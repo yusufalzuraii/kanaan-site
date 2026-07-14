@@ -242,7 +242,20 @@ function Thumb({ src }) {
 
 /* ============================================================ */
 function ProductForm({ initial, isNew, onCancel, onSaved }) {
-  const [f, setF] = useState({ ...emptyProduct(), ...initial });
+  const [f, setF] = useState({ ...emptyProduct(), ...initial, description: initial.description ?? initial.desc ?? "" });
+  // Photos that were already saved on this product when the form opened.
+  const originalImages = useRef(Array.isArray(initial.images) ? [...initial.images] : []);
+  // Photos uploaded during this session that the user then removed — deleted
+  // from storage right away so they never become orphans.
+  const deleteFromStorage = async (url) => {
+    try {
+      await fetch("/api/admin/delete-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+    } catch { /* best effort */ }
+  };
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
@@ -280,8 +293,21 @@ function ProductForm({ initial, isNew, onCancel, onSaved }) {
     if (fileRef.current) fileRef.current.value = "";
   };
 
-  const removeImage = (url) => setF((p) => ({ ...p, images: p.images.filter((u) => u !== url) }));
+  const removeImage = (url) => {
+    setF((p) => ({ ...p, images: p.images.filter((u) => u !== url) }));
+    // If this photo was uploaded just now (not part of the saved product yet),
+    // it's safe to delete it from storage immediately.
+    if (!originalImages.current.includes(url)) deleteFromStorage(url);
+  };
   const makeMain = (url) => setF((p) => ({ ...p, images: [url, ...p.images.filter((u) => u !== url)] }));
+
+  // Leaving without saving: anything uploaded in this session was never
+  // attached to a product, so remove it from storage.
+  const handleCancel = async () => {
+    const unsaved = f.images.filter((u) => !originalImages.current.includes(u));
+    unsaved.forEach((u) => deleteFromStorage(u));
+    onCancel();
+  };
 
   const save = async () => {
     if (!f.name.trim()) { setError("Please enter a product name."); return; }
@@ -299,7 +325,14 @@ function ProductForm({ initial, isNew, onCancel, onSaved }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      if (r.ok) { onSaved(); return; }
+      if (r.ok) {
+        // Saved successfully — now clean up any previously-saved photos the
+        // owner removed, so they don't linger in storage.
+        const removed = originalImages.current.filter((u) => !f.images.includes(u));
+        await Promise.all(removed.map((u) => deleteFromStorage(u)));
+        onSaved();
+        return;
+      }
       const d = await r.json().catch(() => ({}));
       setError(d.error || "Save failed.");
     } catch { setError("Network error."); }
@@ -309,7 +342,7 @@ function ProductForm({ initial, isNew, onCancel, onSaved }) {
   return (
     <div className="max-w-2xl mx-auto px-4 sm:px-6 py-6 pb-28">
       <div className="glass rounded-2xl px-4 py-3 flex items-center justify-between mb-6">
-        <button onClick={onCancel} className="flex items-center gap-1.5 font-body text-sm text-muted hover:text-coral tap-scale">
+        <button onClick={handleCancel} className="flex items-center gap-1.5 font-body text-sm text-muted hover:text-coral tap-scale">
           <X className="w-4 h-4" /> Cancel
         </button>
         <h1 className="font-display font-bold text-lg">{isNew ? "New product" : "Edit product"}</h1>
@@ -436,7 +469,7 @@ function ProductForm({ initial, isNew, onCancel, onSaved }) {
       {/* Save dock */}
       <div className="fixed bottom-4 left-1/2 z-30" style={{ transform: "translateX(-50%)", width: "calc(100% - 24px)", maxWidth: 640 }}>
         <div className="glass rounded-2xl p-2 flex gap-2">
-          <button onClick={onCancel} className="flex-1 rounded-full font-body py-3 tap-scale" style={{ border: "1px solid var(--border)" }}>Cancel</button>
+          <button onClick={handleCancel} className="flex-1 rounded-full font-body py-3 tap-scale" style={{ border: "1px solid var(--border)" }}>Cancel</button>
           <button onClick={save} disabled={saving} className="glass-btn flex-1 rounded-full font-body font-medium py-3 tap-scale flex items-center justify-center gap-2" style={{ background: "var(--coral)", color: "#fff" }}>
             {saving ? <Loader2 className="w-4 h-4 spin" /> : <><Check className="w-4 h-4" /> Save</>}
           </button>

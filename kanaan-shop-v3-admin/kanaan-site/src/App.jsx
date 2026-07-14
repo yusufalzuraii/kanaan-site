@@ -49,7 +49,7 @@ const INSTAGRAM_HANDLE = "@kanaan.shop";
    date so the countdown is accurate. */
 const MAINTENANCE_MODE = true;
 const ACCESS_CODE = "4816";
-const LAUNCH_DATE = "2026-07-23T12:00:00+03:00";
+const LAUNCH_DATE = "2026-07-23T12:00:00+03:00"; // update to your real target date
 // Real logo files live in /public/logo-compact.png and /public/logo-full.png.
 
 /* ============================================================
@@ -533,7 +533,7 @@ function ProductGallery({ product, liked, onToggleLike }) {
   };
 
   return (
-    <div>
+    <div className="min-w-0 w-full">
       <div
         className="relative w-full flex items-center justify-center overflow-hidden"
         onTouchStart={(e) => { touchX.current = e.touches[0].clientX; }}
@@ -578,7 +578,7 @@ function ProductGallery({ product, liked, onToggleLike }) {
       </div>
 
       {images.length > 1 && (
-        <div className="flex gap-2 mt-3 overflow-x-auto pb-1">
+        <div className="flex gap-2 mt-3 overflow-x-auto pb-1 max-w-full" style={{ WebkitOverflowScrolling: "touch" }}>
           {images.map((src, i) =>
             broken[i] ? null : (
               <button
@@ -1383,7 +1383,7 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 pb-32">
       <div className="grid md:grid-cols-2 gap-10">
-        <div className="md:sticky md:top-24 self-start">
+        <div className="md:sticky md:top-24 self-start min-w-0">
           <ProductGallery product={product} liked={liked} onToggleLike={toggleLike} />
         </div>
 
@@ -1405,7 +1405,7 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
             )}
           </div>
 
-          <p className="font-body text-sm text-muted leading-7 mb-8">{product.desc}</p>
+          <p className="font-body text-sm text-muted leading-7 mb-8" style={{ whiteSpace: "pre-line" }}>{product.desc}</p>
 
           <div className="mb-6">
             <p className="font-body text-sm font-medium mb-2">Color: {COLORS[color].label}</p>

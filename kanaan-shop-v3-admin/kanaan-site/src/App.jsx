@@ -49,7 +49,7 @@ const INSTAGRAM_HANDLE = "@kanaan.shop";
    date so the countdown is accurate. */
 const MAINTENANCE_MODE = true;
 const ACCESS_CODE = "4816";
-const LAUNCH_DATE = "2026-08-15T12:00:00+03:00"; // update to your real target date
+const LAUNCH_DATE = "2026-07-23T12:00:00+03:00"; // update to your real target date
 // Real logo files live in /public/logo-compact.png and /public/logo-full.png.
 
 /* ============================================================

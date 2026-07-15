@@ -1,4 +1,4 @@
-import { json, isAuthed, rowToProduct, payloadToRow } from "../../../_shared/util.js";
+import { json, isAuthed, rowToProduct, payloadToRow, saveVariants, parseImages } from "../../../_shared/util.js";
 
 // PUT /api/admin/products/:id  -> update
 export async function onRequestPut(context) {
@@ -23,6 +23,7 @@ export async function onRequestPut(context) {
   ).run();
 
   const updated = await env.DB.prepare("SELECT * FROM products WHERE id = ?").bind(id).first();
+  try { await saveVariants(env, id, body.variants); } catch { /* stock optional */ }
   return json({ ok: true, product: rowToProduct(updated) });
 }
 
@@ -36,14 +37,15 @@ export async function onRequestDelete(context) {
   try {
     const row = await env.DB.prepare("SELECT images FROM products WHERE id = ?").bind(id).first();
     if (row && row.images && env.BUCKET) {
-      for (const p of String(row.images).split(",").map((s) => s.trim()).filter(Boolean)) {
-        if (p.startsWith("/img/")) {
-          try { await env.BUCKET.delete(p.slice(5)); } catch { /* ignore */ }
+      for (const img of parseImages(row.images)) {
+        if (img.url.startsWith("/img/")) {
+          try { await env.BUCKET.delete(img.url.slice(5)); } catch { /* ignore */ }
         }
       }
     }
   } catch { /* ignore */ }
 
+  try { await env.DB.prepare("DELETE FROM variants WHERE product_id = ?").bind(id).run(); } catch { /* ignore */ }
   await env.DB.prepare("DELETE FROM products WHERE id = ?").bind(id).run();
   return json({ ok: true });
 }

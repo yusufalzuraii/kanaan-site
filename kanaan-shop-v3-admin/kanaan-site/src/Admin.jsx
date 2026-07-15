@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
   Plus, Trash2, Pencil, X, Check, Upload, LogOut, ArrowLeft, Star, Loader2, ImageOff,
+  Package, ClipboardList, Phone, MapPin, Clock, CheckCircle2, XCircle,
 } from "lucide-react";
 
 /* Fixed sets (kept in sync with the storefront). */
@@ -31,6 +32,7 @@ const money = (n) => `$${Number(n || 0).toFixed(0)}`;
 const emptyProduct = () => ({
   name: "", category: "tshirts", price: "", colors: [], sizes: ["S", "M", "L", "XL"],
   description: "", badge: "", discount: 0, images: [], soldOut: false, active: true,
+  variants: {},
 });
 
 function AdminStyles() {
@@ -131,7 +133,9 @@ function Login({ onSuccess, onExit }) {
 
 /* ============================================================ */
 function Dashboard({ onExit, onLogout }) {
+  const [tab, setTab] = useState("products");
   const [products, setProducts] = useState([]);
+  const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(null); // product object or null
   const [creating, setCreating] = useState(false);
@@ -147,7 +151,23 @@ function Dashboard({ onExit, onLogout }) {
     setLoading(false);
   };
 
-  useEffect(() => { load(); }, []); // eslint-disable-line
+  const loadOrders = async () => {
+    setLoading(true);
+    try {
+      const r = await fetch("/api/admin/orders");
+      if (r.status === 401) { onLogout(); return; }
+      const d = await r.json();
+      setOrders(Array.isArray(d.orders) ? d.orders : []);
+    } catch { /* ignore */ }
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    if (tab === "products") load();
+    else loadOrders();
+  }, [tab]); // eslint-disable-line
+
+  const pendingCount = orders.filter((o) => o.status === "pending").length;
 
   const logout = async () => {
     try { await fetch("/api/admin/session", { method: "POST" }); } catch { /* ignore */ }
@@ -175,51 +195,231 @@ function Dashboard({ onExit, onLogout }) {
 
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6">
-      <div className="glass rounded-2xl px-4 py-3 flex items-center justify-between mb-6">
+      <div className="glass rounded-2xl px-4 py-3 flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <button onClick={onExit} className="p-1.5 tap-scale hover:text-coral" aria-label="Back to shop"><ArrowLeft className="w-5 h-5" /></button>
-          <h1 className="font-display font-bold text-lg">Products</h1>
+          <h1 className="font-display font-bold text-lg">Kanaan Admin</h1>
         </div>
         <button onClick={logout} className="flex items-center gap-1.5 font-body text-sm text-muted hover:text-coral tap-scale">
           <LogOut className="w-4 h-4" /> Sign out
         </button>
       </div>
 
-      <button
-        onClick={() => setCreating(true)}
-        className="glass-btn w-full rounded-full font-body font-medium py-3 mb-6 tap-scale flex items-center justify-center gap-2"
-        style={{ background: "var(--coral)", color: "#fff" }}
-      >
-        <Plus className="w-5 h-5" /> Add new product
-      </button>
+      {/* Tabs */}
+      <div className="glass rounded-full p-1 flex gap-1 mb-6">
+        <button
+          onClick={() => setTab("products")}
+          className="flex-1 rounded-full py-2 font-body text-sm tap-scale flex items-center justify-center gap-2"
+          style={tab === "products" ? { background: "var(--fg)", color: "var(--bg)" } : { color: "var(--fg-muted)" }}
+        >
+          <Package className="w-4 h-4" /> Products
+        </button>
+        <button
+          onClick={() => setTab("orders")}
+          className="flex-1 rounded-full py-2 font-body text-sm tap-scale flex items-center justify-center gap-2"
+          style={tab === "orders" ? { background: "var(--fg)", color: "var(--bg)" } : { color: "var(--fg-muted)" }}
+        >
+          <ClipboardList className="w-4 h-4" /> Orders
+          {pendingCount > 0 && (
+            <span className="rounded-full font-num" style={{ background: "var(--coral)", color: "#fff", fontSize: "0.68rem", padding: "0 6px", lineHeight: "16px" }}>
+              {pendingCount}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {tab === "orders" ? (
+        <OrdersTab orders={orders} loading={loading} reload={loadOrders} />
+      ) : (
+        <>
+          <button
+            onClick={() => setCreating(true)}
+            className="glass-btn w-full rounded-full font-body font-medium py-3 mb-6 tap-scale flex items-center justify-center gap-2"
+            style={{ background: "var(--coral)", color: "#fff" }}
+          >
+            <Plus className="w-5 h-5" /> Add new product
+          </button>
+
+          {loading ? (
+            <div className="flex justify-center py-16"><Loader2 className="w-6 h-6 spin text-muted" /></div>
+          ) : products.length === 0 ? (
+            <p className="font-body text-muted text-center py-16">No products yet. Add your first one above.</p>
+          ) : (
+            <div className="space-y-3">
+              {products.map((p) => {
+                const totalStock = Object.values(p.variants || {}).reduce((a, b) => a + (Number(b) || 0), 0);
+                const tracked = Object.keys(p.variants || {}).length > 0;
+                return (
+                  <div key={p.id} className="glass rounded-2xl p-3 flex items-center gap-3">
+                    <Thumb src={p.image} />
+                    <div className="flex-1 min-w-0">
+                      <p className="font-body font-medium text-sm truncate">{p.name}</p>
+                      <p className="font-body text-xs text-muted">
+                        {CATEGORIES.find((c) => c.id === p.category)?.label} · {money(p.price)}
+                        {p.discount > 0 ? ` · −${p.discount}%` : ""}
+                        {tracked ? ` · ${totalStock} in stock` : ""}
+                      </p>
+                      <div className="flex gap-1.5 mt-1 flex-wrap">
+                        {p.soldOut && <span className="a-chip" style={{ fontSize: "0.68rem", padding: "1px 8px" }}>Sold out</span>}
+                        {!p.active && <span className="a-chip" style={{ fontSize: "0.68rem", padding: "1px 8px" }}>Hidden</span>}
+                        {p.badge && <span className="a-chip" style={{ fontSize: "0.68rem", padding: "1px 8px", color: p.badge === "sale" ? "var(--coral)" : "var(--teal)" }}>{p.badge}</span>}
+                        {tracked && totalStock === 0 && <span className="a-chip" style={{ fontSize: "0.68rem", padding: "1px 8px", color: "var(--coral)" }}>No stock</span>}
+                      </div>
+                    </div>
+                    <button onClick={() => setEditing(p)} className="glass rounded-full p-2 tap-scale" aria-label="Edit"><Pencil className="w-4 h-4" /></button>
+                    <button onClick={() => remove(p)} className="glass rounded-full p-2 tap-scale" aria-label="Delete"><Trash2 className="w-4 h-4" style={{ color: "var(--coral)" }} /></button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   ORDERS TAB
+   ============================================================ */
+const STATUS_STYLE = {
+  pending: { label: "Pending", color: "var(--coral)" },
+  confirmed: { label: "Confirmed", color: "var(--teal)" },
+  cancelled: { label: "Cancelled", color: "var(--fg-muted)" },
+  expired: { label: "Expired", color: "var(--fg-muted)" },
+};
+
+function timeAgo(ts) {
+  const mins = Math.floor((Date.now() - ts) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
+function OrdersTab({ orders, loading, reload }) {
+  const [filter, setFilter] = useState("pending");
+  const [busy, setBusy] = useState(null);
+
+  const act = async (order, action) => {
+    if (action === "cancel" && !window.confirm(`Reject order #${order.id}? The stock goes back to your shop.`)) return;
+    setBusy(order.id);
+    try {
+      const r = await fetch(`/api/admin/orders/${order.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      if (r.ok) await reload();
+      else {
+        const d = await r.json().catch(() => ({}));
+        window.alert(d.error || "Action failed.");
+      }
+    } catch { window.alert("Network error."); }
+    setBusy(null);
+  };
+
+  const shown = filter === "all" ? orders : orders.filter((o) => o.status === filter);
+
+  return (
+    <div>
+      <div className="flex gap-2 mb-4 flex-wrap">
+        {[["pending", "Pending"], ["confirmed", "Confirmed"], ["all", "All"]].map(([val, lbl]) => (
+          <button
+            key={val}
+            onClick={() => setFilter(val)}
+            className="font-body text-sm px-4 py-1.5 rounded-full tap-scale"
+            style={filter === val ? { background: "var(--fg)", color: "var(--bg)" } : { background: "var(--glass-bg)", border: "1px solid var(--border)", color: "var(--fg-muted)" }}
+          >
+            {lbl}
+          </button>
+        ))}
+      </div>
 
       {loading ? (
         <div className="flex justify-center py-16"><Loader2 className="w-6 h-6 spin text-muted" /></div>
-      ) : products.length === 0 ? (
-        <p className="font-body text-muted text-center py-16">No products yet. Add your first one above.</p>
+      ) : shown.length === 0 ? (
+        <p className="font-body text-muted text-center py-16">
+          {filter === "pending" ? "No orders waiting for you." : "No orders here yet."}
+        </p>
       ) : (
         <div className="space-y-3">
-          {products.map((p) => (
-            <div key={p.id} className="glass rounded-2xl p-3 flex items-center gap-3">
-              <Thumb src={p.image} />
-              <div className="flex-1 min-w-0">
-                <p className="font-body font-medium text-sm truncate">{p.name}</p>
-                <p className="font-body text-xs text-muted">
-                  {CATEGORIES.find((c) => c.id === p.category)?.label} · {money(p.price)}
-                  {p.discount > 0 ? ` · −${p.discount}%` : ""}
-                </p>
-                <div className="flex gap-1.5 mt-1">
-                  {p.soldOut && <span className="a-chip" style={{ fontSize: "0.68rem", padding: "1px 8px" }}>Sold out</span>}
-                  {!p.active && <span className="a-chip" style={{ fontSize: "0.68rem", padding: "1px 8px" }}>Hidden</span>}
-                  {p.badge && <span className="a-chip" style={{ fontSize: "0.68rem", padding: "1px 8px", color: p.badge === "sale" ? "var(--coral)" : "var(--teal)" }}>{p.badge}</span>}
+          {shown.map((o) => {
+            const st = STATUS_STYLE[o.status] || STATUS_STYLE.cancelled;
+            return (
+              <div key={o.id} className="glass rounded-2xl p-4">
+                <div className="flex items-start justify-between gap-3 mb-3">
+                  <div>
+                    <p className="font-num text-lg">#{o.id}</p>
+                    <p className="font-body text-xs text-muted flex items-center gap-1">
+                      <Clock className="w-3 h-3" /> {timeAgo(o.createdAt)}
+                    </p>
+                  </div>
+                  <span className="a-chip" style={{ color: st.color }}>{st.label}</span>
                 </div>
+
+                <div className="font-body text-sm mb-3 space-y-0.5">
+                  <p className="font-medium">{o.name}</p>
+                  <a href={`https://wa.me/${String(o.phone).replace(/[^0-9]/g, "").replace(/^0/, "961")}`} target="_blank" rel="noopener noreferrer" className="text-muted hover:text-coral flex items-center gap-1.5">
+                    <Phone className="w-3.5 h-3.5" /> {o.phone}
+                  </a>
+                  <p className="text-muted flex items-start gap-1.5">
+                    <MapPin className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" /> <span>{o.area} — {o.address}</span>
+                  </p>
+                  {o.notes && <p className="text-muted italic">“{o.notes}”</p>}
+                </div>
+
+                <div className="rounded-xl p-3 mb-3" style={{ background: "var(--field-bg)" }}>
+                  {o.items.map((it, i) => (
+                    <div key={i} className="flex justify-between font-body text-xs mb-1">
+                      <span className="text-muted">{it.name} — {it.color} / {it.size} × {it.qty}</span>
+                      <span className="font-num">{money(it.price * it.qty)}</span>
+                    </div>
+                  ))}
+                  <div className="flex justify-between font-body text-sm pt-2 mt-1 border-t" style={{ borderColor: "var(--border)" }}>
+                    <span>Total <span className="text-muted text-xs">(incl. ${o.delivery} delivery)</span></span>
+                    <span className="font-num">{money(o.total)}</span>
+                  </div>
+                </div>
+
+                {o.status === "pending" ? (
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => act(o, "confirm")}
+                      disabled={busy === o.id}
+                      className="glass-btn flex-1 rounded-full font-body font-medium py-2.5 tap-scale flex items-center justify-center gap-2"
+                      style={{ background: "var(--teal)", color: "#062420" }}
+                    >
+                      {busy === o.id ? <Loader2 className="w-4 h-4 spin" /> : <><CheckCircle2 className="w-4 h-4" /> Confirm</>}
+                    </button>
+                    <button
+                      onClick={() => act(o, "cancel")}
+                      disabled={busy === o.id}
+                      className="flex-1 rounded-full font-body py-2.5 tap-scale flex items-center justify-center gap-2"
+                      style={{ border: "1px solid var(--border)", color: "var(--coral)" }}
+                    >
+                      <XCircle className="w-4 h-4" /> Reject
+                    </button>
+                  </div>
+                ) : o.status === "confirmed" ? (
+                  <button
+                    onClick={() => act(o, "cancel")}
+                    disabled={busy === o.id}
+                    className="w-full rounded-full font-body text-sm py-2 tap-scale"
+                    style={{ border: "1px solid var(--border)", color: "var(--fg-muted)" }}
+                  >
+                    Cancel this order (stock returns)
+                  </button>
+                ) : null}
               </div>
-              <button onClick={() => setEditing(p)} className="glass rounded-full p-2 tap-scale" aria-label="Edit"><Pencil className="w-4 h-4" /></button>
-              <button onClick={() => remove(p)} className="glass rounded-full p-2 tap-scale" aria-label="Delete"><Trash2 className="w-4 h-4" style={{ color: "var(--coral)" }} /></button>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
+      <p className="font-body text-xs text-muted text-center mt-6">
+        Pending orders hold stock for 24 hours, then release it automatically.
+      </p>
     </div>
   );
 }
@@ -241,10 +441,22 @@ function Thumb({ src }) {
 }
 
 /* ============================================================ */
+function normalizeImages(list) {
+  return (Array.isArray(list) ? list : [])
+    .map((x) => (typeof x === "string" ? { url: x, color: null } : { url: x.url, color: x.color || null }))
+    .filter((x) => x.url);
+}
+
 function ProductForm({ initial, isNew, onCancel, onSaved }) {
-  const [f, setF] = useState({ ...emptyProduct(), ...initial, description: initial.description ?? initial.desc ?? "" });
+  const [f, setF] = useState({
+    ...emptyProduct(),
+    ...initial,
+    description: initial.description ?? initial.desc ?? "",
+    images: normalizeImages(initial.images),
+    variants: initial.variants || {},
+  });
   // Photos that were already saved on this product when the form opened.
-  const originalImages = useRef(Array.isArray(initial.images) ? [...initial.images] : []);
+  const originalImages = useRef(normalizeImages(initial.images).map((x) => x.url));
   // Photos uploaded during this session that the user then removed — deleted
   // from storage right away so they never become orphans.
   const deleteFromStorage = async (url) => {
@@ -285,7 +497,7 @@ function ProductForm({ initial, isNew, onCancel, onSaved }) {
         fd.append("file", file);
         const r = await fetch("/api/admin/upload", { method: "POST", body: fd });
         const d = await r.json();
-        if (r.ok && d.url) setF((p) => ({ ...p, images: [...p.images, d.url] }));
+        if (r.ok && d.url) setF((p) => ({ ...p, images: [...p.images, { url: d.url, color: null }] }));
         else setError(d.error || "Upload failed.");
       } catch { setError("Upload failed."); }
     }
@@ -294,29 +506,54 @@ function ProductForm({ initial, isNew, onCancel, onSaved }) {
   };
 
   const removeImage = (url) => {
-    setF((p) => ({ ...p, images: p.images.filter((u) => u !== url) }));
-    // If this photo was uploaded just now (not part of the saved product yet),
-    // it's safe to delete it from storage immediately.
+    setF((p) => ({ ...p, images: p.images.filter((x) => x.url !== url) }));
     if (!originalImages.current.includes(url)) deleteFromStorage(url);
   };
-  const makeMain = (url) => setF((p) => ({ ...p, images: [url, ...p.images.filter((u) => u !== url)] }));
+
+  const makeMain = (url) =>
+    setF((p) => {
+      const hit = p.images.find((x) => x.url === url);
+      return { ...p, images: hit ? [hit, ...p.images.filter((x) => x.url !== url)] : p.images };
+    });
+
+  // Tag a photo with the colour it shows, so the shop can switch the gallery
+  // when a customer picks that colour.
+  const setImageColor = (url, colorKey) =>
+    setF((p) => ({ ...p, images: p.images.map((x) => (x.url === url ? { ...x, color: colorKey } : x)) }));
 
   // Leaving without saving: anything uploaded in this session was never
   // attached to a product, so remove it from storage.
   const handleCancel = async () => {
-    const unsaved = f.images.filter((u) => !originalImages.current.includes(u));
-    unsaved.forEach((u) => deleteFromStorage(u));
+    const unsaved = f.images.filter((x) => !originalImages.current.includes(x.url));
+    unsaved.forEach((x) => deleteFromStorage(x.url));
     onCancel();
   };
+
+  const setVariant = (colorKey, size, value) => {
+    const n = value === "" ? "" : Math.max(0, Math.round(Number(value) || 0));
+    setF((p) => ({ ...p, variants: { ...p.variants, [`${colorKey}|${size}`]: n } }));
+  };
+  const clearStock = () => setF((p) => ({ ...p, variants: {} }));
+  const trackingOn = Object.keys(f.variants || {}).some((k) => Number(f.variants[k]) > 0);
 
   const save = async () => {
     if (!f.name.trim()) { setError("Please enter a product name."); return; }
     setSaving(true);
     setError("");
+    // Only send stock rows for colour/size combos that still exist on the product.
+    const validVariants = {};
+    for (const c of f.colors) {
+      for (const s of f.sizes) {
+        const key = `${c}|${s}`;
+        const v = f.variants[key];
+        if (v !== "" && v != null && Number(v) > 0) validVariants[key] = Number(v);
+      }
+    }
+
     const payload = {
       name: f.name, category: f.category, price: f.price, colors: f.colors, sizes: f.sizes,
       description: f.description, badge: f.badge, discount: f.discount, images: f.images,
-      soldOut: !!f.soldOut, active: f.active !== false,
+      soldOut: !!f.soldOut, active: f.active !== false, variants: validVariants,
     };
     try {
       const url = isNew ? "/api/admin/products" : `/api/admin/products/${f.id}`;
@@ -328,7 +565,8 @@ function ProductForm({ initial, isNew, onCancel, onSaved }) {
       if (r.ok) {
         // Saved successfully — now clean up any previously-saved photos the
         // owner removed, so they don't linger in storage.
-        const removed = originalImages.current.filter((u) => !f.images.includes(u));
+        const keptUrls = f.images.map((x) => x.url);
+        const removed = originalImages.current.filter((u) => !keptUrls.includes(u));
         await Promise.all(removed.map((u) => deleteFromStorage(u)));
         onSaved();
         return;
@@ -367,18 +605,36 @@ function ProductForm({ initial, isNew, onCancel, onSaved }) {
 
         {/* Images */}
         <Group label="Photos (first one is the main image)">
-          <div className="flex flex-wrap gap-2 mb-2">
-            {f.images.map((url, i) => (
-              <div key={url} className="relative rounded-xl overflow-hidden" style={{ width: 76, height: 95, border: i === 0 ? "2px solid var(--coral)" : "1px solid var(--border)" }}>
-                <img src={url} alt="" className="w-full h-full" style={{ objectFit: "cover" }} />
-                <button onClick={() => removeImage(url)} className="absolute top-1 right-1 rounded-full p-0.5" style={{ background: "rgba(0,0,0,0.6)" }} aria-label="Remove">
-                  <X className="w-3.5 h-3.5" style={{ color: "#fff" }} />
-                </button>
-                {i !== 0 && (
-                  <button onClick={() => makeMain(url)} className="absolute bottom-1 left-1 rounded-full p-0.5" style={{ background: "rgba(0,0,0,0.6)" }} aria-label="Make main">
-                    <Star className="w-3.5 h-3.5" style={{ color: "#fff" }} />
+          <div className="flex flex-wrap gap-3 mb-2">
+            {f.images.map((img, i) => (
+              <div key={img.url} style={{ width: 76 }}>
+                <div className="relative rounded-xl overflow-hidden" style={{ width: 76, height: 95, border: i === 0 ? "2px solid var(--coral)" : "1px solid var(--border)" }}>
+                  <img src={img.url} alt="" className="w-full h-full" style={{ objectFit: "cover" }} />
+                  <button onClick={() => removeImage(img.url)} className="absolute top-1 right-1 rounded-full p-0.5" style={{ background: "rgba(0,0,0,0.6)" }} aria-label="Remove">
+                    <X className="w-3.5 h-3.5" style={{ color: "#fff" }} />
                   </button>
-                )}
+                  {i !== 0 && (
+                    <button onClick={() => makeMain(img.url)} className="absolute bottom-1 left-1 rounded-full p-0.5" style={{ background: "rgba(0,0,0,0.6)" }} aria-label="Make main">
+                      <Star className="w-3.5 h-3.5" style={{ color: "#fff" }} />
+                    </button>
+                  )}
+                  {img.color && (
+                    <span className="absolute bottom-1 right-1 rounded-full" style={{ width: 14, height: 14, background: COLORS[img.color], border: "1.5px solid #fff" }} />
+                  )}
+                </div>
+                {/* Which colour does this photo show? */}
+                <select
+                  value={img.color || ""}
+                  onChange={(e) => setImageColor(img.url, e.target.value || null)}
+                  className="a-field mt-1"
+                  style={{ padding: "3px 4px", fontSize: "0.65rem", borderRadius: 8 }}
+                  title="Which colour is in this photo?"
+                >
+                  <option value="">Any colour</option>
+                  {f.colors.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
               </div>
             ))}
             <button
@@ -455,6 +711,73 @@ function ProductForm({ initial, isNew, onCancel, onSaved }) {
               </div>
             )}
           </div>
+        </Group>
+
+        {/* Stock matrix */}
+        <Group label="Stock (how many pieces you have)">
+          {f.colors.length === 0 || f.sizes.length === 0 ? (
+            <p className="font-body text-xs text-muted">
+              Pick at least one colour and one size above, and the stock table will appear here.
+            </p>
+          ) : (
+            <>
+              <div className="overflow-x-auto -mx-1 px-1">
+                <table style={{ borderCollapse: "separate", borderSpacing: 4 }}>
+                  <thead>
+                    <tr>
+                      <th />
+                      {f.colors.map((c) => (
+                        <th key={c} className="font-body text-xs text-muted" style={{ minWidth: 62 }}>
+                          <span className="inline-flex items-center gap-1">
+                            <span className="rounded-full" style={{ width: 10, height: 10, background: COLORS[c], border: "1px solid var(--border)", display: "inline-block" }} />
+                            {c}
+                          </span>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {f.sizes.map((s) => (
+                      <tr key={s}>
+                        <td className="font-num text-xs text-muted pr-1" style={{ whiteSpace: "nowrap" }}>{s}</td>
+                        {f.colors.map((c) => {
+                          const key = `${c}|${s}`;
+                          const held = (f.reserved || {})[key] || 0;
+                          return (
+                            <td key={key}>
+                              <input
+                                type="number"
+                                inputMode="numeric"
+                                min="0"
+                                value={f.variants[key] ?? ""}
+                                onChange={(e) => setVariant(c, s, e.target.value)}
+                                placeholder="0"
+                                className="a-field"
+                                style={{ padding: "5px 6px", textAlign: "center", fontSize: "0.8rem", borderColor: held > 0 ? "var(--coral)" : undefined }}
+                                title={held > 0 ? `${held} held by a pending order` : undefined}
+                              />
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex items-center justify-between mt-2 gap-3">
+                <p className="font-body text-xs text-muted">
+                  {trackingOn
+                    ? "Stock is tracked: sizes sell out on their own and orders reduce these numbers."
+                    : "Leave all empty to keep this product always available (no stock tracking)."}
+                </p>
+                {trackingOn && (
+                  <button onClick={clearStock} className="font-body text-xs text-muted hover:text-coral flex-shrink-0">
+                    Stop tracking
+                  </button>
+                )}
+              </div>
+            </>
+          )}
         </Group>
 
         {/* Toggles */}

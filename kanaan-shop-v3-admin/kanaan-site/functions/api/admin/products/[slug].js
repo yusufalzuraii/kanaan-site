@@ -18,6 +18,8 @@ const esc = (s) =>
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 
+import { parseImages } from "../_shared/util.js";
+
 export async function onRequestGet(context) {
   const { request, env, params, next } = context;
 
@@ -48,7 +50,7 @@ export async function onRequestGet(context) {
   const origin = new URL(request.url).origin;
   const url = `${origin}/product/${row.id}`;
 
-  const firstImage = String(row.images || "").split(",").map((s) => s.trim()).filter(Boolean)[0] || "";
+  const firstImage = parseImages(row.images)[0]?.url || "";
   const image = firstImage
     ? (/^https?:\/\//i.test(firstImage) ? firstImage : `${origin}${firstImage.startsWith("/") ? "" : "/"}${firstImage}`)
     : `${origin}/logo-full.png`;

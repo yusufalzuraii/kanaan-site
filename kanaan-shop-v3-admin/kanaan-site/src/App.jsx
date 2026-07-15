@@ -49,7 +49,7 @@ const INSTAGRAM_HANDLE = "@kanaan.shop";
    date so the countdown is accurate. */
 const MAINTENANCE_MODE = true;
 const ACCESS_CODE = "4816";
-const LAUNCH_DATE = "2026-07-23T12:00:00+03:00"; // update to your real target date
+const LAUNCH_DATE = "2026-08-15T12:00:00+03:00"; // update to your real target date
 // Real logo files live in /public/logo-compact.png and /public/logo-full.png.
 
 /* ============================================================
@@ -440,12 +440,48 @@ function productImageSrc(image) {
 
 // A product's photos, normalized to a clean array of usable image URLs.
 // Accepts an array, or a single comma-separated string (from the sheet).
-function getImages(product) {
+/* A product's photos, normalized to [{ url, color }].
+   Accepts the new color-tagged format, a plain array, or a legacy
+   comma-separated string — so old and new products both work. */
+function getImageList(product) {
   const raw = product.images != null ? product.images : product.image;
   let list = [];
   if (Array.isArray(raw)) list = raw;
   else if (typeof raw === "string") list = raw.split(",");
-  return list.map((s) => productImageSrc(s)).filter(Boolean);
+  return list
+    .map((x) => (typeof x === "string" ? { url: productImageSrc(x), color: null } : { url: productImageSrc(x.url), color: x.color || null }))
+    .filter((x) => x.url);
+}
+
+// Photos for a specific color. If none are tagged with that color, fall back
+// to the untagged ones (or all of them) so the gallery is never empty.
+function getImagesForColor(product, colorKey) {
+  const all = getImageList(product);
+  if (!colorKey || all.length === 0) return all;
+  const matching = all.filter((x) => x.color === colorKey);
+  if (matching.length > 0) return matching;
+  const untagged = all.filter((x) => !x.color);
+  return untagged.length > 0 ? untagged : all;
+}
+
+function getImages(product) {
+  return getImageList(product).map((x) => x.url);
+}
+
+/* ---------- stock helpers ----------
+   product.tracked is true only when the owner entered quantities.
+   Untracked products behave exactly as before: always available. */
+function stockFor(product, colorKey, size) {
+  if (!product || !product.tracked || !product.stock) return Infinity;
+  return product.stock[`${colorKey}|${size}`] || 0;
+}
+function colorHasStock(product, colorKey) {
+  if (!product || !product.tracked || !product.stock) return true;
+  return product.sizes.some((s) => stockFor(product, colorKey, s) > 0);
+}
+function productHasStock(product) {
+  if (!product || !product.tracked || !product.stock) return true;
+  return product.colors.some((c) => colorHasStock(product, c));
 }
 
 function SoldOutBadge() {
@@ -461,7 +497,7 @@ function SoldOutBadge() {
   );
 }
 
-function SwatchPanel({ product, big, liked, onToggleLike }) {
+function SwatchPanel({ product, big, liked, onToggleLike, forceSoldOut }) {
   const c1 = COLORS[product.colors[0]]?.hex || "#141414";
   const c2 = COLORS[product.colors[1]]?.hex || c1;
   const [imgOk, setImgOk] = useState(true);
@@ -497,7 +533,7 @@ function SwatchPanel({ product, big, liked, onToggleLike }) {
           </GlassChip>
         </div>
       )}
-      {product.soldOut && <SoldOutBadge />}
+      {(forceSoldOut || product.soldOut) && <SoldOutBadge />}
       {onToggleLike && (
         <div className="absolute top-3 left-3">
           <LikeButton liked={liked} onToggle={onToggleLike} />
@@ -512,13 +548,18 @@ function SwatchPanel({ product, big, liked, onToggleLike }) {
    Falls back to the mesh art when a product has no photos, so
    the look is identical to before for image-less products.
    ============================================================ */
-function ProductGallery({ product, liked, onToggleLike }) {
-  const images = getImages(product);
-  const c1 = COLORS[product.colors[0]]?.hex || "#141414";
+function ProductGallery({ product, liked, onToggleLike, activeColor }) {
+  const images = getImagesForColor(product, activeColor).map((x) => x.url);
+  const c1 = COLORS[activeColor]?.hex || COLORS[product.colors[0]]?.hex || "#141414";
   const c2 = COLORS[product.colors[1]]?.hex || c1;
   const [active, setActive] = useState(0);
   const [broken, setBroken] = useState({});
   const touchX = useRef(null);
+
+  // Jump back to the first photo whenever the shopper picks another color.
+  useEffect(() => {
+    setActive(0);
+  }, [activeColor]);
 
   useEffect(() => {
     setActive(0);
@@ -571,7 +612,7 @@ function ProductGallery({ product, liked, onToggleLike }) {
             </GlassChip>
           </div>
         )}
-        {product.soldOut && <SoldOutBadge />}
+        {(product.soldOut || !productHasStock(product)) && <SoldOutBadge />}
         <div className="absolute top-3 left-3">
           <LikeButton liked={liked} onToggle={onToggleLike} size="lg" />
         </div>
@@ -608,18 +649,19 @@ function ProductGallery({ product, liked, onToggleLike }) {
    PRODUCT CARD
    ============================================================ */
 function ProductCard({ product, onOpen, liked, onToggleLike }) {
+  const isOut = product.soldOut || !productHasStock(product);
   return (
     <button onClick={() => onOpen(product)} className="text-left group focus:outline-none w-full">
       <div
         className="transition-transform duration-500 group-hover:-translate-y-2"
-        style={{ transitionTimingFunction: "cubic-bezier(0.16,1,0.3,1)", opacity: product.soldOut ? 0.7 : 1 }}
+        style={{ transitionTimingFunction: "cubic-bezier(0.16,1,0.3,1)", opacity: isOut ? 0.7 : 1 }}
       >
-        <SwatchPanel product={product} liked={liked} onToggleLike={onToggleLike} />
+        <SwatchPanel product={product} liked={liked} onToggleLike={onToggleLike} forceSoldOut={isOut} />
       </div>
       <div className="mt-3.5 space-y-1">
         <p className="font-body font-medium text-fg text-sm">{product.name}</p>
         <div className="flex items-center gap-2">
-          {product.soldOut ? (
+          {isOut ? (
             <span className="font-num text-muted text-base">Sold out</span>
           ) : product.discount > 0 ? (
             <>
@@ -851,20 +893,35 @@ function KanaanShop() {
 
   const toggleLike = (id) => setLikes((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
-  const cartKey = (pid, size, color) => `${pid}-${size}-${color}`;
+  const cartKey = (pid, size, colorKey) => `${pid}-${size}-${colorKey}`;
 
-  const addToCart = (product, size, color, qty) => {
+  // colorKey = the palette key we track stock against ("black")
+  // colorLabel = what the shopper reads ("Black")
+  const addToCart = (product, size, colorKey, colorLabel, qty) => {
     setCart((prev) => {
-      const key = cartKey(product.id, size, color);
+      const key = cartKey(product.id, size, colorKey);
+      const limit = stockFor(product, colorKey, size); // Infinity when untracked
       const existing = prev.find((i) => i.key === key);
-      if (existing) return prev.map((i) => (i.key === key ? { ...i, qty: i.qty + qty } : i));
-      return [...prev, { key, productId: product.id, name: product.name, price: effectivePrice(product), size, color, qty }];
+      if (existing) {
+        const capped = Math.min(existing.qty + qty, limit);
+        return prev.map((i) => (i.key === key ? { ...i, qty: capped } : i));
+      }
+      return [...prev, {
+        key, productId: product.id, name: product.name, price: effectivePrice(product),
+        size, colorKey, color: colorLabel, qty: Math.min(qty, limit),
+      }];
     });
     setCartOpen(true);
   };
 
   const updateQty = (key, delta) => {
-    setCart((prev) => prev.map((i) => (i.key === key ? { ...i, qty: Math.max(1, i.qty + delta) } : i)).filter((i) => i.qty > 0));
+    setCart((prev) => prev.map((i) => {
+      if (i.key !== key) return i;
+      const product = products.find((p) => p.id === i.productId);
+      const limit = product ? stockFor(product, i.colorKey, i.size) : Infinity;
+      const next = Math.max(1, Math.min(i.qty + delta, limit));
+      return { ...i, qty: next };
+    }).filter((i) => i.qty > 0));
   };
   const removeFromCart = (key) => setCart((prev) => prev.filter((i) => i.key !== key));
 
@@ -1339,11 +1396,13 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    setSize(product.sizes[0]);
-    setColor(product.colors[0]);
+    // Start on a colour/size that's actually in stock where possible.
+    const firstColor = product.colors.find((c) => colorHasStock(product, c)) || product.colors[0];
+    setColor(firstColor);
+    setSize(product.sizes.find((s) => stockFor(product, firstColor, s) > 0) || product.sizes[0]);
     setQty(1);
     setAdded(false);
-  }, [product.id]);
+  }, [product.id]); // eslint-disable-line
 
   useEffect(() => {
     document.title = `${product.name} — ${STORE_NAME}`;
@@ -1352,9 +1411,23 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
   const related = products.filter((p) => p.category === product.category && p.id !== product.id).slice(0, 3);
   const productUrl = `${SITE_URL}/product/${product.slug}`;
 
+  const available = stockFor(product, color, size);
+  const outOfStock = product.soldOut || !productHasStock(product);
+  const canAdd = !outOfStock && available > 0;
+
+  // Switching colour: if the current size isn't available in it, move to one that is.
+  const pickColor = (key) => {
+    setColor(key);
+    if (stockFor(product, key, size) <= 0) {
+      const firstAvailable = product.sizes.find((s) => stockFor(product, key, s) > 0);
+      if (firstAvailable) setSize(firstAvailable);
+    }
+    setQty(1);
+  };
+
   const handleAdd = () => {
-    if (product.soldOut) return;
-    addToCart(product, size, COLORS[color]?.label || color, qty);
+    if (!canAdd) return;
+    addToCart(product, size, color, COLORS[color]?.label || color, qty);
     setAdded(true);
     setTimeout(() => setAdded(false), 1800);
   };
@@ -1384,7 +1457,7 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 pb-32">
       <div className="grid md:grid-cols-2 gap-10">
         <div className="md:sticky md:top-24 self-start min-w-0">
-          <ProductGallery product={product} liked={liked} onToggleLike={toggleLike} />
+          <ProductGallery product={product} liked={liked} onToggleLike={toggleLike} activeColor={color} />
         </div>
 
         <div>
@@ -1408,31 +1481,83 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
           <p className="font-body text-sm text-muted leading-7 mb-8" style={{ whiteSpace: "pre-line" }}>{product.desc}</p>
 
           <div className="mb-6">
-            <p className="font-body text-sm font-medium mb-2">Color: {COLORS[color].label}</p>
-            <div className="flex gap-2">
-              {product.colors.map((key) => (
-                <button key={key} onClick={() => setColor(key)} className="w-9 h-9 rounded-full border-2 tap-scale" style={{ borderColor: color === key ? "var(--coral)" : "transparent", boxShadow: "0 0 0 1px var(--border)" }} aria-label={COLORS[key].label}>
-                  <span className="block w-full h-full rounded-full" style={{ background: COLORS[key].hex }} />
-                </button>
-              ))}
+            <p className="font-body text-sm font-medium mb-2">
+              Color: {COLORS[color]?.label || color}
+              {!colorHasStock(product, color) && <span className="text-muted"> — out of stock</span>}
+            </p>
+            <div className="flex gap-2 flex-wrap">
+              {product.colors.map((key) => {
+                const inStock = colorHasStock(product, key);
+                return (
+                  <button
+                    key={key}
+                    onClick={() => pickColor(key)}
+                    disabled={!inStock}
+                    className="relative w-9 h-9 rounded-full border-2 tap-scale"
+                    style={{
+                      borderColor: color === key ? "var(--coral)" : "transparent",
+                      boxShadow: "0 0 0 1px var(--border)",
+                      opacity: inStock ? 1 : 0.35,
+                      cursor: inStock ? "pointer" : "not-allowed",
+                    }}
+                    aria-label={`${COLORS[key]?.label || key}${inStock ? "" : " (out of stock)"}`}
+                    title={inStock ? COLORS[key]?.label || key : `${COLORS[key]?.label || key} — out of stock`}
+                  >
+                    <span className="block w-full h-full rounded-full" style={{ background: COLORS[key]?.hex || "#888" }} />
+                    {!inStock && (
+                      <span className="absolute inset-0 flex items-center justify-center" aria-hidden="true">
+                        <span style={{ width: "120%", height: 1.5, background: "var(--fg)", transform: "rotate(-45deg)", opacity: 0.7 }} />
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
           <div className="mb-8">
             <p className="font-body text-sm font-medium mb-2">Size</p>
             <div className="flex flex-wrap gap-2">
-              {product.sizes.map((sz) => (
-                <button key={sz} onClick={() => setSize(sz)} className="font-num text-sm px-4 py-2 rounded-full tap-scale transition-all" style={size === sz ? { background: "var(--fg)", color: "var(--bg)" } : { background: "var(--glass-bg)", border: "1px solid var(--glass-border)" }}>
-                  {sz}
-                </button>
-              ))}
+              {product.sizes.map((sz) => {
+                const left = stockFor(product, color, sz);
+                const inStock = left > 0;
+                return (
+                  <button
+                    key={sz}
+                    onClick={() => { if (inStock) { setSize(sz); setQty(1); } }}
+                    disabled={!inStock}
+                    className="font-num text-sm px-4 py-2 rounded-full tap-scale transition-all"
+                    style={
+                      size === sz && inStock
+                        ? { background: "var(--fg)", color: "var(--bg)" }
+                        : {
+                            background: "var(--glass-bg)",
+                            border: "1px solid var(--glass-border)",
+                            opacity: inStock ? 1 : 0.4,
+                            textDecoration: inStock ? "none" : "line-through",
+                            cursor: inStock ? "pointer" : "not-allowed",
+                          }
+                    }
+                    title={inStock ? undefined : "Out of stock"}
+                  >
+                    {sz}
+                  </button>
+                );
+              })}
             </div>
+            {product.tracked && available > 0 && available <= 3 && (
+              <p className="font-body text-xs text-coral mt-2">Only {available} left in this size</p>
+            )}
           </div>
 
           <div className="hidden sm:flex items-center gap-4">
-            {product.soldOut ? (
+            {outOfStock ? (
               <button disabled className="w-full rounded-full font-body font-medium py-3 flex items-center justify-center gap-2 cursor-not-allowed" style={{ background: "var(--glass-bg)", border: "1px solid var(--glass-border)", color: "var(--fg-muted)" }}>
                 Sold out
+              </button>
+            ) : !canAdd ? (
+              <button disabled className="w-full rounded-full font-body font-medium py-3 flex items-center justify-center gap-2 cursor-not-allowed" style={{ background: "var(--glass-bg)", border: "1px solid var(--glass-border)", color: "var(--fg-muted)" }}>
+                This size is out of stock
               </button>
             ) : (
               <>
@@ -1441,7 +1566,7 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
                     <Minus className="w-4 h-4" />
                   </button>
                   <span className="font-num w-8 text-center">{qty}</span>
-                  <button onClick={() => setQty((q) => q + 1)} className="p-3 tap-scale" aria-label="Increase quantity">
+                  <button onClick={() => setQty((q) => Math.min(available, q + 1))} disabled={qty >= available} className="p-3 tap-scale" aria-label="Increase quantity">
                     <Plus className="w-4 h-4" />
                   </button>
                 </div>
@@ -1502,11 +1627,11 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
         <div className="glass rounded-2xl px-4 py-3 flex items-center gap-3">
           <div className="flex-1 min-w-0">
             <p className="font-body text-xs text-muted truncate">{product.name}</p>
-            <p className="font-num text-base">{product.soldOut ? "Sold out" : money(effectivePrice(product))}</p>
+            <p className="font-num text-base">{outOfStock ? "Sold out" : money(effectivePrice(product))}</p>
           </div>
-          {product.soldOut ? (
+          {!canAdd ? (
             <button disabled className="rounded-full font-body font-medium px-5 py-2.5 flex items-center gap-2 flex-shrink-0 cursor-not-allowed" style={{ border: "1px solid var(--glass-border)", color: "var(--fg-muted)" }}>
-              Sold out
+              {outOfStock ? "Sold out" : "Out of stock"}
             </button>
           ) : (
             <button onClick={handleAdd} className="glass-btn rounded-full font-body font-medium px-5 py-2.5 tap-scale flex items-center gap-2 flex-shrink-0" style={{ background: "var(--coral)", color: "#fff" }}>
@@ -1620,6 +1745,7 @@ function CartDrawer({ open, onClose, cart, updateQty, removeFromCart, total, onC
 function CheckoutView({ cart, total, onSubmitted }) {
   const [form, setForm] = useState({ name: "", phone: "", area: LEBANON_GOVERNORATES[0], address: "", notes: "" });
   const [error, setError] = useState("");
+  const [sending, setSending] = useState(false);
 
   useEffect(() => {
     document.title = `Checkout — ${STORE_NAME}`;
@@ -1649,16 +1775,47 @@ function CheckoutView({ cart, total, onSubmitted }) {
     return lines.join("\n");
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!form.name.trim() || !form.phone.trim() || !form.address.trim()) {
       setError("Please fill in your name, phone number and address before sending.");
       return;
     }
     setError("");
-    const orderNumber = Math.floor(1000 + Math.random() * 9000);
+    setSending(true);
+
+    // Register the order first so the shop can hold the stock and track it.
+    // We open WhatsApp with the real order number the server gave us.
+    let orderNumber = null;
+    try {
+      const res = await fetch("/api/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: form.name, phone: form.phone, area: form.area,
+          address: form.address, notes: form.notes,
+          items: cart.map((i) => ({
+            productId: i.productId, colorKey: i.colorKey, color: i.color,
+            size: i.size, qty: i.qty,
+          })),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setSending(false);
+        setError(data.error || "Something went wrong. Please try again.");
+        return;
+      }
+      orderNumber = data.orderNumber;
+    } catch {
+      // Offline or the API is unreachable — don't block the sale, fall back
+      // to sending the order on WhatsApp without a tracked number.
+      orderNumber = String(Math.floor(1000 + Math.random() * 9000));
+    }
+
     const msg = encodeURIComponent(buildMessage(orderNumber));
     window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${msg}`, "_blank");
+    setSending(false);
     onSubmitted({ ...form, total: grandTotal, count: cart.reduce((sum, i) => sum + i.qty, 0), orderNumber });
   };
 
@@ -1700,9 +1857,9 @@ function CheckoutView({ cart, total, onSubmitted }) {
         {error && <p className="font-body text-sm text-coral">{error}</p>}
 
         <Magnetic strength={8} className="block w-full">
-          <button type="submit" className="glass-btn w-full font-body font-medium py-3.5 rounded-full tap-scale flex items-center justify-center gap-2" style={{ background: "var(--teal)", color: "#062420" }}>
+          <button type="submit" disabled={sending} className="glass-btn w-full font-body font-medium py-3.5 rounded-full tap-scale flex items-center justify-center gap-2" style={{ background: "var(--teal)", color: "#062420", opacity: sending ? 0.7 : 1 }}>
             <MessageCircle className="w-5 h-5" />
-            Send order on WhatsApp
+            {sending ? "Preparing your order…" : "Send order on WhatsApp"}
           </button>
         </Magnetic>
         <p className="font-body text-xs text-muted text-center">WhatsApp will open with your order ready — just review and send.</p>

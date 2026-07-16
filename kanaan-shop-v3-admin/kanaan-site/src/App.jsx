@@ -30,8 +30,11 @@ import {
   Share2,
   Link2,
   Smartphone,
+  Search,
+  ChevronDown,
 } from "lucide-react";
 import Admin from "./Admin.jsx";
+import { COLORS as PALETTE, swatchBackground } from "./palette.js";
 
 /* ============================================================
    SETTINGS — edit before publishing
@@ -49,7 +52,7 @@ const INSTAGRAM_HANDLE = "@kanaan.shop";
    date so the countdown is accurate. */
 const MAINTENANCE_MODE = true;
 const ACCESS_CODE = "4816";
-const LAUNCH_DATE = "2026-07-23T12:00:00+03:00"; // update to your real target date
+const LAUNCH_DATE = "2026-08-15T12:00:00+03:00"; // update to your real target date
 // Real logo files live in /public/logo-compact.png and /public/logo-full.png.
 
 /* ============================================================
@@ -57,40 +60,18 @@ const LAUNCH_DATE = "2026-07-23T12:00:00+03:00"; // update to your real target d
    ============================================================ */
 const FALLBACK_CATEGORIES = [
   { id: "tshirts", label: "T-Shirts" },
+  { id: "shirts", label: "Shirts" },
   { id: "jeans", label: "Jeans" },
   { id: "pants", label: "Pants" },
   { id: "sets", label: "Sets" },
   { id: "shorts", label: "Shorts" },
+  { id: "underwear", label: "Underwear" },
   { id: "shoes", label: "Shoes" },
 ];
 
-const FALLBACK_COLORS = {
-  black: { label: "Black", hex: "#141414" },
-  charcoal: { label: "Charcoal", hex: "#36393F" },
-  gray: { label: "Gray", hex: "#9AA0A6" },
-  white: { label: "White", hex: "#F1EFE9" },
-  cream: { label: "Cream", hex: "#EFE7D3" },
-  beige: { label: "Beige", hex: "#E3D6BE" },
-  sand: { label: "Sand", hex: "#D8CBB3" },
-  khaki: { label: "Khaki", hex: "#B8A98A" },
-  brown: { label: "Brown", hex: "#6B4A2B" },
-  coral: { label: "Coral", hex: "#FF4522" },
-  red: { label: "Red", hex: "#C6362F" },
-  maroon: { label: "Maroon", hex: "#7A2E2E" },
-  burgundy: { label: "Burgundy", hex: "#5C1F2E" },
-  pink: { label: "Pink", hex: "#E58AA6" },
-  orange: { label: "Orange", hex: "#E8863B" },
-  mustard: { label: "Mustard", hex: "#C9A227" },
-  yellow: { label: "Yellow", hex: "#E9C63B" },
-  olive: { label: "Olive", hex: "#556B2F" },
-  green: { label: "Green", hex: "#3F8F5B" },
-  teal: { label: "Teal", hex: "#12B3A0" },
-  sky: { label: "Sky", hex: "#7FB2F0" },
-  blue: { label: "Blue", hex: "#2F6FE0" },
-  navy: { label: "Navy", hex: "#1F2A44" },
-  indigo: { label: "Indigo", hex: "#2A3A66" },
-  purple: { label: "Purple", hex: "#6E5BFF" },
-};
+// The full palette lives in src/palette.js so the shop and the admin
+// panel can never drift apart.
+const FALLBACK_COLORS = PALETTE;
 
 function slugify(str) {
   return str
@@ -369,9 +350,53 @@ function SegmentedToggle() {
   );
 }
 
+/* Placeholder icons shown when a product has no photo yet.
+   Lucide has no trousers/underwear glyphs, so those two are drawn
+   here by hand in the same 24px stroked line style. */
 function IconFor({ type, className, style }) {
+  const stroke = {
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.6,
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+  };
   if (type === "shoe") return <Footprints className={className} style={style} />;
+  if (type === "pants") {
+    return (
+      <svg className={className} style={style} {...stroke} xmlns="http://www.w3.org/2000/svg">
+        <path d="M6.5 3h11l1 18h-4.5L12 10l-2 11H5.5z" />
+        <path d="M6.5 6.5h11" />
+      </svg>
+    );
+  }
+  if (type === "underwear") {
+    return (
+      <svg className={className} style={style} {...stroke} xmlns="http://www.w3.org/2000/svg">
+        <path d="M4 8h16v2.5c0 4-3.4 5.5-5.2 8.5h-1.4C12 15 12 15 12 15s0 0-1.4 4H9.2C7.4 16 4 14.5 4 10.5z" />
+        <path d="M4 8h16" />
+      </svg>
+    );
+  }
+  if (type === "shirt-button") {
+    return (
+      <svg className={className} style={style} {...stroke} xmlns="http://www.w3.org/2000/svg">
+        <path d="M8.5 2 12 5.5 15.5 2l4.9 1.6a2 2 0 0 1 1.3 2.2l-.6 3.4a1 1 0 0 1-1 .8H18v10a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V10H3.9a1 1 0 0 1-1-.8l-.6-3.4a2 2 0 0 1 1.3-2.2z" />
+        <path d="M12 8v13" />
+      </svg>
+    );
+  }
   return <Shirt className={className} style={style} />;
+}
+
+// Keep in sync with iconForCategory() in functions/_shared/util.js
+function iconForCategory(category) {
+  if (category === "shoes") return "shoe";
+  if (category === "shirts") return "shirt-button";
+  if (category === "underwear") return "underwear";
+  if (category === "jeans" || category === "pants" || category === "shorts") return "pants";
+  return "shirt";
 }
 
 /* ============================================================
@@ -523,7 +548,7 @@ function SwatchPanel({ product, big, liked, onToggleLike, forceSoldOut }) {
       ) : (
         <>
           <div className="grain-overlay" style={{ opacity: 0.05 }} />
-          <IconFor type={product.icon} className={big ? "w-24 h-24" : "w-12 h-12"} style={{ color: "rgba(255,255,255,0.5)" }} />
+          <IconFor type={product.icon || iconForCategory(product.category)} className={big ? "w-24 h-24" : "w-12 h-12"} style={{ color: "rgba(255,255,255,0.5)" }} />
         </>
       )}
       {product.badge && (
@@ -602,7 +627,7 @@ function ProductGallery({ product, liked, onToggleLike, activeColor }) {
         ) : (
           <>
             <div className="grain-overlay" style={{ opacity: 0.05 }} />
-            <IconFor type={product.icon} className="w-24 h-24" style={{ color: "rgba(255,255,255,0.5)" }} />
+            <IconFor type={product.icon || iconForCategory(product.category)} className="w-24 h-24" style={{ color: "rgba(255,255,255,0.5)" }} />
           </>
         )}
         {product.badge && (
@@ -674,7 +699,7 @@ function ProductCard({ product, onOpen, liked, onToggleLike }) {
         </div>
         <div className="flex items-center gap-1 pt-1">
           {product.colors.map((key) => (
-            <span key={key} className="w-3 h-3 rounded-full border" style={{ background: COLORS[key]?.hex || "#888", borderColor: "var(--border)" }} />
+            <span key={key} className="w-3 h-3 rounded-full border" style={{ background: swatchBackground(key), borderColor: "var(--border)" }} />
           ))}
         </div>
       </div>
@@ -815,6 +840,238 @@ function ComingSoonGate({ onUnlock }) {
 }
 
 /* ============================================================
+   SEARCH OVERLAY
+   ------------------------------------------------------------
+   Opens from the header (or ⌘K / Ctrl-K). Filters as you type across
+   product names, categories and colours, and shows real thumbnails so
+   you recognise the piece before you click. Arrow keys + Enter work
+   on desktop; it's a full-height sheet on a phone.
+   ============================================================ */
+function scoreProduct(product, q) {
+  const name = product.name.toLowerCase();
+  if (name === q) return 100;
+  if (name.startsWith(q)) return 80;
+  if (name.includes(q)) return 60;
+
+  const category = (CATEGORIES.find((c) => c.id === product.category)?.label || "").toLowerCase();
+  if (category.includes(q)) return 40;
+
+  const colorNames = product.colors.map((k) => (COLORS[k]?.label || k).toLowerCase());
+  if (colorNames.some((c) => c.includes(q))) return 30;
+
+  // last resort: match against the description
+  if ((product.desc || "").toLowerCase().includes(q)) return 10;
+  return 0;
+}
+
+function SearchOverlay({ open, onClose, products, openProduct, goCatalog }) {
+  const [q, setQ] = useState("");
+  const [cursor, setCursor] = useState(0);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    if (open) {
+      setQ("");
+      setCursor(0);
+      // let the sheet mount before focusing, or mobile keyboards misfire
+      const t = setTimeout(() => inputRef.current?.focus(), 60);
+      return () => clearTimeout(t);
+    }
+  }, [open]);
+
+  // Don't let the page scroll behind the sheet.
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, [open]);
+
+  const query = q.trim().toLowerCase();
+  const results = useMemo(() => {
+    if (!query) return [];
+    return products
+      .map((p) => ({ p, score: scoreProduct(p, query) }))
+      .filter((x) => x.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 8)
+      .map((x) => x.p);
+  }, [query, products]);
+
+  useEffect(() => setCursor(0), [query]);
+
+  if (!open) return null;
+
+  const pick = (p) => {
+    onClose();
+    openProduct(p);
+  };
+
+  const onKeyDown = (e) => {
+    if (e.key === "Escape") { onClose(); return; }
+    if (results.length === 0) return;
+    if (e.key === "ArrowDown") { e.preventDefault(); setCursor((c) => (c + 1) % results.length); }
+    if (e.key === "ArrowUp") { e.preventDefault(); setCursor((c) => (c - 1 + results.length) % results.length); }
+    if (e.key === "Enter") { e.preventDefault(); pick(results[cursor]); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 search-fade" onClick={onClose}>
+      <div className="absolute inset-0" style={{ background: "rgba(8,8,12,0.55)", backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)" }} />
+      <div
+        className="relative mx-auto px-4 search-rise"
+        style={{ maxWidth: 560, paddingTop: "12vh" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="glass glass-sheen rounded-3xl overflow-hidden" style={{ boxShadow: "0 24px 60px rgba(0,0,0,0.35)" }}>
+          <div className="flex items-center gap-3 px-4" style={{ height: 58 }}>
+            <Search className="w-5 h-5 text-muted flex-shrink-0" />
+            <input
+              ref={inputRef}
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              onKeyDown={onKeyDown}
+              placeholder="Search for a piece, a colour, a category…"
+              className="flex-1 bg-transparent border-0 font-body outline-none"
+              style={{ fontSize: 16, color: "var(--fg)" }}
+            />
+            <button onClick={onClose} className="p-1.5 rounded-full tap-scale text-muted hover:text-coral flex-shrink-0" aria-label="Close search">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          {query && (
+            <div style={{ borderTop: "1px solid var(--glass-border)", maxHeight: "56vh", overflowY: "auto" }}>
+              {results.length === 0 ? (
+                <div className="px-4 py-8 text-center">
+                  <p className="font-body text-sm text-muted mb-3">Nothing matched “{q}”.</p>
+                  <button
+                    onClick={() => { onClose(); goCatalog("all"); }}
+                    className="font-body text-sm text-coral hover:underline"
+                  >
+                    Browse the full shop instead →
+                  </button>
+                </div>
+              ) : (
+                results.map((p, i) => {
+                  const out = p.soldOut || !productHasStock(p);
+                  return (
+                    <button
+                      key={p.id}
+                      onClick={() => pick(p)}
+                      onMouseEnter={() => setCursor(i)}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors"
+                      style={{ background: cursor === i ? "var(--glass-bg)" : "transparent" }}
+                    >
+                      <SearchThumb product={p} />
+                      <span className="flex-1 min-w-0">
+                        <span className="block font-body text-sm truncate">{p.name}</span>
+                        <span className="block font-body text-xs text-muted">
+                          {CATEGORIES.find((c) => c.id === p.category)?.label}
+                          {out ? " · Sold out" : ""}
+                        </span>
+                      </span>
+                      <span className="font-num text-sm flex-shrink-0" style={{ color: p.discount > 0 ? "var(--coral)" : "var(--fg)" }}>
+                        {money(effectivePrice(p))}
+                      </span>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          )}
+
+          {!query && (
+            <div className="px-4 pb-4" style={{ borderTop: "1px solid var(--glass-border)", paddingTop: 14 }}>
+              <p className="font-body text-xs text-muted mb-2.5">Jump to</p>
+              <div className="flex flex-wrap gap-2">
+                {CATEGORIES.map((c) => (
+                  <button
+                    key={c.id}
+                    onClick={() => { onClose(); goCatalog(c.id); }}
+                    className="font-body text-xs px-3 py-1.5 rounded-full tap-scale"
+                    style={{ background: "var(--glass-bg)", border: "1px solid var(--glass-border)" }}
+                  >
+                    {c.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SearchThumb({ product }) {
+  const [ok, setOk] = useState(true);
+  const src = getImages(product)[0];
+  if (src && ok) {
+    return (
+      <span className="rounded-lg overflow-hidden flex-shrink-0 block" style={{ width: 40, height: 50, border: "1px solid var(--glass-border)" }}>
+        <img src={src} alt="" className="w-full h-full" style={{ objectFit: "cover" }} onError={() => setOk(false)} />
+      </span>
+    );
+  }
+  const c1 = COLORS[product.colors[0]]?.hex || "#141414";
+  return (
+    <span
+      className="rounded-lg flex-shrink-0 flex items-center justify-center block"
+      style={{ width: 40, height: 50, border: "1px solid var(--glass-border)", background: `radial-gradient(120% 120% at 25% 25%, ${c1} 0%, transparent 70%), #1A1A1E` }}
+    >
+      <IconFor type={product.icon || iconForCategory(product.category)} className="w-4 h-4" style={{ color: "rgba(255,255,255,0.5)" }} />
+    </span>
+  );
+}
+
+/* ============================================================
+   COLOUR PICKER
+   ------------------------------------------------------------
+   Rendered twice on the product page: directly under the gallery on
+   mobile (so you can see the photos change as you tap a colour), and
+   in the details column on desktop.
+   ============================================================ */
+function ColorPicker({ product, color, onPick }) {
+  return (
+    <>
+      <p className="font-body text-sm font-medium mb-2">
+        Color: {COLORS[color]?.label || color}
+        {!colorHasStock(product, color) && <span className="text-muted"> — out of stock</span>}
+      </p>
+      <div className="flex gap-2 flex-wrap">
+        {product.colors.map((key) => {
+          const inStock = colorHasStock(product, key);
+          return (
+            <button
+              key={key}
+              onClick={() => onPick(key)}
+              disabled={!inStock}
+              className="relative w-9 h-9 rounded-full border-2 tap-scale"
+              style={{
+                borderColor: color === key ? "var(--coral)" : "transparent",
+                boxShadow: "0 0 0 1px var(--border)",
+                opacity: inStock ? 1 : 0.35,
+                cursor: inStock ? "pointer" : "not-allowed",
+              }}
+              aria-label={`${COLORS[key]?.label || key}${inStock ? "" : " (out of stock)"}`}
+              title={inStock ? COLORS[key]?.label || key : `${COLORS[key]?.label || key} — out of stock`}
+            >
+              <span className="block w-full h-full rounded-full" style={{ background: swatchBackground(key) }} />
+              {!inStock && (
+                <span className="absolute inset-0 flex items-center justify-center" aria-hidden="true">
+                  <span style={{ width: "120%", height: 1.5, background: "var(--fg)", transform: "rotate(-45deg)", opacity: 0.7 }} />
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
+/* ============================================================
    ROOT
    ============================================================ */
 export default function KanaanShopRoot() {
@@ -840,6 +1097,19 @@ function KanaanShop() {
   const [unlocked, setUnlocked] = useState(() => {
     try { return localStorage.getItem("kanaan-access") === ACCESS_CODE; } catch { return false; }
   });
+  const [searchOpen, setSearchOpen] = useState(false);
+
+  // ⌘K / Ctrl-K opens search, the way people expect on desktop.
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setSearchOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // Persist the cart + likes in the browser's localStorage so they survive
   // page reloads on the live site. (The earlier window.storage API only
@@ -957,7 +1227,7 @@ function KanaanShop() {
     <ProductsContext.Provider value={products}>
     <div data-theme={theme} className="min-h-screen bg-app text-fg font-body relative">
       <GlobalStyles />
-      <Header cartCount={cartCount} onHome={goHome} onCart={() => setCartOpen(true)} menuOpen={menuOpen} setMenuOpen={setMenuOpen} goCatalog={goCatalog} />
+      <Header cartCount={cartCount} onHome={goHome} onCart={() => setCartOpen(true)} onSearch={() => setSearchOpen(true)} menuOpen={menuOpen} setMenuOpen={setMenuOpen} goCatalog={goCatalog} />
       <main>
         {route.type === "home" && (
           <HomeView products={products} loading={catalogLoading} goCatalog={goCatalog} openProduct={openProduct} likes={likes} toggleLike={toggleLike} />
@@ -995,6 +1265,13 @@ function KanaanShop() {
       </main>
       <Footer goCatalog={goCatalog} />
       <WhatsAppFab raised={route.type === "product"} />
+      <SearchOverlay
+        open={searchOpen}
+        onClose={() => setSearchOpen(false)}
+        products={products}
+        openProduct={openProduct}
+        goCatalog={goCatalog}
+      />
       <CartDrawer
         open={cartOpen}
         onClose={() => setCartOpen(false)}
@@ -1129,8 +1406,14 @@ function GlobalStyles() {
       @keyframes dockIn { from { opacity: 0; transform: translate(-50%, 20px); } to { opacity: 1; transform: translate(-50%, 0); } }
       .dock-in { animation: dockIn 0.5s cubic-bezier(0.16,1,0.3,1) both; }
 
+      /* Search overlay */
+      @keyframes searchFade { from { opacity: 0; } to { opacity: 1; } }
+      @keyframes searchRise { from { opacity: 0; transform: translateY(-10px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+      .search-fade { animation: searchFade 0.18s ease both; }
+      .search-rise { animation: searchRise 0.32s cubic-bezier(0.16,1,0.3,1) both; }
+
       @media (prefers-reduced-motion: reduce) {
-        .mesh-blob, .hero-fade-1, .hero-fade-2, .hero-fade-3, .hero-fade-4, .dock-in, .fab-pulse { animation: none !important; }
+        .mesh-blob, .hero-fade-1, .hero-fade-2, .hero-fade-3, .hero-fade-4, .dock-in, .fab-pulse, .search-fade, .search-rise { animation: none !important; }
       }
 
       .tap-scale { transition: transform 0.15s ease; }
@@ -1144,7 +1427,7 @@ function GlobalStyles() {
 /* ============================================================
    HEADER
    ============================================================ */
-function Header({ cartCount, onHome, onCart, menuOpen, setMenuOpen, goCatalog }) {
+function Header({ cartCount, onHome, onCart, onSearch, menuOpen, setMenuOpen, goCatalog }) {
   const [scrolled, setScrolled] = useState(false);
 
   useEffect(() => {
@@ -1173,6 +1456,9 @@ function Header({ cartCount, onHome, onCart, menuOpen, setMenuOpen, goCatalog })
 
           <div className="flex items-center gap-2.5">
             <SegmentedToggle />
+            <button onClick={onSearch} className="p-2 tap-scale hover:text-coral transition-colors" aria-label="Search products">
+              <Search className="w-5 h-5" />
+            </button>
             <button onClick={onCart} className="relative p-2 tap-scale hover:text-coral transition-colors" aria-label="Cart">
               <ShoppingBag className="w-5 h-5" />
               {cartCount > 0 && (
@@ -1334,12 +1620,21 @@ function HomeView({ products, loading, goCatalog, openProduct, likes, toggleLike
 /* ============================================================
    CATALOG
    ============================================================ */
+const PAGE_SIZE = 12;
+
 function CatalogView({ activeCategory, loading, goCatalog, products, openProduct, likes, toggleLike }) {
   const label = activeCategory === "all" ? "Shop" : CATEGORIES.find((c) => c.id === activeCategory)?.label || "Shop";
+  const [shown, setShown] = useState(PAGE_SIZE);
 
   useEffect(() => {
     document.title = `${label} — ${STORE_NAME}`;
   }, [label]);
+
+  // Start from the top of the list again when the category changes.
+  useEffect(() => { setShown(PAGE_SIZE); }, [activeCategory]);
+
+  const visible = products.slice(0, shown);
+  const remaining = products.length - visible.length;
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10">
@@ -1373,13 +1668,30 @@ function CatalogView({ activeCategory, loading, goCatalog, products, openProduct
       ) : products.length === 0 ? (
         <p className="font-body text-muted py-16 text-center">No products in this category yet.</p>
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
-          {products.map((p, i) => (
-            <Reveal key={p.id} delay={(i % 8) * 50}>
-              <ProductCard product={p} onOpen={openProduct} liked={likes.includes(p.id)} onToggleLike={() => toggleLike(p.id)} />
-            </Reveal>
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
+            {visible.map((p, i) => (
+              <Reveal key={p.id} delay={(i % 8) * 50}>
+                <ProductCard product={p} onOpen={openProduct} liked={likes.includes(p.id)} onToggleLike={() => toggleLike(p.id)} />
+              </Reveal>
+            ))}
+          </div>
+
+          {remaining > 0 && (
+            <div className="flex flex-col items-center gap-3 mt-10">
+              <p className="font-body text-xs text-muted">
+                Showing {visible.length} of {products.length}
+              </p>
+              <button
+                onClick={() => setShown((n) => n + PAGE_SIZE)}
+                className="glass glass-btn rounded-full font-body font-medium px-8 py-3 tap-scale flex items-center gap-2"
+              >
+                Load {Math.min(remaining, PAGE_SIZE)} more
+                <ChevronDown className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -1458,6 +1770,11 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
       <div className="grid md:grid-cols-2 gap-10">
         <div className="md:sticky md:top-24 self-start min-w-0">
           <ProductGallery product={product} liked={liked} onToggleLike={toggleLike} activeColor={color} />
+          {/* Mobile: colours sit right under the photos so you can watch
+              the gallery switch as you tap. */}
+          <div className="mt-4 md:hidden">
+            <ColorPicker product={product} color={color} onPick={pickColor} />
+          </div>
         </div>
 
         <div>
@@ -1480,39 +1797,10 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
 
           <p className="font-body text-sm text-muted leading-7 mb-8" style={{ whiteSpace: "pre-line" }}>{product.desc}</p>
 
-          <div className="mb-6">
-            <p className="font-body text-sm font-medium mb-2">
-              Color: {COLORS[color]?.label || color}
-              {!colorHasStock(product, color) && <span className="text-muted"> — out of stock</span>}
-            </p>
-            <div className="flex gap-2 flex-wrap">
-              {product.colors.map((key) => {
-                const inStock = colorHasStock(product, key);
-                return (
-                  <button
-                    key={key}
-                    onClick={() => pickColor(key)}
-                    disabled={!inStock}
-                    className="relative w-9 h-9 rounded-full border-2 tap-scale"
-                    style={{
-                      borderColor: color === key ? "var(--coral)" : "transparent",
-                      boxShadow: "0 0 0 1px var(--border)",
-                      opacity: inStock ? 1 : 0.35,
-                      cursor: inStock ? "pointer" : "not-allowed",
-                    }}
-                    aria-label={`${COLORS[key]?.label || key}${inStock ? "" : " (out of stock)"}`}
-                    title={inStock ? COLORS[key]?.label || key : `${COLORS[key]?.label || key} — out of stock`}
-                  >
-                    <span className="block w-full h-full rounded-full" style={{ background: COLORS[key]?.hex || "#888" }} />
-                    {!inStock && (
-                      <span className="absolute inset-0 flex items-center justify-center" aria-hidden="true">
-                        <span style={{ width: "120%", height: 1.5, background: "var(--fg)", transform: "rotate(-45deg)", opacity: 0.7 }} />
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
+          {/* On desktop the picker sits with the rest of the details.
+              On mobile it's rendered right under the gallery instead. */}
+          <div className="mb-6 hidden md:block">
+            <ColorPicker product={product} color={color} onPick={pickColor} />
           </div>
 
           <div className="mb-8">
@@ -1865,7 +2153,7 @@ function CheckoutView({ cart, total, onSubmitted }) {
         <p className="font-body text-xs text-muted text-center">WhatsApp will open with your order ready — just review and send.</p>
 
         <style>{`
-          .field { width: 100%; border: 1px solid var(--border); background: var(--field-bg); color: var(--fg); border-radius: 14px; padding: 0.7rem 1rem; font-family: 'Inter', sans-serif; font-size: 0.875rem; }
+          .field { width: 100%; border: 1px solid var(--border); background: var(--field-bg); color: var(--fg); border-radius: 14px; padding: 0.7rem 1rem; font-family: 'Inter', sans-serif; font-size: 16px; }
           .field:focus { outline: none; border-color: var(--coral); box-shadow: 0 0 0 3px rgba(255,69,34,0.15); }
         `}</style>
       </form>

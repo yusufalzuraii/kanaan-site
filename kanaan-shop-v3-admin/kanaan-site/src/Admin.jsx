@@ -1,26 +1,22 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
   Plus, Trash2, Pencil, X, Check, Upload, LogOut, ArrowLeft, Star, Loader2, ImageOff,
-  Package, ClipboardList, Phone, MapPin, Clock, CheckCircle2, XCircle,
+  Package, ClipboardList, Phone, MapPin, Clock, CheckCircle2, XCircle, ChevronDown,
 } from "lucide-react";
+
+import { COLORS, COLOR_KEYS, groupedColors, swatchBackground, colorLabel } from "./palette.js";
 
 /* Fixed sets (kept in sync with the storefront). */
 const CATEGORIES = [
   { id: "tshirts", label: "T-Shirts" },
+  { id: "shirts", label: "Shirts" },
   { id: "jeans", label: "Jeans" },
   { id: "pants", label: "Pants" },
   { id: "sets", label: "Sets" },
   { id: "shorts", label: "Shorts" },
+  { id: "underwear", label: "Underwear" },
   { id: "shoes", label: "Shoes" },
 ];
-
-const COLORS = {
-  black: "#141414", charcoal: "#36393F", gray: "#9AA0A6", white: "#F1EFE9", cream: "#EFE7D3",
-  beige: "#E3D6BE", sand: "#D8CBB3", khaki: "#B8A98A", brown: "#6B4A2B", coral: "#FF4522",
-  red: "#C6362F", maroon: "#7A2E2E", burgundy: "#5C1F2E", pink: "#E58AA6", orange: "#E8863B",
-  mustard: "#C9A227", yellow: "#E9C63B", olive: "#556B2F", green: "#3F8F5B", teal: "#12B3A0",
-  sky: "#7FB2F0", blue: "#2F6FE0", navy: "#1F2A44", indigo: "#2A3A66", purple: "#6E5BFF",
-};
 
 const SIZE_PRESETS = {
   clothing: ["S", "M", "L", "XL", "XXL"],
@@ -39,7 +35,7 @@ function AdminStyles() {
   return (
     <style>{`
       .a-field { width:100%; border:1px solid var(--border); background:var(--field-bg); color:var(--fg);
-        border-radius:12px; padding:0.6rem 0.85rem; font-family:'Inter',sans-serif; font-size:0.9rem; }
+        border-radius:12px; padding:0.6rem 0.85rem; font-family:'Inter',sans-serif; font-size:16px; }
       .a-field:focus { outline:none; border-color:var(--coral); box-shadow:0 0 0 3px rgba(255,69,34,0.15); }
       .a-chip { display:inline-flex; align-items:center; gap:6px; border-radius:999px; padding:4px 10px;
         font-size:0.8rem; border:1px solid var(--border); background:var(--glass-bg); }
@@ -239,7 +235,6 @@ function Dashboard({ onExit, onLogout }) {
           >
             <Plus className="w-5 h-5" /> Add new product
           </button>
-
           {loading ? (
             <div className="flex justify-center py-16"><Loader2 className="w-6 h-6 spin text-muted" /></div>
           ) : products.length === 0 ? (
@@ -275,6 +270,49 @@ function Dashboard({ onExit, onLogout }) {
           )}
         </>
       )}
+
+      <DevSignature />
+    </div>
+  );
+}
+
+/* ============================================================
+   DEVELOPER SIGNATURE
+   Shown only inside the admin panel — never on the storefront.
+   ============================================================ */
+// Lucide dropped brand marks, so the Facebook "f" is drawn here.
+function FacebookIcon({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <path d="M22 12.06C22 6.5 17.52 2 12 2S2 6.5 2 12.06c0 5.02 3.66 9.18 8.44 9.94v-7.03H7.9v-2.91h2.54V9.85c0-2.52 1.49-3.91 3.77-3.91 1.09 0 2.24.2 2.24.2v2.46h-1.26c-1.24 0-1.63.78-1.63 1.57v1.89h2.78l-.45 2.91h-2.33V22c4.78-.76 8.44-4.92 8.44-9.94z" />
+    </svg>
+  );
+}
+
+function DevSignature() {
+  return (
+    <div className="glass rounded-2xl px-4 py-4 mt-10 text-center">
+      <p className="font-body text-xs text-muted mb-1">برمجة وتصميم</p>
+      <p className="font-display font-bold text-sm mb-3">يوسف الزريعي</p>
+      <div className="flex items-center justify-center gap-2 flex-wrap">
+        <a
+          href="https://wa.me/96171210775"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="a-chip tap-scale hover:text-coral"
+          dir="ltr"
+        >
+          <Phone className="w-3.5 h-3.5" /> +961 71 210 775
+        </a>
+        <a
+          href="https://www.facebook.com/yusufzura3i"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="a-chip tap-scale hover:text-coral"
+        >
+          <FacebookIcon className="w-3.5 h-3.5" /> Facebook
+        </a>
+      </div>
     </div>
   );
 }
@@ -619,7 +657,7 @@ function ProductForm({ initial, isNew, onCancel, onSaved }) {
                     </button>
                   )}
                   {img.color && (
-                    <span className="absolute bottom-1 right-1 rounded-full" style={{ width: 14, height: 14, background: COLORS[img.color], border: "1.5px solid #fff" }} />
+                    <span className="absolute bottom-1 right-1 rounded-full" style={{ width: 14, height: 14, background: swatchBackground(img.color), border: "1.5px solid #fff" }} />
                   )}
                 </div>
                 {/* Which colour does this photo show? */}
@@ -632,7 +670,7 @@ function ProductForm({ initial, isNew, onCancel, onSaved }) {
                 >
                   <option value="">Any colour</option>
                   {f.colors.map((c) => (
-                    <option key={c} value={c}>{c}</option>
+                    <option key={c} value={c}>{colorLabel(c)}</option>
                   ))}
                 </select>
               </div>
@@ -653,18 +691,7 @@ function ProductForm({ initial, isNew, onCancel, onSaved }) {
 
         {/* Colors */}
         <Group label="Colors">
-          <div className="flex flex-wrap gap-2">
-            {Object.entries(COLORS).map(([key, hex]) => {
-              const on = f.colors.includes(key);
-              return (
-                <button key={key} onClick={() => toggleColor(key)} title={key}
-                  className="rounded-full tap-scale flex items-center justify-center"
-                  style={{ width: 30, height: 30, background: hex, border: on ? "2px solid var(--coral)" : "1px solid var(--border)", boxShadow: on ? "0 0 0 2px var(--bg)" : "none" }}>
-                  {on && <Check className="w-3.5 h-3.5" style={{ color: hex === "#F1EFE9" || hex === "#EFE7D3" || hex === "#E9C63B" ? "#000" : "#fff" }} />}
-                </button>
-              );
-            })}
-          </div>
+          <ColorSelector selected={f.colors} onToggle={toggleColor} />
         </Group>
 
         {/* Sizes */}
@@ -727,10 +754,10 @@ function ProductForm({ initial, isNew, onCancel, onSaved }) {
                     <tr>
                       <th />
                       {f.colors.map((c) => (
-                        <th key={c} className="font-body text-xs text-muted" style={{ minWidth: 62 }}>
+                        <th key={c} className="font-body text-xs text-muted" style={{ minWidth: 68 }}>
                           <span className="inline-flex items-center gap-1">
-                            <span className="rounded-full" style={{ width: 10, height: 10, background: COLORS[c], border: "1px solid var(--border)", display: "inline-block" }} />
-                            {c}
+                            <span className="rounded-full" style={{ width: 10, height: 10, background: swatchBackground(c), border: "1px solid var(--border)", display: "inline-block" }} />
+                            {colorLabel(c)}
                           </span>
                         </th>
                       ))}
@@ -798,6 +825,131 @@ function ProductForm({ initial, isNew, onCancel, onSaved }) {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   COLOUR SELECTOR
+   ------------------------------------------------------------
+   The palette is large on purpose (clothing colours are), so this
+   keeps it usable: the colours you actually reach for are on top,
+   there's a search box for finding a shade by name, and everything
+   else is tucked into groups you can open when you need them.
+   ============================================================ */
+function isLightHex(hex) {
+  const h = String(hex || "").replace("#", "");
+  if (h.length !== 6) return false;
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  // perceived brightness
+  return (r * 299 + g * 587 + b * 114) / 1000 > 165;
+}
+
+function Swatch({ colorKey, on, onToggle, size = 30 }) {
+  const c = COLORS[colorKey];
+  const tick = isLightHex(c?.hex) ? "#000" : "#fff";
+  return (
+    <button
+      onClick={() => onToggle(colorKey)}
+      title={colorLabel(colorKey)}
+      aria-label={colorLabel(colorKey)}
+      aria-pressed={on}
+      className="rounded-full tap-scale flex items-center justify-center flex-shrink-0"
+      style={{
+        width: size,
+        height: size,
+        background: swatchBackground(colorKey),
+        border: on ? "2px solid var(--coral)" : "1px solid var(--border)",
+        boxShadow: on ? "0 0 0 2px var(--bg)" : "none",
+      }}
+    >
+      {on && <Check className="w-3.5 h-3.5" style={{ color: tick }} />}
+    </button>
+  );
+}
+
+function ColorSelector({ selected, onToggle }) {
+  const [q, setQ] = useState("");
+  const [showAll, setShowAll] = useState(false);
+  const groups = groupedColors();
+  const query = q.trim().toLowerCase();
+
+  const matches = query
+    ? COLOR_KEYS.filter((k) => colorLabel(k).toLowerCase().includes(query) || k.includes(query))
+    : [];
+
+  const basics = groups.find((g) => g.id === "basic")?.keys || [];
+  const rest = groups.filter((g) => g.id !== "basic");
+
+  return (
+    <div>
+      {/* Chosen colours, so you always see what's on the product */}
+      {selected.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          {selected.map((k) => (
+            <span key={k} className="a-chip" style={{ paddingLeft: 4 }}>
+              <span className="rounded-full flex-shrink-0" style={{ width: 14, height: 14, background: swatchBackground(k), border: "1px solid var(--border)", display: "inline-block" }} />
+              {colorLabel(k)}
+              <button onClick={() => onToggle(k)} aria-label={`Remove ${colorLabel(k)}`}><X className="w-3 h-3" /></button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      <input
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="Search a colour… (e.g. olive, burgundy, mint)"
+        className="a-field mb-3"
+      />
+
+      {query ? (
+        matches.length === 0 ? (
+          <p className="font-body text-xs text-muted py-2">
+            No colour named “{q}”. Try a close one — or pick “Multicolour / Printed” for patterns.
+          </p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {matches.map((k) => (
+              <Swatch key={k} colorKey={k} on={selected.includes(k)} onToggle={onToggle} />
+            ))}
+          </div>
+        )
+      ) : (
+        <>
+          <p className="font-body text-xs text-muted mb-1.5">Most used</p>
+          <div className="flex flex-wrap gap-2">
+            {basics.map((k) => (
+              <Swatch key={k} colorKey={k} on={selected.includes(k)} onToggle={onToggle} />
+            ))}
+          </div>
+
+          <button
+            onClick={() => setShowAll((v) => !v)}
+            className="font-body text-xs text-muted hover:text-coral mt-3 flex items-center gap-1"
+          >
+            {showAll ? "Hide" : `All colours (${COLOR_KEYS.length})`}
+            <ChevronDown className="w-3.5 h-3.5" style={{ transform: showAll ? "rotate(180deg)" : "none", transition: "transform 0.2s" }} />
+          </button>
+
+          {showAll && (
+            <div className="mt-3 space-y-3">
+              {rest.map((g) => (
+                <div key={g.id}>
+                  <p className="font-body text-xs text-muted mb-1.5">{g.label}</p>
+                  <div className="flex flex-wrap gap-2">
+                    {g.keys.map((k) => (
+                      <Swatch key={k} colorKey={k} on={selected.includes(k)} onToggle={onToggle} />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

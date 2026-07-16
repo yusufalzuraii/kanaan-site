@@ -1,14 +1,24 @@
 /* Shared helpers for all API functions. */
 
-export const CATEGORY_IDS = ["tshirts", "jeans", "pants", "sets", "shorts", "shoes"];
+export const CATEGORY_IDS = ["tshirts", "shirts", "jeans", "pants", "sets", "shorts", "underwear", "shoes"];
 export const CATEGORY_LABELS = {
-  tshirts: "T-Shirts", jeans: "Jeans", pants: "Pants", sets: "Sets", shorts: "Shorts", shoes: "Shoes",
+  tshirts: "T-Shirts", shirts: "Shirts", jeans: "Jeans", pants: "Pants",
+  sets: "Sets", shorts: "Shorts", underwear: "Underwear", shoes: "Shoes",
 };
 
+/* Keep in sync with src/palette.js — never remove a key, products
+   in the database point at these. */
 export const COLOR_KEYS = [
-  "black","charcoal","gray","white","cream","beige","sand","khaki","brown",
-  "coral","red","maroon","burgundy","pink","orange","mustard","yellow",
-  "olive","green","teal","sky","blue","navy","indigo","purple",
+  "black","white","gray","navy","beige","brown","red","blue","green","coral",
+  "charcoal","graphite","slate","silver","lightgray","offwhite","ivory","cream",
+  "oatmeal","sand","stone","taupe","khaki","tan","camel","mocha","coffee","chocolate",
+  "crimson","rust","terracotta","maroon","burgundy","wine","oxblood","salmon","blush",
+  "pink","dustyrose","hotpink","fuchsia","magenta",
+  "orange","apricot","peach","copper","amber","mustard","gold","yellow","lemon","butter",
+  "olive","army","forest","emerald","sage","pistachio","mint","lime","chartreuse",
+  "teal","turquoise","aqua","petrol","sky","babyblue","denim","cobalt","royal","indigo","midnight",
+  "lavender","lilac","mauve","violet","purple","plum","aubergine",
+  "multicolor","striped","printed",
 ];
 
 export function json(data, status = 200, extraHeaders = {}) {
@@ -20,6 +30,15 @@ export function json(data, status = 200, extraHeaders = {}) {
 
 export function slugify(str) {
   return String(str).toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+}
+
+// Which placeholder icon a category uses when a product has no photo.
+export function iconForCategory(category) {
+  if (category === "shoes") return "shoe";
+  if (category === "shirts") return "shirt-button";
+  if (category === "underwear") return "underwear";
+  if (category === "jeans" || category === "pants" || category === "shorts") return "pants";
+  return "shirt";
 }
 
 /* ---------- auth (stateless signed cookie) ---------- */
@@ -101,7 +120,7 @@ export function rowToProduct(r) {
     discount: badge === "sale" ? Number(r.discount) || 0 : 0,
     images,
     image: images[0] ? images[0].url : null,
-    icon: r.category === "shoes" ? "shoe" : "shirt",
+    icon: iconForCategory(r.category),
     soldOut: !!r.sold_out,
     active: r.active === undefined ? true : !!r.active,
     sortOrder: Number(r.sort_order) || 0,

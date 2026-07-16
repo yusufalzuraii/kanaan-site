@@ -4,3 +4,14 @@
 
 html, body, #root { height: 100%; margin: 0; }
 body { -webkit-font-smoothing: antialiased; }
+
+/* Keep the layout locked at 1x while browsing.
+   - touch-action: manipulation kills the double-tap-to-zoom gesture
+   - text-size-adjust stops iOS resizing text on rotate
+   (Form fields are set to 16px at their own rules — anything smaller
+   makes iOS zoom in when a field is focused.) */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  touch-action: manipulation;
+}

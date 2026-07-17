@@ -2,6 +2,7 @@ import React, {
   createContext,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -32,6 +33,8 @@ import {
   Smartphone,
   Search,
   ChevronDown,
+  Tag,
+  ArrowRight,
 } from "lucide-react";
 import Admin from "./Admin.jsx";
 import { COLORS as PALETTE, swatchBackground } from "./palette.js";
@@ -58,16 +61,36 @@ const LAUNCH_DATE = "2026-08-15T12:00:00+03:00"; // update to your real target d
 /* ============================================================
    PRODUCT DATA
    ============================================================ */
+/* Ordered deliberately: tops, bottoms, sets & underwear, footwear,
+   then accessories and the Old Money edit. Keep in sync with
+   CATEGORY_IDS in functions/_shared/util.js. */
 const FALLBACK_CATEGORIES = [
   { id: "tshirts", label: "T-Shirts" },
   { id: "shirts", label: "Shirts" },
   { id: "jeans", label: "Jeans" },
   { id: "pants", label: "Pants" },
-  { id: "sets", label: "Sets" },
   { id: "shorts", label: "Shorts" },
+  { id: "sets", label: "Sets" },
   { id: "underwear", label: "Underwear" },
   { id: "shoes", label: "Shoes" },
+  { id: "slippers", label: "Slippers" },
+  { id: "accessories", label: "Accessories" },
+  { id: "oldmoney", label: "Old Money Collection" },
 ];
+
+/* Fits. Only these two categories are split; the rest have none. */
+const SUBCATEGORIES = {
+  tshirts: [
+    { id: "oversized", label: "Oversized" },
+    { id: "regular", label: "Regular fit" },
+  ],
+  jeans: [
+    { id: "baggy", label: "Baggy" },
+    { id: "regular", label: "Regular" },
+  ],
+};
+const subsFor = (cat) => SUBCATEGORIES[cat] || [];
+const subLabel = (cat, sub) => subsFor(cat).find((s) => s.id === sub)?.label || sub;
 
 // The full palette lives in src/palette.js so the shop and the admin
 // panel can never drift apart.
@@ -153,7 +176,9 @@ function useRouter() {
       /* ignore */
     }
     setPath(to);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    // Jump, don't glide: smooth-scrolling from deep down a long catalog
+    // took a visible moment and left people mid-page on the new one.
+    window.scrollTo(0, 0);
   };
 
   return [path, navigate];
@@ -162,8 +187,12 @@ function useRouter() {
 function parseRoute(path) {
   if (path === "/") return { type: "home" };
   if (path.startsWith("/admin")) return { type: "admin" };
-  if (path === "/shop") return { type: "catalog", category: "all" };
-  if (path.startsWith("/shop/")) return { type: "catalog", category: path.slice(6) };
+  if (path === "/sale") return { type: "sale" };
+  if (path === "/shop") return { type: "catalog", category: "all", sub: null };
+  if (path.startsWith("/shop/")) {
+    const [category, sub] = path.slice(6).split("/").filter(Boolean);
+    return { type: "catalog", category: category || "all", sub: sub || null };
+  }
   if (path.startsWith("/product/")) return { type: "product", slug: path.slice(9) };
   if (path === "/checkout") return { type: "checkout" };
   return { type: "home" };
@@ -379,6 +408,15 @@ function IconFor({ type, className, style }) {
       </svg>
     );
   }
+  if (type === "accessory") {
+    return (
+      <svg className={className} style={style} {...stroke} xmlns="http://www.w3.org/2000/svg">
+        <path d="M3.5 16.5c0-4.7 3.8-8.5 8.5-8.5s8.5 3.8 8.5 8.5" />
+        <path d="M2 16.5h16.5a2.5 2.5 0 0 1 0 5H4a2 2 0 0 1-2-2z" />
+        <path d="M12 8V5.5" />
+      </svg>
+    );
+  }
   if (type === "shirt-button") {
     return (
       <svg className={className} style={style} {...stroke} xmlns="http://www.w3.org/2000/svg">
@@ -392,9 +430,10 @@ function IconFor({ type, className, style }) {
 
 // Keep in sync with iconForCategory() in functions/_shared/util.js
 function iconForCategory(category) {
-  if (category === "shoes") return "shoe";
-  if (category === "shirts") return "shirt-button";
+  if (category === "shoes" || category === "slippers") return "shoe";
+  if (category === "shirts" || category === "oldmoney") return "shirt-button";
   if (category === "underwear") return "underwear";
+  if (category === "accessories") return "accessory";
   if (category === "jeans" || category === "pants" || category === "shorts") return "pants";
   return "shirt";
 }
@@ -574,25 +613,39 @@ function SwatchPanel({ product, big, liked, onToggleLike, forceSoldOut }) {
    the look is identical to before for image-less products.
    ============================================================ */
 function ProductGallery({ product, liked, onToggleLike, activeColor }) {
-  const images = getImagesForColor(product, activeColor).map((x) => x.url);
+  // Memoised: without this the list was rebuilt on every render, which
+  // remounted the <img> and made colour switching feel sluggish.
+  const images = useMemo(
+    () => getImagesForColor(product, activeColor).map((x) => x.url),
+    [product, activeColor]
+  );
+  const allUrls = useMemo(() => getImageList(product).map((x) => x.url), [product]);
+
+  // Warm the browser cache with every photo of this product as soon as the
+  // page opens, so tapping a colour swaps instantly instead of waiting on
+  // a fresh download.
+  useEffect(() => {
+    const imgs = allUrls.map((url) => {
+      const im = new Image();
+      im.src = url;
+      return im;
+    });
+    return () => imgs.forEach((im) => { im.src = ""; });
+  }, [allUrls]);
+
   const c1 = COLORS[activeColor]?.hex || COLORS[product.colors[0]]?.hex || "#141414";
   const c2 = COLORS[product.colors[1]]?.hex || c1;
   const [active, setActive] = useState(0);
   const [broken, setBroken] = useState({});
   const touchX = useRef(null);
 
-  // Jump back to the first photo whenever the shopper picks another color.
+  // Back to the first photo whenever the product or the chosen colour changes.
   useEffect(() => {
     setActive(0);
-  }, [activeColor]);
-
-  useEffect(() => {
-    setActive(0);
-    setBroken({});
-  }, [product.id]);
+  }, [product.id, activeColor]);
 
   const idx = Math.min(active, Math.max(0, images.length - 1));
-  const activeSrc = images[idx] && !broken[idx] ? images[idx] : null;
+  const activeSrc = images[idx] && !broken[images[idx]] ? images[idx] : null;
   const go = (dir) => {
     if (images.length < 2) return;
     setActive((i) => (i + dir + images.length) % images.length);
@@ -617,12 +670,12 @@ function ProductGallery({ product, liked, onToggleLike, activeColor }) {
       >
         {activeSrc ? (
           <img
-            key={idx}
+            key={activeSrc}
             src={activeSrc}
             alt={product.name}
             className="absolute inset-0 w-full h-full"
             style={{ objectFit: "cover" }}
-            onError={() => setBroken((b) => ({ ...b, [idx]: true }))}
+            onError={() => setBroken((b) => ({ ...b, [activeSrc]: true }))}
           />
         ) : (
           <>
@@ -646,9 +699,9 @@ function ProductGallery({ product, liked, onToggleLike, activeColor }) {
       {images.length > 1 && (
         <div className="flex gap-2 mt-3 overflow-x-auto pb-1 max-w-full" style={{ WebkitOverflowScrolling: "touch" }}>
           {images.map((src, i) =>
-            broken[i] ? null : (
+            broken[src] ? null : (
               <button
-                key={i}
+                key={src}
                 onClick={() => setActive(i)}
                 className="relative flex-shrink-0 rounded-xl overflow-hidden tap-scale"
                 style={{ width: 64, height: 80, border: idx === i ? "2px solid var(--coral)" : "1px solid var(--border)" }}
@@ -659,7 +712,7 @@ function ProductGallery({ product, liked, onToggleLike, activeColor }) {
                   alt=""
                   className="w-full h-full"
                   style={{ objectFit: "cover" }}
-                  onError={() => setBroken((b) => ({ ...b, [i]: true }))}
+                  onError={() => setBroken((b) => ({ ...b, [src]: true }))}
                 />
               </button>
             )
@@ -769,12 +822,12 @@ function ComingSoonGate({ onUnlock }) {
         </div>
 
         <h1 className="font-display font-bold text-4xl sm:text-6xl leading-[1.1] mb-4 hero-fade-3">
-          Kanaan Shop is
-          <span className="block text-coral">getting a refresh</span>
+          Our website is
+          <span className="block text-coral">launching soon!</span>
         </h1>
-        <p className="font-body text-muted text-base sm:text-lg mb-10 hero-fade-4" style={{ maxWidth: 440 }}>
-          We're putting the final touches on new pieces and a better shopping experience.
-          Back online very soon — from Saida, for all of Lebanon.
+        <p className="font-body text-muted text-base sm:text-lg mb-10 hero-fade-4" style={{ maxWidth: 460 }}>
+          Get ready for an effortless shopping experience, bringing your favorite styles just a click away.
+          <span className="block mt-2">Based in Saida, delivering across Lebanon</span>
         </p>
 
         <div className="glass glass-sheen rounded-3xl px-4 sm:px-8 py-6 sm:py-7 mb-8 hero-fade-4">
@@ -864,7 +917,7 @@ function scoreProduct(product, q) {
   return 0;
 }
 
-function SearchOverlay({ open, onClose, products, openProduct, goCatalog }) {
+function SearchOverlay({ open, onClose, products, openProduct, goCatalog, goSale }) {
   const [q, setQ] = useState("");
   const [cursor, setCursor] = useState(0);
   const inputRef = useRef(null);
@@ -985,6 +1038,13 @@ function SearchOverlay({ open, onClose, products, openProduct, goCatalog }) {
             <div className="px-4 pb-4" style={{ borderTop: "1px solid var(--glass-border)", paddingTop: 14 }}>
               <p className="font-body text-xs text-muted mb-2.5">Jump to</p>
               <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => { onClose(); goSale(); }}
+                  className="font-body text-xs px-3 py-1.5 rounded-full tap-scale flex items-center gap-1"
+                  style={{ background: "rgba(255,69,34,0.14)", border: "1px solid rgba(255,69,34,0.4)", color: "var(--coral)" }}
+                >
+                  <Tag className="w-3 h-3" /> Sale
+                </button>
                 {CATEGORIES.map((c) => (
                   <button
                     key={c.id}
@@ -1071,6 +1131,289 @@ function ColorPicker({ product, color, onPick }) {
   );
 }
 
+/* A product counts as "on sale" only if it's really cheaper than its
+   list price — a 0% sale badge shouldn't pull anyone in. */
+function isOnSale(p) {
+  return p.discount > 0 && effectivePrice(p) < p.price;
+}
+
+/* ============================================================
+   SHOP MENU (desktop)
+   ------------------------------------------------------------
+   Eleven categories won't sit in a row without turning the header
+   into a wall of text, so they live in one calm panel — with fits
+   listed under the categories that have them.
+   ============================================================ */
+function ShopMenu({ goCatalog }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
+    const onEsc = (e) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onEsc);
+    return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onEsc); };
+  }, [open]);
+
+  const pick = (cat, sub) => { setOpen(false); goCatalog(cat, sub); };
+
+  return (
+    <div
+      ref={wrapRef}
+      className="relative"
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="hover:text-coral transition-colors flex items-center gap-1"
+        aria-expanded={open}
+        aria-haspopup="true"
+      >
+        Shop
+        <ChevronDown className="w-3.5 h-3.5" style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform 0.2s" }} />
+      </button>
+
+      {open && (
+        <div className="absolute left-1/2 pt-3 search-fade" style={{ transform: "translateX(-50%)", top: "100%", zIndex: 60 }}>
+          <div className="glass glass-sheen rounded-2xl p-4" style={{ width: 460, boxShadow: "0 20px 50px rgba(0,0,0,0.3)" }}>
+            <button
+              onClick={() => pick("all")}
+              className="w-full text-left font-body text-sm px-3 py-2 rounded-xl hover:text-coral transition-colors flex items-center justify-between"
+              style={{ background: "var(--glass-bg)" }}
+            >
+              All products <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+
+            <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 mt-3">
+              {CATEGORIES.map((c) => {
+                const subs = subsFor(c.id);
+                return (
+                  <div key={c.id} className="py-1">
+                    <button
+                      onClick={() => pick(c.id)}
+                      className="font-body text-sm hover:text-coral transition-colors block text-left"
+                    >
+                      {c.label}
+                    </button>
+                    {subs.length > 0 && (
+                      <div className="flex gap-2 mt-0.5">
+                        {subs.map((sb) => (
+                          <button
+                            key={sb.id}
+                            onClick={() => pick(c.id, sb.id)}
+                            className="font-body text-muted hover:text-coral transition-colors"
+                            style={{ fontSize: "0.7rem" }}
+                          >
+                            {sb.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   SALE CARD — the permanent hook on the home page
+   ------------------------------------------------------------
+   Uses the house glass + mesh language, but flips the weighting:
+   coral is the surface here instead of an accent, so it stands out
+   from the calm cards around it without inventing a new style.
+   ============================================================ */
+function SaleCard({ onOpen, count, maxDiscount }) {
+  return (
+    <button
+      onClick={onOpen}
+      className="glass glass-sheen sale-card group rounded-3xl p-6 h-full w-full flex flex-col justify-between relative overflow-hidden text-left tap-scale"
+      style={{ minHeight: 150, borderColor: "rgba(255,69,34,0.45)" }}
+      aria-label={`Sale — ${count} pieces, up to ${maxDiscount}% off`}
+    >
+      {/* coral wash + slow drifting glow, same family as MeshBackground */}
+      <span className="absolute inset-0 pointer-events-none" aria-hidden="true" style={{ background: "linear-gradient(135deg, rgba(255,69,34,0.22), rgba(255,69,34,0.04) 60%)" }} />
+      <span className="sale-glow" aria-hidden="true" />
+      <span className="grain-overlay" aria-hidden="true" />
+
+      <span className="relative flex items-start justify-between gap-3 w-full">
+        <span className="block">
+          <Tag className="w-5 h-5 text-coral mb-3" />
+          <span className="block font-display font-bold text-xl leading-snug">
+            On sale now
+          </span>
+          <span className="block font-body text-xs text-muted mt-1">
+            {count} {count === 1 ? "piece" : "pieces"} across the shop
+          </span>
+        </span>
+
+        <span
+          className="font-num font-bold flex-shrink-0 rounded-2xl px-3 py-2 text-center"
+          style={{ background: "var(--coral)", color: "#fff", lineHeight: 1.05 }}
+        >
+          <span className="block text-2xl">−{maxDiscount}%</span>
+          <span className="block font-body" style={{ fontSize: "0.55rem", letterSpacing: "0.08em" }}>UP TO</span>
+        </span>
+      </span>
+
+      <span className="relative font-body text-sm text-coral mt-4 inline-flex items-center gap-1.5">
+        Shop the sale
+        <ArrowRight className="w-4 h-4 transition-transform duration-300 group-hover:translate-x-1" />
+      </span>
+    </button>
+  );
+}
+
+/* ============================================================
+   SALE VIEW — its own page, deliberately louder than the shop
+   ------------------------------------------------------------
+   Same glass/mesh vocabulary as the rest of the site, but coral leads
+   instead of accents, cards carry the saving in money (not just a %),
+   and the biggest discounts come first.
+   ============================================================ */
+function SaleView({ products, loading, goCatalog, openProduct, likes, toggleLike }) {
+  const [shown, setShown] = useState(PAGE_SIZE);
+
+  useEffect(() => {
+    document.title = `Sale — ${STORE_NAME}`;
+  }, []);
+
+  // Deepest discounts first — that's what people came for.
+  const items = useMemo(
+    () => products.filter(isOnSale).sort((a, b) => b.discount - a.discount),
+    [products]
+  );
+  const visible = items.slice(0, shown);
+  const remaining = items.length - visible.length;
+  const maxDiscount = items.length ? items[0].discount : 0;
+  const biggestSaving = items.length
+    ? Math.max(...items.map((p) => p.price - effectivePrice(p)))
+    : 0;
+
+  return (
+    <div>
+      {/* Hero */}
+      <section className="relative overflow-hidden">
+        <MeshBackground variant="hero" />
+        <div className="absolute inset-0 pointer-events-none" aria-hidden="true" style={{ background: "linear-gradient(180deg, rgba(255,69,34,0.14), transparent 70%)" }} />
+        <div className="relative max-w-6xl mx-auto px-4 sm:px-6 pt-14 pb-10 text-center">
+          <div className="hero-fade-1 mb-4 flex justify-center">
+            <GlassChip tone="coral"><Tag className="w-3 h-3" /> Limited time</GlassChip>
+          </div>
+          <h1 className="font-display font-bold text-5xl sm:text-7xl leading-[1] mb-4 hero-fade-2">
+            <span className="text-coral">Sale</span>
+          </h1>
+          <p className="font-body text-muted text-base sm:text-lg hero-fade-3 mx-auto" style={{ maxWidth: 460 }}>
+            Every discounted piece in the shop, gathered in one place.
+            When it's gone, it's gone.
+          </p>
+
+          {items.length > 0 && (
+            <div className="flex items-center justify-center gap-3 mt-8 hero-fade-4 flex-wrap">
+              <SaleStat value={`${items.length}`} label={items.length === 1 ? "piece" : "pieces"} />
+              <SaleStat value={`−${maxDiscount}%`} label="up to" accent />
+              <SaleStat value={money(biggestSaving)} label="biggest saving" />
+            </div>
+          )}
+        </div>
+      </section>
+
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 pb-16">
+        {loading && items.length === 0 ? (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="rounded-2xl glass" style={{ aspectRatio: "4/5", opacity: 0.5 }} />
+            ))}
+          </div>
+        ) : items.length === 0 ? (
+          <div className="glass rounded-3xl py-16 px-6 text-center">
+            <Tag className="w-8 h-8 text-muted mx-auto mb-4" style={{ opacity: 0.5 }} />
+            <p className="font-display font-bold text-lg mb-2">No sale on right now</p>
+            <p className="font-body text-sm text-muted mb-5">
+              Nothing is discounted at the moment — but pieces go on sale often, so keep an eye here.
+            </p>
+            <button onClick={() => goCatalog("all")} className="glass glass-btn rounded-full font-body font-medium px-6 py-3 tap-scale">
+              Browse the shop
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
+              {visible.map((p, i) => (
+                <Reveal key={p.id} delay={(i % 8) * 50}>
+                  <SaleProductCard product={p} onOpen={openProduct} liked={likes.includes(p.id)} onToggleLike={() => toggleLike(p.id)} />
+                </Reveal>
+              ))}
+            </div>
+
+            {remaining > 0 && (
+              <div className="flex flex-col items-center gap-3 mt-10">
+                <p className="font-body text-xs text-muted">Showing {visible.length} of {items.length}</p>
+                <button
+                  onClick={() => setShown((n) => n + PAGE_SIZE)}
+                  className="glass glass-btn rounded-full font-body font-medium px-8 py-3 tap-scale flex items-center gap-2"
+                >
+                  Load {Math.min(remaining, PAGE_SIZE)} more
+                  <ChevronDown className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SaleStat({ value, label, accent }) {
+  return (
+    <div className="glass rounded-2xl px-5 py-3 text-center" style={accent ? { borderColor: "rgba(255,69,34,0.5)" } : undefined}>
+      <p className="font-num font-bold text-xl" style={accent ? { color: "var(--coral)" } : undefined}>{value}</p>
+      <p className="font-body text-muted" style={{ fontSize: "0.65rem", letterSpacing: "0.06em" }}>{label}</p>
+    </div>
+  );
+}
+
+/* Like ProductCard, but the saving is spelled out in money — a shopper
+   shouldn't have to do the percentage maths in their head. */
+function SaleProductCard({ product, onOpen, liked, onToggleLike }) {
+  const isOut = product.soldOut || !productHasStock(product);
+  const saving = product.price - effectivePrice(product);
+  return (
+    <button onClick={() => onOpen(product)} className="text-left group focus:outline-none w-full">
+      <div
+        className="transition-transform duration-500 group-hover:-translate-y-2"
+        style={{ transitionTimingFunction: "cubic-bezier(0.16,1,0.3,1)", opacity: isOut ? 0.7 : 1 }}
+      >
+        <SwatchPanel product={product} liked={liked} onToggleLike={onToggleLike} forceSoldOut={isOut} />
+      </div>
+      <div className="mt-3.5 space-y-1">
+        <p className="font-body font-medium text-fg text-sm">{product.name}</p>
+        <div className="flex items-center gap-2 flex-wrap">
+          {isOut ? (
+            <span className="font-num text-sm text-muted">Sold out</span>
+          ) : (
+            <>
+              <span className="font-num text-sm text-coral">{money(effectivePrice(product))}</span>
+              <span className="font-num text-xs text-muted line-through">{money(product.price)}</span>
+              <span className="font-body rounded-full px-1.5" style={{ fontSize: "0.6rem", background: "rgba(255,69,34,0.15)", color: "var(--coral)" }}>
+                save {money(saving)}
+              </span>
+            </>
+          )}
+        </div>
+      </div>
+    </button>
+  );
+}
+
 /* ============================================================
    ROOT
    ============================================================ */
@@ -1098,6 +1441,13 @@ function KanaanShop() {
     try { return localStorage.getItem("kanaan-access") === ACCESS_CODE; } catch { return false; }
   });
   const [searchOpen, setSearchOpen] = useState(false);
+
+  // Belt and braces on the scroll reset: navigate() jumps immediately, and
+  // this runs again once the new page has actually rendered, so a tall
+  // catalog can't leave you stranded halfway down the product page.
+  useLayoutEffect(() => {
+    window.scrollTo(0, 0);
+  }, [path]);
 
   // ⌘K / Ctrl-K opens search, the way people expect on desktop.
   useEffect(() => {
@@ -1157,7 +1507,12 @@ function KanaanShop() {
   }, []);
 
   const goHome = () => navigate("/");
-  const goCatalog = (cat) => { navigate(cat && cat !== "all" ? `/shop/${cat}` : "/shop"); setMenuOpen(false); };
+  const goCatalog = (cat, sub) => {
+    if (!cat || cat === "all") navigate("/shop");
+    else navigate(sub ? `/shop/${cat}/${sub}` : `/shop/${cat}`);
+    setMenuOpen(false);
+  };
+  const goSale = () => { navigate("/sale"); setMenuOpen(false); };
   const openProduct = (product) => navigate(`/product/${product.slug}`);
   const goCheckout = () => { setCartOpen(false); setOrderPlaced(false); navigate("/checkout"); };
 
@@ -1200,8 +1555,10 @@ function KanaanShop() {
 
   const filteredProducts = useMemo(() => {
     if (route.type !== "catalog") return products;
-    return route.category === "all" ? products : products.filter((p) => p.category === route.category);
-  }, [route.type, route.category, products]);
+    let list = route.category === "all" ? products : products.filter((p) => p.category === route.category);
+    if (route.sub) list = list.filter((p) => p.subcategory === route.sub);
+    return list;
+  }, [route.type, route.category, route.sub, products]);
 
   const currentProduct = route.type === "product" ? products.find((p) => p.slug === route.slug) : null;
 
@@ -1227,13 +1584,16 @@ function KanaanShop() {
     <ProductsContext.Provider value={products}>
     <div data-theme={theme} className="min-h-screen bg-app text-fg font-body relative">
       <GlobalStyles />
-      <Header cartCount={cartCount} onHome={goHome} onCart={() => setCartOpen(true)} onSearch={() => setSearchOpen(true)} menuOpen={menuOpen} setMenuOpen={setMenuOpen} goCatalog={goCatalog} />
+      <Header cartCount={cartCount} onHome={goHome} onCart={() => setCartOpen(true)} onSearch={() => setSearchOpen(true)} onSale={goSale} menuOpen={menuOpen} setMenuOpen={setMenuOpen} goCatalog={goCatalog} />
       <main>
         {route.type === "home" && (
-          <HomeView products={products} loading={catalogLoading} goCatalog={goCatalog} openProduct={openProduct} likes={likes} toggleLike={toggleLike} />
+          <HomeView products={products} loading={catalogLoading} goCatalog={goCatalog} goSale={goSale} openProduct={openProduct} likes={likes} toggleLike={toggleLike} />
+        )}
+        {route.type === "sale" && (
+          <SaleView products={products} loading={catalogLoading} goCatalog={goCatalog} openProduct={openProduct} likes={likes} toggleLike={toggleLike} />
         )}
         {route.type === "catalog" && (
-          <CatalogView activeCategory={route.category} loading={catalogLoading} goCatalog={goCatalog} products={filteredProducts} openProduct={openProduct} likes={likes} toggleLike={toggleLike} />
+          <CatalogView activeCategory={route.category} activeSub={route.sub} loading={catalogLoading} goCatalog={goCatalog} products={filteredProducts} openProduct={openProduct} likes={likes} toggleLike={toggleLike} />
         )}
         {route.type === "product" && currentProduct && (
           <ProductView product={currentProduct} products={products} addToCart={addToCart} openProduct={openProduct} liked={likes.includes(currentProduct.id)} toggleLike={() => toggleLike(currentProduct.id)} />
@@ -1263,7 +1623,7 @@ function KanaanShop() {
         )}
         {route.type === "checkout" && orderPlaced && <ConfirmationView order={lastOrder} goHome={goHome} />}
       </main>
-      <Footer goCatalog={goCatalog} />
+      <Footer goCatalog={goCatalog} goSale={goSale} />
       <WhatsAppFab raised={route.type === "product"} />
       <SearchOverlay
         open={searchOpen}
@@ -1271,6 +1631,7 @@ function KanaanShop() {
         products={products}
         openProduct={openProduct}
         goCatalog={goCatalog}
+        goSale={goSale}
       />
       <CartDrawer
         open={cartOpen}
@@ -1412,8 +1773,26 @@ function GlobalStyles() {
       .search-fade { animation: searchFade 0.18s ease both; }
       .search-rise { animation: searchRise 0.32s cubic-bezier(0.16,1,0.3,1) both; }
 
+      /* Sale card */
+      @keyframes saleGlow {
+        0%, 100% { transform: translate(-10%, -10%) scale(1); opacity: 0.55; }
+        50% { transform: translate(10%, 10%) scale(1.25); opacity: 0.8; }
+      }
+      .sale-glow {
+        position: absolute; right: -20%; bottom: -40%;
+        width: 70%; padding-bottom: 70%;
+        border-radius: 9999px;
+        background: radial-gradient(circle, rgba(255,69,34,0.55) 0%, transparent 70%);
+        filter: blur(30px);
+        animation: saleGlow 9s ease-in-out infinite;
+        will-change: transform, opacity;
+        pointer-events: none;
+      }
+      .sale-card { transition: transform 0.4s cubic-bezier(0.16,1,0.3,1), border-color 0.3s ease; }
+      .sale-card:hover { transform: translateY(-3px); border-color: rgba(255,69,34,0.9); }
+
       @media (prefers-reduced-motion: reduce) {
-        .mesh-blob, .hero-fade-1, .hero-fade-2, .hero-fade-3, .hero-fade-4, .dock-in, .fab-pulse, .search-fade, .search-rise { animation: none !important; }
+        .mesh-blob, .hero-fade-1, .hero-fade-2, .hero-fade-3, .hero-fade-4, .dock-in, .fab-pulse, .search-fade, .search-rise, .sale-glow { animation: none !important; }
       }
 
       .tap-scale { transition: transform 0.15s ease; }
@@ -1427,7 +1806,7 @@ function GlobalStyles() {
 /* ============================================================
    HEADER
    ============================================================ */
-function Header({ cartCount, onHome, onCart, onSearch, menuOpen, setMenuOpen, goCatalog }) {
+function Header({ cartCount, onHome, onCart, onSearch, onSale, menuOpen, setMenuOpen, goCatalog }) {
   const [scrolled, setScrolled] = useState(false);
 
   useEffect(() => {
@@ -1446,12 +1825,10 @@ function Header({ cartCount, onHome, onCart, onSearch, menuOpen, setMenuOpen, go
 
           <nav className="hidden lg:flex items-center gap-5 font-body text-sm">
             <button onClick={onHome} className="hover:text-coral transition-colors">Home</button>
-            <button onClick={() => goCatalog("all")} className="hover:text-coral transition-colors">Shop</button>
-            {CATEGORIES.map((c) => (
-              <button key={c.id} onClick={() => goCatalog(c.id)} className="hover:text-coral transition-colors text-muted">
-                {c.label}
-              </button>
-            ))}
+            <ShopMenu goCatalog={goCatalog} />
+            <button onClick={onSale} className="hover:opacity-80 transition-opacity flex items-center gap-1.5" style={{ color: "var(--coral)" }}>
+              <Tag className="w-3.5 h-3.5" /> Sale
+            </button>
           </nav>
 
           <div className="flex items-center gap-2.5">
@@ -1474,14 +1851,38 @@ function Header({ cartCount, onHome, onCart, onSearch, menuOpen, setMenuOpen, go
         </div>
 
         {menuOpen && (
-          <div className="lg:hidden px-5 pb-3 pt-2 flex flex-col gap-3 font-body text-sm border-t mt-2" style={{ borderColor: "var(--border)" }}>
+          <div className="lg:hidden px-5 pb-3 pt-2 flex flex-col gap-2.5 font-body text-sm border-t mt-2" style={{ borderColor: "var(--border)", maxHeight: "70vh", overflowY: "auto" }}>
             <button onClick={onHome} className="text-left hover:text-coral">Home</button>
-            <button onClick={() => goCatalog("all")} className="text-left hover:text-coral">Shop</button>
-            {CATEGORIES.map((c) => (
-              <button key={c.id} onClick={() => goCatalog(c.id)} className="text-left text-muted hover:text-coral">
-                {c.label}
-              </button>
-            ))}
+            <button onClick={() => goCatalog("all")} className="text-left hover:text-coral">Shop — all products</button>
+            <button onClick={onSale} className="text-left flex items-center gap-1.5" style={{ color: "var(--coral)" }}>
+              <Tag className="w-3.5 h-3.5" /> Sale
+            </button>
+            <div className="border-t pt-2.5 mt-0.5 flex flex-col gap-2.5" style={{ borderColor: "var(--border)" }}>
+              {CATEGORIES.map((c) => {
+                const subs = subsFor(c.id);
+                return (
+                  <div key={c.id}>
+                    <button onClick={() => goCatalog(c.id)} className="text-left text-muted hover:text-coral block">
+                      {c.label}
+                    </button>
+                    {subs.length > 0 && (
+                      <div className="flex gap-3 mt-1 ml-3">
+                        {subs.map((sb) => (
+                          <button
+                            key={sb.id}
+                            onClick={() => goCatalog(c.id, sb.id)}
+                            className="text-muted hover:text-coral"
+                            style={{ fontSize: "0.7rem" }}
+                          >
+                            {sb.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
       </header>
@@ -1492,12 +1893,15 @@ function Header({ cartCount, onHome, onCart, onSearch, menuOpen, setMenuOpen, go
 /* ============================================================
    HOME
    ============================================================ */
-function HomeView({ products, loading, goCatalog, openProduct, likes, toggleLike }) {
+function HomeView({ products, loading, goCatalog, goSale, openProduct, likes, toggleLike }) {
   useEffect(() => {
     document.title = `${STORE_NAME} — Menswear from Saida, Lebanon`;
   }, []);
 
   const featured = products.slice(0, 8);
+  const onSale = useMemo(() => products.filter(isOnSale), [products]);
+  const saleCount = onSale.length;
+  const maxDiscount = saleCount ? Math.max(...onSale.map((p) => p.discount)) : 0;
   const [spot, setSpot] = useState({ x: 50, y: 50 });
 
   const onHeroMove = (e) => {
@@ -1518,11 +1922,11 @@ function HomeView({ products, loading, goCatalog, openProduct, likes, toggleLike
           </div>
           <h1 className="font-display font-bold text-5xl sm:text-7xl leading-[1.05] max-w-3xl hero-fade-2">
             Kanaan Shop
-            <span className="block text-coral">Menswear from the coast</span>
+            <span className="block text-coral">Everyday wear, refined</span>
           </h1>
           <p className="font-body text-muted text-base sm:text-lg max-w-xl mt-5 hero-fade-3">
-            Everyday pieces in heavy fabrics and thoughtful cuts, inspired by Saida and its old souk. Delivery
-            everywhere in Lebanon, cash on delivery.
+            Timeless everyday pieces, thoughtfully selected with quality fabrics and flattering cuts.
+            Delivery across Lebanon | Cash on delivery.
           </p>
           <div className="flex items-center gap-3 mt-8 hero-fade-4">
             <Magnetic>
@@ -1531,7 +1935,7 @@ function HomeView({ products, loading, goCatalog, openProduct, likes, toggleLike
               </button>
             </Magnetic>
             <button onClick={() => goCatalog("sets")} className="glass rounded-full font-body px-6 py-3 tap-scale hover:opacity-80 transition-opacity">
-              See sets
+              Explore pairings
             </button>
           </div>
         </div>
@@ -1539,8 +1943,8 @@ function HomeView({ products, loading, goCatalog, openProduct, likes, toggleLike
 
       <section className="max-w-6xl mx-auto px-4 sm:px-6 py-10">
         <div className="grid grid-cols-2 lg:grid-cols-4 lg:grid-rows-2 gap-4">
-          <Reveal className="col-span-2 lg:row-span-2">
-            <div className="glass glass-sheen rounded-3xl p-6 h-full flex flex-col justify-between relative overflow-hidden" style={{ minHeight: 320 }}>
+          <Reveal className="col-span-2">
+            <div className="glass glass-sheen rounded-3xl p-6 h-full flex flex-col justify-between relative overflow-hidden" style={{ minHeight: 150 }}>
               <MeshBackground variant="card" />
               <div className="relative">
                 <Sparkles className="w-5 h-5 text-coral mb-3" />
@@ -1551,6 +1955,15 @@ function HomeView({ products, loading, goCatalog, openProduct, likes, toggleLike
               </button>
             </div>
           </Reveal>
+
+          {/* Sits directly under "New season", same width. Only appears when
+              something is actually discounted — a Sale door opening onto an
+              empty room does more harm than good. */}
+          {saleCount > 0 && (
+            <Reveal className="col-span-2 lg:row-start-2" delay={60}>
+              <SaleCard onOpen={goSale} count={saleCount} maxDiscount={maxDiscount} />
+            </Reveal>
+          )}
           {[
             { icon: Truck, label: "Delivery all over Lebanon" },
             { icon: ShieldCheck, label: "Cash on delivery" },
@@ -1622,24 +2035,33 @@ function HomeView({ products, loading, goCatalog, openProduct, likes, toggleLike
    ============================================================ */
 const PAGE_SIZE = 12;
 
-function CatalogView({ activeCategory, loading, goCatalog, products, openProduct, likes, toggleLike }) {
+function CatalogView({ activeCategory, activeSub, loading, goCatalog, products, openProduct, likes, toggleLike }) {
   const label = activeCategory === "all" ? "Shop" : CATEGORIES.find((c) => c.id === activeCategory)?.label || "Shop";
   const [shown, setShown] = useState(PAGE_SIZE);
+  const subs = subsFor(activeCategory);
 
   useEffect(() => {
-    document.title = `${label} — ${STORE_NAME}`;
-  }, [label]);
+    const suffix = activeSub ? ` — ${subLabel(activeCategory, activeSub)}` : "";
+    document.title = `${label}${suffix} — ${STORE_NAME}`;
+  }, [label, activeCategory, activeSub]);
 
-  // Start from the top of the list again when the category changes.
-  useEffect(() => { setShown(PAGE_SIZE); }, [activeCategory]);
+  // Start from the top of the list again when the category or fit changes.
+  useEffect(() => { setShown(PAGE_SIZE); }, [activeCategory, activeSub]);
 
   const visible = products.slice(0, shown);
   const remaining = products.length - visible.length;
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10">
-      <h1 className="font-display font-bold text-3xl mb-6">Shop</h1>
-      <div className="flex flex-wrap gap-2 mb-8">
+      <h1 className="font-display font-bold text-3xl mb-1">
+        {activeCategory === "all" ? "Shop" : label}
+      </h1>
+      {activeSub && (
+        <p className="font-body text-sm text-coral mb-5">{subLabel(activeCategory, activeSub)}</p>
+      )}
+      {!activeSub && <div className="mb-5" />}
+
+      <div className="flex flex-wrap gap-2 mb-4">
         <button
           onClick={() => goCatalog("all")}
           className="font-body text-sm px-4 py-2 rounded-full tap-scale transition-all"
@@ -1659,6 +2081,36 @@ function CatalogView({ activeCategory, loading, goCatalog, products, openProduct
         ))}
       </div>
 
+      {/* Fits — only for the categories that have them (Jeans, T-Shirts).
+          Secondary styling on purpose: it's a refinement, not a new aisle. */}
+      {subs.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 mb-8">
+          <span className="font-body text-xs text-muted mr-1">Fit</span>
+          <button
+            onClick={() => goCatalog(activeCategory)}
+            className="font-body text-xs px-3 py-1.5 rounded-full tap-scale transition-all"
+            style={!activeSub
+              ? { background: "var(--coral)", color: "#fff" }
+              : { background: "var(--glass-bg)", border: "1px solid var(--glass-border)", color: "var(--fg-muted)" }}
+          >
+            All fits
+          </button>
+          {subs.map((sb) => (
+            <button
+              key={sb.id}
+              onClick={() => goCatalog(activeCategory, sb.id)}
+              className="font-body text-xs px-3 py-1.5 rounded-full tap-scale transition-all"
+              style={activeSub === sb.id
+                ? { background: "var(--coral)", color: "#fff" }
+                : { background: "var(--glass-bg)", border: "1px solid var(--glass-border)", color: "var(--fg-muted)" }}
+            >
+              {sb.label}
+            </button>
+          ))}
+        </div>
+      )}
+      {subs.length === 0 && <div className="mb-4" />}
+
       {loading && products.length === 0 ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
           {Array.from({ length: 8 }).map((_, i) => (
@@ -1666,7 +2118,9 @@ function CatalogView({ activeCategory, loading, goCatalog, products, openProduct
           ))}
         </div>
       ) : products.length === 0 ? (
-        <p className="font-body text-muted py-16 text-center">No products in this category yet.</p>
+        <p className="font-body text-muted py-16 text-center">
+          {activeSub ? `No ${subLabel(activeCategory, activeSub).toLowerCase()} pieces here yet.` : "No products in this category yet."}
+        </p>
       ) : (
         <>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
@@ -2260,7 +2714,7 @@ function WhatsAppFab({ raised }) {
 /* ============================================================
    FOOTER
    ============================================================ */
-function Footer({ goCatalog }) {
+function Footer({ goCatalog, goSale }) {
   return (
     <footer className="mt-10 px-4 sm:px-6 pb-6">
       <div className="glass max-w-6xl mx-auto rounded-3xl px-4 sm:px-6 py-12">
@@ -2277,6 +2731,9 @@ function Footer({ goCatalog }) {
           <div>
             <p className="font-body text-sm font-medium mb-4">Categories</p>
             <div className="flex flex-col gap-2">
+              <button onClick={goSale} className="font-body text-sm text-left transition-colors flex items-center gap-1.5 hover:opacity-80" style={{ color: "var(--coral)" }}>
+                <Tag className="w-3.5 h-3.5" /> Sale
+              </button>
               {CATEGORIES.map((c) => (
                 <button key={c.id} onClick={() => goCatalog(c.id)} className="font-body text-sm text-muted hover:text-coral text-left transition-colors">
                   {c.label}

@@ -242,8 +242,8 @@ function Reveal({ children, delay = 0, className = "" }) {
       className={className}
       style={{
         opacity: visible ? 1 : 0,
-        transform: visible ? "translateY(0)" : "translateY(20px)",
-        transition: `opacity 0.7s ease ${delay}ms, transform 0.7s cubic-bezier(0.16,1,0.3,1) ${delay}ms`,
+        transform: visible ? "translateY(0)" : "translateY(14px)",
+        transition: `opacity 0.5s ease ${delay}ms, transform 0.5s cubic-bezier(0.16,1,0.3,1) ${delay}ms`,
       }}
     >
       {children}
@@ -1243,27 +1243,27 @@ function SaleCard({ onOpen, count, maxDiscount }) {
       <span className="sale-glow" aria-hidden="true" />
       <span className="grain-overlay" aria-hidden="true" />
 
-      <span className="relative flex items-start justify-between gap-3 w-full">
-        <span className="block">
+      <span className="relative flex items-start justify-between gap-4 w-full">
+        <span className="block min-w-0">
           <Tag className="w-5 h-5 text-coral mb-3" />
           <span className="block font-display font-bold text-xl leading-snug">
             On sale now
           </span>
-          <span className="block font-body text-xs text-muted mt-1">
+          <span className="block font-body text-xs text-muted mt-1.5">
             {count} {count === 1 ? "piece" : "pieces"} across the shop
           </span>
         </span>
 
         <span
-          className="font-num font-bold flex-shrink-0 rounded-2xl px-3 py-2 text-center"
-          style={{ background: "var(--coral)", color: "#fff", lineHeight: 1.05 }}
+          className="font-num font-bold flex-shrink-0 rounded-2xl text-center flex flex-col items-center justify-center"
+          style={{ background: "var(--coral)", color: "#fff", width: 86, height: 62, boxShadow: "0 8px 20px rgba(255,69,34,0.35)" }}
         >
-          <span className="block text-2xl">−{maxDiscount}%</span>
-          <span className="block font-body" style={{ fontSize: "0.55rem", letterSpacing: "0.08em" }}>UP TO</span>
+          <span className="block text-2xl leading-none">−{maxDiscount}%</span>
+          <span className="block font-body" style={{ fontSize: "0.55rem", letterSpacing: "0.12em", marginTop: 3, opacity: 0.9 }}>UP TO</span>
         </span>
       </span>
 
-      <span className="relative font-body text-sm text-coral mt-4 inline-flex items-center gap-1.5">
+      <span className="relative font-body text-sm font-medium text-coral mt-5 inline-flex items-center gap-1.5">
         Shop the sale
         <ArrowRight className="w-4 h-4 transition-transform duration-300 group-hover:translate-x-1" />
       </span>
@@ -1303,20 +1303,20 @@ function SaleView({ products, loading, goCatalog, openProduct, likes, toggleLike
       <section className="relative overflow-hidden">
         <MeshBackground variant="hero" />
         <div className="absolute inset-0 pointer-events-none" aria-hidden="true" style={{ background: "linear-gradient(180deg, rgba(255,69,34,0.14), transparent 70%)" }} />
-        <div className="relative max-w-6xl mx-auto px-4 sm:px-6 pt-14 pb-10 text-center">
-          <div className="hero-fade-1 mb-4 flex justify-center">
+        <div className="relative max-w-6xl mx-auto px-4 sm:px-6 pt-12 pb-12 text-center">
+          <div className="hero-fade-1 mb-5 flex justify-center">
             <GlassChip tone="coral"><Tag className="w-3 h-3" /> Limited time</GlassChip>
           </div>
-          <h1 className="font-display font-bold text-5xl sm:text-7xl leading-[1] mb-4 hero-fade-2">
-            <span className="text-coral">Sale</span>
+          <h1 className="font-display font-bold text-6xl sm:text-7xl leading-[0.95] mb-3 hero-fade-2 text-coral" style={{ letterSpacing: "-0.02em" }}>
+            Sale
           </h1>
-          <p className="font-body text-muted text-base sm:text-lg hero-fade-3 mx-auto" style={{ maxWidth: 460 }}>
+          <p className="font-body text-muted text-sm sm:text-base hero-fade-3 mx-auto leading-7" style={{ maxWidth: 400 }}>
             Every discounted piece in the shop, gathered in one place.
-            When it's gone, it's gone.
+            <span className="block font-medium" style={{ color: "var(--fg)" }}>When it's gone, it's gone.</span>
           </p>
 
           {items.length > 0 && (
-            <div className="flex items-center justify-center gap-3 mt-8 hero-fade-4 flex-wrap">
+            <div className="flex items-center justify-center gap-2.5 mt-7 hero-fade-4 flex-wrap">
               <SaleStat value={`${items.length}`} label={items.length === 1 ? "piece" : "pieces"} />
               <SaleStat value={`−${maxDiscount}%`} label="up to" accent />
               <SaleStat value={money(biggestSaving)} label="biggest saving" />
@@ -1374,9 +1374,15 @@ function SaleView({ products, loading, goCatalog, openProduct, likes, toggleLike
 
 function SaleStat({ value, label, accent }) {
   return (
-    <div className="glass rounded-2xl px-5 py-3 text-center" style={accent ? { borderColor: "rgba(255,69,34,0.5)" } : undefined}>
-      <p className="font-num font-bold text-xl" style={accent ? { color: "var(--coral)" } : undefined}>{value}</p>
-      <p className="font-body text-muted" style={{ fontSize: "0.65rem", letterSpacing: "0.06em" }}>{label}</p>
+    <div
+      className="glass rounded-2xl py-3 text-center"
+      style={{
+        minWidth: 104,
+        ...(accent ? { borderColor: "rgba(255,69,34,0.5)", background: "rgba(255,69,34,0.07)" } : {}),
+      }}
+    >
+      <p className="font-num font-bold text-xl leading-tight" style={accent ? { color: "var(--coral)" } : undefined}>{value}</p>
+      <p className="font-body text-muted uppercase" style={{ fontSize: "0.62rem", letterSpacing: "0.09em", marginTop: 2 }}>{label}</p>
     </div>
   );
 }
@@ -1395,20 +1401,18 @@ function SaleProductCard({ product, onOpen, liked, onToggleLike }) {
         <SwatchPanel product={product} liked={liked} onToggleLike={onToggleLike} forceSoldOut={isOut} />
       </div>
       <div className="mt-3.5 space-y-1">
-        <p className="font-body font-medium text-fg text-sm">{product.name}</p>
-        <div className="flex items-center gap-2 flex-wrap">
-          {isOut ? (
-            <span className="font-num text-sm text-muted">Sold out</span>
-          ) : (
-            <>
-              <span className="font-num text-sm text-coral">{money(effectivePrice(product))}</span>
-              <span className="font-num text-xs text-muted line-through">{money(product.price)}</span>
-              <span className="font-body rounded-full px-1.5" style={{ fontSize: "0.6rem", background: "rgba(255,69,34,0.15)", color: "var(--coral)" }}>
-                save {money(saving)}
-              </span>
-            </>
-          )}
-        </div>
+        <p className="font-body font-medium text-fg text-sm truncate">{product.name}</p>
+        {isOut ? (
+          <span className="font-num text-sm text-muted">Sold out</span>
+        ) : (
+          <div className="flex items-baseline gap-2">
+            <span className="font-num text-base text-coral">{money(effectivePrice(product))}</span>
+            <span className="font-num text-xs text-muted line-through">{money(product.price)}</span>
+            <span className="font-body rounded-full ml-auto flex-shrink-0" style={{ fontSize: "0.62rem", padding: "2px 8px", background: "rgba(255,69,34,0.12)", border: "1px solid rgba(255,69,34,0.25)", color: "var(--coral)" }}>
+              save {money(saving)}
+            </span>
+          </div>
+        )}
       </div>
     </button>
   );
@@ -1653,8 +1657,6 @@ function KanaanShop() {
 function GlobalStyles() {
   return (
     <style>{`
-      @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
-
       [data-theme="dark"] {
         --bg: #0B0B0E;
         --bg-soft: #101014;
@@ -1700,6 +1702,14 @@ function GlobalStyles() {
         background: var(--glass-bg);
         backdrop-filter: blur(20px) saturate(180%);
         -webkit-backdrop-filter: blur(20px) saturate(180%);
+      }
+      @media (max-width: 640px) {
+        .glass {
+          backdrop-filter: blur(14px) saturate(170%);
+          -webkit-backdrop-filter: blur(14px) saturate(170%);
+        }
+      }
+      .glass {
         border: 1px solid var(--glass-border);
         box-shadow: var(--glass-shadow),
                     inset 0 1px 0 rgba(255,255,255,0.28),
@@ -1773,6 +1783,25 @@ function GlobalStyles() {
       .search-fade { animation: searchFade 0.18s ease both; }
       .search-rise { animation: searchRise 0.32s cubic-bezier(0.16,1,0.3,1) both; }
 
+      /* Hero promise chips — slide in one after the other, then a slow
+         breathing glow keeps them alive without shouting. */
+      @keyframes chipIn {
+        from { opacity: 0; transform: translateY(10px) scale(0.96); }
+        to { opacity: 1; transform: translateY(0) scale(1); }
+      }
+      @keyframes chipBreath {
+        0%, 100% { box-shadow: var(--glass-shadow), inset 0 1px 0 rgba(255,255,255,0.12), 0 0 0 0 rgba(18,179,160,0); }
+        50% { box-shadow: var(--glass-shadow), inset 0 1px 0 rgba(255,255,255,0.12), 0 0 18px 2px rgba(18,179,160,0.18); }
+      }
+      .promise-chip { opacity: 0; }
+      .promise-chip-1 { animation: chipIn 0.6s cubic-bezier(0.16,1,0.3,1) 0.45s both, chipBreath 5s ease-in-out 1.2s infinite; }
+      .promise-chip-2 { animation: chipIn 0.6s cubic-bezier(0.16,1,0.3,1) 0.62s both, chipBreath 5s ease-in-out 3.7s infinite; }
+      .promise-divider {
+        width: 18px; height: 1px; flex-shrink: 0;
+        background: linear-gradient(90deg, transparent, var(--fg-muted), transparent);
+        opacity: 0; animation: chipIn 0.5s ease 0.8s both;
+      }
+
       /* Sale card */
       @keyframes saleGlow {
         0%, 100% { transform: translate(-10%, -10%) scale(1); opacity: 0.55; }
@@ -1792,7 +1821,9 @@ function GlobalStyles() {
       .sale-card:hover { transform: translateY(-3px); border-color: rgba(255,69,34,0.9); }
 
       @media (prefers-reduced-motion: reduce) {
-        .mesh-blob, .hero-fade-1, .hero-fade-2, .hero-fade-3, .hero-fade-4, .dock-in, .fab-pulse, .search-fade, .search-rise, .sale-glow { animation: none !important; }
+        .mesh-blob, .hero-fade-1, .hero-fade-2, .hero-fade-3, .hero-fade-4, .dock-in, .fab-pulse, .search-fade, .search-rise, .sale-glow, .promise-divider { animation: none !important; }
+        .promise-chip { animation: none !important; opacity: 1 !important; }
+        .promise-divider { opacity: 1 !important; }
       }
 
       .tap-scale { transition: transform 0.15s ease; }
@@ -1926,8 +1957,19 @@ function HomeView({ products, loading, goCatalog, goSale, openProduct, likes, to
           </h1>
           <p className="font-body text-muted text-base sm:text-lg max-w-xl mt-5 hero-fade-3">
             Timeless everyday pieces, thoughtfully selected with quality fabrics and flattering cuts.
-            Delivery across Lebanon | Cash on delivery.
           </p>
+          {/* The promise line gets its own row: two glass chips that slide in
+              one after the other, with a soft breathing glow — the first thing
+              a Lebanese shopper wants to know, made unmissable. */}
+          <div className="flex items-center gap-2.5 mt-4 flex-wrap">
+            <span className="glass promise-chip promise-chip-1 inline-flex items-center gap-2 rounded-full px-4 py-2 font-body text-sm">
+              <Truck className="w-4 h-4 text-teal" /> Delivery across Lebanon
+            </span>
+            <span className="promise-divider" aria-hidden="true" />
+            <span className="glass promise-chip promise-chip-2 inline-flex items-center gap-2 rounded-full px-4 py-2 font-body text-sm">
+              <ShieldCheck className="w-4 h-4 text-teal" /> Cash on delivery
+            </span>
+          </div>
           <div className="flex items-center gap-3 mt-8 hero-fade-4">
             <Magnetic>
               <button onClick={() => goCatalog("all")} className="glass glass-btn rounded-full font-body font-medium px-6 py-3 tap-scale" style={{ background: "var(--coral)", color: "#fff", borderColor: "var(--coral)" }}>

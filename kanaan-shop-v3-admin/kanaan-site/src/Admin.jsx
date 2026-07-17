@@ -37,6 +37,8 @@ const subsFor = (cat) => SUBCATEGORIES[cat] || [];
 const SIZE_PRESETS = {
   clothing: ["S", "M", "L", "XL", "XXL"],
   shoes: ["40", "41", "42", "43", "44", "45"],
+  // Waist sizes for jeans & pants (29–42, even steps above 33).
+  pants: ["29", "30", "31", "32", "33", "34", "36", "38", "40", "42"],
 };
 
 const money = (n) => `$${Number(n || 0).toFixed(0)}`;
@@ -267,33 +269,7 @@ function Dashboard({ onExit, onLogout }) {
           ) : products.length === 0 ? (
             <p className="font-body text-muted text-center py-16">No products yet. Add your first one above.</p>
           ) : (
-            <div className="space-y-3">
-              {products.map((p) => {
-                const totalStock = Object.values(p.variants || {}).reduce((a, b) => a + (Number(b) || 0), 0);
-                const tracked = Object.keys(p.variants || {}).length > 0;
-                return (
-                  <div key={p.id} className="glass rounded-2xl p-3 flex items-center gap-3">
-                    <Thumb src={p.image} />
-                    <div className="flex-1 min-w-0">
-                      <p className="font-body font-medium text-sm truncate">{p.name}</p>
-                      <p className="font-body text-xs text-muted">
-                        {CATEGORIES.find((c) => c.id === p.category)?.label} · {money(p.price)}
-                        {p.discount > 0 ? ` · −${p.discount}%` : ""}
-                        {tracked ? ` · ${totalStock} in stock` : ""}
-                      </p>
-                      <div className="flex gap-1.5 mt-1 flex-wrap">
-                        {p.soldOut && <span className="a-chip" style={{ fontSize: "0.68rem", padding: "1px 8px" }}>Sold out</span>}
-                        {!p.active && <span className="a-chip" style={{ fontSize: "0.68rem", padding: "1px 8px" }}>Hidden</span>}
-                        {p.badge && <span className="a-chip" style={{ fontSize: "0.68rem", padding: "1px 8px", color: p.badge === "sale" ? "var(--coral)" : "var(--teal)" }}>{p.badge}</span>}
-                        {tracked && totalStock === 0 && <span className="a-chip" style={{ fontSize: "0.68rem", padding: "1px 8px", color: "var(--coral)" }}>No stock</span>}
-                      </div>
-                    </div>
-                    <button onClick={() => setEditing(p)} className="glass rounded-full p-2 tap-scale" aria-label="Edit"><Pencil className="w-4 h-4" /></button>
-                    <button onClick={() => setPendingDelete(p)} className="glass rounded-full p-2 tap-scale" aria-label="Delete"><Trash2 className="w-4 h-4" style={{ color: "var(--coral)" }} /></button>
-                  </div>
-                );
-              })}
-            </div>
+            <ProductsBrowser products={products} onEdit={setEditing} onDelete={setPendingDelete} />
           )}
         </>
       )}
@@ -372,6 +348,167 @@ function ConfirmDialog({ open, busy, title, body, confirmLabel, onCancel, onConf
         </div>
       </div>
     </div>
+  );
+}
+
+/* ============================================================
+   PRODUCTS BROWSER
+   ------------------------------------------------------------
+   The flat list stopped scaling once the catalogue grew: finding one
+   product to edit meant scrolling past everything. Now there's an
+   instant search box on top, and below it the products live in
+   collapsible category folders (with a count on each). Searching
+   flattens the folders into one ranked result list.
+   ============================================================ */
+function ProductCardRow({ p, onEdit, onDelete }) {
+  const totalStock = Object.values(p.variants || {}).reduce((a, b) => a + (Number(b) || 0), 0);
+  const tracked = Object.keys(p.variants || {}).length > 0;
+  return (
+    <div className="glass rounded-2xl p-3 flex items-center gap-3">
+      <Thumb src={p.image} />
+      <div className="flex-1 min-w-0">
+        <p className="font-body font-medium text-sm truncate">{p.name}</p>
+        <p className="font-body text-xs text-muted">
+          {CATEGORIES.find((c) => c.id === p.category)?.label}
+          {p.subcategory ? ` / ${p.subcategory}` : ""} · {money(p.price)}
+          {p.discount > 0 ? ` · −${p.discount}%` : ""}
+          {tracked ? ` · ${totalStock} in stock` : ""}
+        </p>
+        <div className="flex gap-1.5 mt-1 flex-wrap">
+          {p.soldOut && <span className="a-chip" style={{ fontSize: "0.68rem", padding: "1px 8px" }}>Sold out</span>}
+          {!p.active && <span className="a-chip" style={{ fontSize: "0.68rem", padding: "1px 8px" }}>Hidden</span>}
+          {p.badge && <span className="a-chip" style={{ fontSize: "0.68rem", padding: "1px 8px", color: p.badge === "sale" ? "var(--coral)" : "var(--teal)" }}>{p.badge}</span>}
+          {tracked && totalStock === 0 && <span className="a-chip" style={{ fontSize: "0.68rem", padding: "1px 8px", color: "var(--coral)" }}>No stock</span>}
+        </div>
+      </div>
+      <button onClick={() => onEdit(p)} className="glass rounded-full p-2 tap-scale" aria-label="Edit"><Pencil className="w-4 h-4" /></button>
+      <button onClick={() => onDelete(p)} className="glass rounded-full p-2 tap-scale" aria-label="Delete"><Trash2 className="w-4 h-4" style={{ color: "var(--coral)" }} /></button>
+    </div>
+  );
+}
+
+function ProductsBrowser({ products, onEdit, onDelete }) {
+  const [q, setQ] = useState("");
+  // First folder starts open so the page never looks empty.
+  const [open, setOpen] = useState(() => {
+    const first = CATEGORIES.find((c) => products.some((p) => p.category === c.id));
+    return first ? { [first.id]: true } : {};
+  });
+
+  const query = q.trim().toLowerCase();
+
+  const matches = useMemo(() => {
+    if (!query) return [];
+    const score = (p) => {
+      const n = p.name.toLowerCase();
+      if (n === query) return 100;
+      if (n.startsWith(query)) return 80;
+      if (n.includes(query)) return 60;
+      const cat = (CATEGORIES.find((c) => c.id === p.category)?.label || "").toLowerCase();
+      if (cat.includes(query)) return 40;
+      if (p.colors?.some((k) => colorLabel(k).toLowerCase().includes(query))) return 30;
+      return 0;
+    };
+    return products
+      .map((p) => ({ p, s: score(p) }))
+      .filter((x) => x.s > 0)
+      .sort((a, b) => b.s - a.s)
+      .map((x) => x.p);
+  }, [query, products]);
+
+  // Folders: keep the site's category order, skip empty ones.
+  const folders = useMemo(
+    () =>
+      CATEGORIES.map((c) => ({ ...c, items: products.filter((p) => p.category === c.id) }))
+        .filter((c) => c.items.length > 0),
+    [products]
+  );
+
+  const toggle = (id) => setOpen((o) => ({ ...o, [id]: !o[id] }));
+
+  return (
+    <div>
+      {/* Search */}
+      <div className="glass rounded-2xl flex items-center gap-2.5 px-3.5 mb-4" style={{ height: 46 }}>
+        <SearchIconGlyph />
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Search your products…"
+          className="flex-1 bg-transparent border-0 outline-none font-body"
+          style={{ fontSize: 16, color: "var(--fg)" }}
+        />
+        {q && (
+          <button onClick={() => setQ("")} className="p-1 tap-scale text-muted hover:text-coral" aria-label="Clear search">
+            <X className="w-4 h-4" />
+          </button>
+        )}
+      </div>
+
+      {query ? (
+        matches.length === 0 ? (
+          <p className="font-body text-sm text-muted text-center py-10">Nothing matched “{q}”.</p>
+        ) : (
+          <div className="space-y-3">
+            <p className="font-body text-xs text-muted">{matches.length} {matches.length === 1 ? "result" : "results"}</p>
+            {matches.map((p) => (
+              <ProductCardRow key={p.id} p={p} onEdit={onEdit} onDelete={onDelete} />
+            ))}
+          </div>
+        )
+      ) : (
+        <div className="space-y-3">
+          {folders.map((c) => {
+            const isOpen = !!open[c.id];
+            const outCount = c.items.filter((p) => {
+              const tracked = Object.keys(p.variants || {}).length > 0;
+              const total = Object.values(p.variants || {}).reduce((a, b) => a + (Number(b) || 0), 0);
+              return p.soldOut || (tracked && total === 0);
+            }).length;
+            return (
+              <div key={c.id} className="glass rounded-2xl overflow-hidden">
+                <button
+                  onClick={() => toggle(c.id)}
+                  className="w-full flex items-center gap-3 px-4 tap-scale"
+                  style={{ height: 52 }}
+                  aria-expanded={isOpen}
+                >
+                  <Package className="w-4 h-4 text-muted flex-shrink-0" />
+                  <span className="font-body font-medium text-sm flex-1 text-left">{c.label}</span>
+                  {outCount > 0 && (
+                    <span className="a-chip" style={{ fontSize: "0.65rem", padding: "1px 7px", color: "var(--coral)" }}>{outCount} out</span>
+                  )}
+                  <span className="font-num text-xs rounded-full px-2" style={{ background: "var(--field-bg)", border: "1px solid var(--border)", lineHeight: "20px" }}>
+                    {c.items.length}
+                  </span>
+                  <ChevronDown
+                    className="w-4 h-4 text-muted flex-shrink-0"
+                    style={{ transform: isOpen ? "rotate(180deg)" : "none", transition: "transform 0.25s" }}
+                  />
+                </button>
+                {isOpen && (
+                  <div className="px-2.5 pb-2.5 space-y-2.5" style={{ borderTop: "1px solid var(--border)", paddingTop: 10 }}>
+                    {c.items.map((p) => (
+                      <ProductCardRow key={p.id} p={p} onEdit={onEdit} onDelete={onDelete} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Small inline search glyph (keeps the lucide import list tidy).
+function SearchIconGlyph() {
+  return (
+    <svg className="w-4 h-4 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--fg-muted)" }} xmlns="http://www.w3.org/2000/svg">
+      <circle cx="11" cy="11" r="7" />
+      <path d="m20 20-3.5-3.5" />
+    </svg>
   );
 }
 
@@ -695,6 +832,36 @@ function ProductForm({ initial, isNew, onCancel, onSaved }) {
   const clearStock = () => setF((p) => ({ ...p, variants: {} }));
   const trackingOn = Object.keys(f.variants || {}).some((k) => Number(f.variants[k]) > 0);
 
+  // Most pieces exist as exactly one item per colour+size, so every combo
+  // starts at 1 instead of empty — the owner only edits the exceptions.
+  // Existing untracked products are left alone: filling them silently would
+  // switch stock tracking on behind the owner's back. "Fill all with 1"
+  // below covers those when wanted.
+  const wasUntracked = useRef(!isNew && Object.keys(initial.variants || {}).length === 0);
+  useEffect(() => {
+    if (wasUntracked.current) return;
+    setF((p) => {
+      const next = { ...p.variants };
+      let changed = false;
+      for (const c of p.colors) {
+        for (const s of p.sizes) {
+          const key = `${c}|${s}`;
+          if (next[key] === undefined) { next[key] = 1; changed = true; }
+        }
+      }
+      return changed ? { ...p, variants: next } : p;
+    });
+  }, [f.colors, f.sizes]); // eslint-disable-line
+
+  const fillAllWithOne = () => {
+    wasUntracked.current = false;
+    setF((p) => {
+      const next = {};
+      for (const c of p.colors) for (const s of p.sizes) next[`${c}|${s}`] = 1;
+      return { ...p, variants: next };
+    });
+  };
+
   const save = async () => {
     if (!f.name.trim()) { setError("Please enter a product name."); return; }
     setSaving(true);
@@ -854,8 +1021,10 @@ function ProductForm({ initial, isNew, onCancel, onSaved }) {
               placeholder="Add a size then press Enter" />
             <button onClick={() => { addSize(sizeInput); setSizeInput(""); }} className="glass rounded-xl px-4 tap-scale font-body text-sm">Add</button>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <button onClick={() => set("sizes", [...SIZE_PRESETS.clothing])} className="font-body text-xs text-muted hover:text-coral">Use S–XXL</button>
+            <span className="text-muted">·</span>
+            <button onClick={() => set("sizes", [...SIZE_PRESETS.pants])} className="font-body text-xs text-muted hover:text-coral">Use pants sizes 29–42</button>
             <span className="text-muted">·</span>
             <button onClick={() => set("sizes", [...SIZE_PRESETS.shoes])} className="font-body text-xs text-muted hover:text-coral">Use shoe sizes 40–45</button>
           </div>
@@ -941,9 +1110,13 @@ function ProductForm({ initial, isNew, onCancel, onSaved }) {
                     ? "Stock is tracked: sizes sell out on their own and orders reduce these numbers."
                     : "Leave all empty to keep this product always available (no stock tracking)."}
                 </p>
-                {trackingOn && (
+                {trackingOn ? (
                   <button onClick={clearStock} className="font-body text-xs text-muted hover:text-coral flex-shrink-0">
                     Stop tracking
+                  </button>
+                ) : (
+                  <button onClick={fillAllWithOne} className="font-body text-xs text-coral hover:opacity-80 flex-shrink-0">
+                    Fill all with 1
                   </button>
                 )}
               </div>

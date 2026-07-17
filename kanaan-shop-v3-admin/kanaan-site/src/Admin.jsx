@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
   Plus, Trash2, Pencil, X, Check, Upload, LogOut, ArrowLeft, Star, Loader2, ImageOff,
-  Package, ClipboardList, Phone, MapPin, Clock, CheckCircle2, XCircle, ChevronDown,
+  Package, ClipboardList, Phone, MapPin, Clock, CheckCircle2, XCircle, ChevronDown, AlertTriangle,
 } from "lucide-react";
 
 import { COLORS, COLOR_KEYS, groupedColors, swatchBackground, colorLabel } from "./palette.js";
@@ -12,11 +12,27 @@ const CATEGORIES = [
   { id: "shirts", label: "Shirts" },
   { id: "jeans", label: "Jeans" },
   { id: "pants", label: "Pants" },
-  { id: "sets", label: "Sets" },
   { id: "shorts", label: "Shorts" },
+  { id: "sets", label: "Sets" },
   { id: "underwear", label: "Underwear" },
   { id: "shoes", label: "Shoes" },
+  { id: "slippers", label: "Slippers" },
+  { id: "accessories", label: "Accessories" },
+  { id: "oldmoney", label: "Old Money Collection" },
 ];
+
+/* Fits — only these categories have them. */
+const SUBCATEGORIES = {
+  tshirts: [
+    { id: "oversized", label: "Oversized" },
+    { id: "regular", label: "Regular fit" },
+  ],
+  jeans: [
+    { id: "baggy", label: "Baggy" },
+    { id: "regular", label: "Regular" },
+  ],
+};
+const subsFor = (cat) => SUBCATEGORIES[cat] || [];
 
 const SIZE_PRESETS = {
   clothing: ["S", "M", "L", "XL", "XXL"],
@@ -26,7 +42,7 @@ const SIZE_PRESETS = {
 const money = (n) => `$${Number(n || 0).toFixed(0)}`;
 
 const emptyProduct = () => ({
-  name: "", category: "tshirts", price: "", colors: [], sizes: ["S", "M", "L", "XL"],
+  name: "", category: "tshirts", subcategory: "", price: "", colors: [], sizes: ["S", "M", "L", "XL"],
   description: "", badge: "", discount: 0, images: [], soldOut: false, active: true,
   variants: {},
 });
@@ -170,12 +186,23 @@ function Dashboard({ onExit, onLogout }) {
     onLogout();
   };
 
-  const remove = async (p) => {
-    if (!window.confirm(`Delete "${p.name}"? This cannot be undone.`)) return;
+  // Deleting is permanent and takes the photos with it, so it goes through
+  // a proper dialog rather than the browser's confirm box (which some phone
+  // browsers suppress entirely — the reason a tap could delete by accident).
+  const [pendingDelete, setPendingDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const confirmRemove = async () => {
+    const p = pendingDelete;
+    if (!p) return;
+    setDeleting(true);
     try {
       const r = await fetch(`/api/admin/products/${p.id}`, { method: "DELETE" });
       if (r.ok) setProducts((prev) => prev.filter((x) => x.id !== p.id));
-    } catch { /* ignore */ }
+      else window.alert("Could not delete that product. Please try again.");
+    } catch { window.alert("Network error. Please try again."); }
+    setDeleting(false);
+    setPendingDelete(null);
   };
 
   if (editing || creating) {
@@ -262,7 +289,7 @@ function Dashboard({ onExit, onLogout }) {
                       </div>
                     </div>
                     <button onClick={() => setEditing(p)} className="glass rounded-full p-2 tap-scale" aria-label="Edit"><Pencil className="w-4 h-4" /></button>
-                    <button onClick={() => remove(p)} className="glass rounded-full p-2 tap-scale" aria-label="Delete"><Trash2 className="w-4 h-4" style={{ color: "var(--coral)" }} /></button>
+                    <button onClick={() => setPendingDelete(p)} className="glass rounded-full p-2 tap-scale" aria-label="Delete"><Trash2 className="w-4 h-4" style={{ color: "var(--coral)" }} /></button>
                   </div>
                 );
               })}
@@ -272,6 +299,78 @@ function Dashboard({ onExit, onLogout }) {
       )}
 
       <DevSignature />
+
+      <ConfirmDialog
+        open={!!pendingDelete}
+        busy={deleting}
+        title="Delete this product?"
+        body={pendingDelete
+          ? `“${pendingDelete.name}” and its photos will be removed for good. This can't be undone.`
+          : ""}
+        confirmLabel="Yes, delete"
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={confirmRemove}
+      />
+    </div>
+  );
+}
+
+/* ============================================================
+   CONFIRM DIALOG
+   Used for anything destructive. Deliberately makes Cancel the
+   easy, obvious choice.
+   ============================================================ */
+function ConfirmDialog({ open, busy, title, body, confirmLabel, onCancel, onConfirm }) {
+  useEffect(() => {
+    if (!open) return;
+    const onEsc = (e) => { if (e.key === "Escape" && !busy) onCancel(); };
+    document.addEventListener("keydown", onEsc);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onEsc);
+      document.body.style.overflow = prev;
+    };
+  }, [open, busy, onCancel]);
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" role="dialog" aria-modal="true">
+      <div
+        className="absolute inset-0"
+        style={{ background: "rgba(8,8,12,0.6)", backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)" }}
+        onClick={() => !busy && onCancel()}
+      />
+      <div className="glass glass-sheen rounded-3xl p-6 relative w-full" style={{ maxWidth: 380, boxShadow: "0 24px 60px rgba(0,0,0,0.4)" }}>
+        <div className="flex items-start gap-3 mb-4">
+          <span className="rounded-full p-2 flex-shrink-0" style={{ background: "rgba(255,69,34,0.15)" }}>
+            <AlertTriangle className="w-5 h-5" style={{ color: "var(--coral)" }} />
+          </span>
+          <div>
+            <p className="font-display font-bold text-base mb-1">{title}</p>
+            <p className="font-body text-sm text-muted leading-6">{body}</p>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={onCancel}
+            disabled={busy}
+            className="flex-1 rounded-full font-body font-medium py-3 tap-scale"
+            style={{ background: "var(--glass-bg)", border: "1px solid var(--border)" }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={busy}
+            className="flex-1 rounded-full font-body font-medium py-3 tap-scale flex items-center justify-center gap-2"
+            style={{ background: "var(--coral)", color: "#fff" }}
+          >
+            {busy ? <Loader2 className="w-4 h-4 spin" /> : confirmLabel}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -339,9 +438,9 @@ function timeAgo(ts) {
 function OrdersTab({ orders, loading, reload }) {
   const [filter, setFilter] = useState("pending");
   const [busy, setBusy] = useState(null);
+  const [pendingCancel, setPendingCancel] = useState(null);
 
   const act = async (order, action) => {
-    if (action === "cancel" && !window.confirm(`Reject order #${order.id}? The stock goes back to your shop.`)) return;
     setBusy(order.id);
     try {
       const r = await fetch(`/api/admin/orders/${order.id}`, {
@@ -356,6 +455,7 @@ function OrdersTab({ orders, loading, reload }) {
       }
     } catch { window.alert("Network error."); }
     setBusy(null);
+    setPendingCancel(null);
   };
 
   const shown = filter === "all" ? orders : orders.filter((o) => o.status === filter);
@@ -432,7 +532,7 @@ function OrdersTab({ orders, loading, reload }) {
                       {busy === o.id ? <Loader2 className="w-4 h-4 spin" /> : <><CheckCircle2 className="w-4 h-4" /> Confirm</>}
                     </button>
                     <button
-                      onClick={() => act(o, "cancel")}
+                      onClick={() => setPendingCancel(o)}
                       disabled={busy === o.id}
                       className="flex-1 rounded-full font-body py-2.5 tap-scale flex items-center justify-center gap-2"
                       style={{ border: "1px solid var(--border)", color: "var(--coral)" }}
@@ -442,7 +542,7 @@ function OrdersTab({ orders, loading, reload }) {
                   </div>
                 ) : o.status === "confirmed" ? (
                   <button
-                    onClick={() => act(o, "cancel")}
+                    onClick={() => setPendingCancel(o)}
                     disabled={busy === o.id}
                     className="w-full rounded-full font-body text-sm py-2 tap-scale"
                     style={{ border: "1px solid var(--border)", color: "var(--fg-muted)" }}
@@ -458,6 +558,18 @@ function OrdersTab({ orders, loading, reload }) {
       <p className="font-body text-xs text-muted text-center mt-6">
         Pending orders hold stock for 24 hours, then release it automatically.
       </p>
+
+      <ConfirmDialog
+        open={!!pendingCancel}
+        busy={busy === pendingCancel?.id}
+        title={pendingCancel?.status === "confirmed" ? "Cancel this order?" : "Reject this order?"}
+        body={pendingCancel
+          ? `Order #${pendingCancel.id} from ${pendingCancel.name}. The stock goes straight back to your shop.`
+          : ""}
+        confirmLabel={pendingCancel?.status === "confirmed" ? "Yes, cancel it" : "Yes, reject"}
+        onCancel={() => setPendingCancel(null)}
+        onConfirm={() => act(pendingCancel, "cancel")}
+      />
     </div>
   );
 }
@@ -490,6 +602,7 @@ function ProductForm({ initial, isNew, onCancel, onSaved }) {
     ...emptyProduct(),
     ...initial,
     description: initial.description ?? initial.desc ?? "",
+    subcategory: initial.subcategory || "",
     images: normalizeImages(initial.images),
     variants: initial.variants || {},
   });
@@ -513,6 +626,14 @@ function ProductForm({ initial, isNew, onCancel, onSaved }) {
   const fileRef = useRef(null);
 
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+
+  // Changing category drops a fit that doesn't exist there (a Baggy
+  // T-Shirt shouldn't survive a switch from Jeans).
+  const pickCategory = (cat) =>
+    setF((p) => {
+      const stillValid = subsFor(cat).some((sb) => sb.id === p.subcategory);
+      return { ...p, category: cat, subcategory: stillValid ? p.subcategory : "" };
+    });
 
   const toggleColor = (key) =>
     setF((p) => ({ ...p, colors: p.colors.includes(key) ? p.colors.filter((c) => c !== key) : [...p.colors, key] }));
@@ -589,7 +710,7 @@ function ProductForm({ initial, isNew, onCancel, onSaved }) {
     }
 
     const payload = {
-      name: f.name, category: f.category, price: f.price, colors: f.colors, sizes: f.sizes,
+      name: f.name, category: f.category, subcategory: f.subcategory || "", price: f.price, colors: f.colors, sizes: f.sizes,
       description: f.description, badge: f.badge, discount: f.discount, images: f.images,
       soldOut: !!f.soldOut, active: f.active !== false, variants: validVariants,
     };
@@ -632,7 +753,7 @@ function ProductForm({ initial, isNew, onCancel, onSaved }) {
 
         <div className="grid grid-cols-2 gap-4">
           <Group label="Category">
-            <select className="a-field" value={f.category} onChange={(e) => set("category", e.target.value)}>
+            <select className="a-field" value={f.category} onChange={(e) => pickCategory(e.target.value)}>
               {CATEGORIES.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
             </select>
           </Group>
@@ -640,6 +761,29 @@ function ProductForm({ initial, isNew, onCancel, onSaved }) {
             <input className="a-field" type="number" inputMode="numeric" value={f.price} onChange={(e) => set("price", e.target.value)} placeholder="0" />
           </Group>
         </div>
+
+        {/* Fit — only shown for the categories that have one. */}
+        {subsFor(f.category).length > 0 && (
+          <Group label="Fit">
+            <div className="flex gap-2 flex-wrap">
+              {[{ id: "", label: "Not specified" }, ...subsFor(f.category)].map((sb) => (
+                <button
+                  key={sb.id || "none"}
+                  onClick={() => set("subcategory", sb.id)}
+                  className="font-body text-sm px-4 py-2 rounded-full tap-scale"
+                  style={(f.subcategory || "") === sb.id
+                    ? { background: "var(--fg)", color: "var(--bg)" }
+                    : { background: "var(--glass-bg)", border: "1px solid var(--border)" }}
+                >
+                  {sb.label}
+                </button>
+              ))}
+            </div>
+            <p className="font-body text-xs text-muted mt-1.5">
+              Shoppers can filter by this on the {CATEGORIES.find((c) => c.id === f.category)?.label} page.
+            </p>
+          </Group>
+        )}
 
         {/* Images */}
         <Group label="Photos (first one is the main image)">

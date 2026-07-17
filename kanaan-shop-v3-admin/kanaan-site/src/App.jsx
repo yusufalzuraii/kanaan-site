@@ -147,6 +147,18 @@ function AppProvider({ children }) {
     }
   }, []);
 
+  // Keep the browser's own chrome (status bar / address bar tint on
+  // Android) matching whichever theme the person picked, instead of
+  // leaving it on the light default from index.html.
+  useEffect(() => {
+    try {
+      const meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.setAttribute("content", theme === "dark" ? "#0B0B0E" : "#F2F2F4");
+    } catch (e) {
+      /* ignore */
+    }
+  }, [theme]);
+
   return <AppContext.Provider value={{ theme, setTheme, reducedMotion }}>{children}</AppContext.Provider>;
 }
 
@@ -1658,6 +1670,7 @@ function GlobalStyles() {
   return (
     <style>{`
       [data-theme="dark"] {
+        color-scheme: dark;
         --bg: #0B0B0E;
         --bg-soft: #101014;
         --fg: #F5F5F7;
@@ -1670,6 +1683,7 @@ function GlobalStyles() {
         --logo-filter: invert(1) brightness(1.1);
       }
       [data-theme="light"] {
+        color-scheme: light;
         --bg: #F2F2F4;
         --bg-soft: #FFFFFF;
         --fg: #14141A;
@@ -1774,7 +1788,7 @@ function GlobalStyles() {
       .hero-fade-3 { animation: fadeUp 0.8s cubic-bezier(0.16,1,0.3,1) 0.22s both; }
       .hero-fade-4 { animation: fadeUp 0.8s cubic-bezier(0.16,1,0.3,1) 0.34s both; }
 
-      @keyframes dockIn { from { opacity: 0; transform: translate(-50%, 20px); } to { opacity: 1; transform: translate(-50%, 0); } }
+      @keyframes dockIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
       .dock-in { animation: dockIn 0.5s cubic-bezier(0.16,1,0.3,1) both; }
 
       /* Search overlay */
@@ -2407,8 +2421,15 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
         </div>
       )}
 
-      <div className="fixed bottom-4 left-1/2 z-30 dock-in sm:hidden" style={{ width: "calc(100% - 24px)", maxWidth: 420 }}>
-        <div className="glass rounded-2xl px-4 py-3 flex items-center gap-3">
+      {/* Centering (translateX) is a static inline style, independent of the
+          entrance animation on the inner wrapper. Previously the -50% shift
+          only existed inside the dockIn keyframes' fill-mode — so on any
+          device/browser that disables animations (reduced-motion settings,
+          some Android battery-saver modes, etc.) the whole bar lost its
+          transform and got pushed half off-screen, hiding Add to cart
+          entirely. This is what happened on the Samsung Internet browser. */}
+      <div className="fixed bottom-4 left-1/2 z-30 sm:hidden" style={{ transform: "translateX(-50%)", width: "calc(100% - 24px)", maxWidth: 420 }}>
+        <div className="glass rounded-2xl px-4 py-3 flex items-center gap-3 dock-in">
           <div className="flex-1 min-w-0">
             <p className="font-body text-xs text-muted truncate">{product.name}</p>
             <p className="font-num text-base">{outOfStock ? "Sold out" : money(effectivePrice(product))}</p>

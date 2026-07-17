@@ -4,6 +4,16 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <!-- Some Android browsers (Samsung Internet's "Dark mode for websites",
+         Chrome's auto-dark heuristic) apply their own dark filter on top of
+         any page that doesn't explicitly declare which colour schemes it
+         supports — even when the site has its own light/dark toggle and the
+         person picked light. This tells the browser the page is themed
+         itself, so it leaves our colours alone. The default here is "light"
+         because that's the app's default theme; the in-app toggle handles
+         the rest via the CSS rule below. -->
+    <meta name="color-scheme" content="light" />
+    <meta name="theme-color" content="#F2F2F4" />
     <!-- Fonts: preconnect + stylesheet here instead of a CSS @import inside
          the app bundle — the browser starts fetching them immediately with
          the page, not after JS parses. display=swap keeps text visible. -->

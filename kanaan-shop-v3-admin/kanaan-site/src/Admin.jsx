@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Plus, Trash2, Pencil, X, Check, Upload, LogOut, ArrowLeft, Star, Loader2, ImageOff,
   Package, ClipboardList, Phone, MapPin, Clock, CheckCircle2, XCircle, ChevronDown, AlertTriangle,

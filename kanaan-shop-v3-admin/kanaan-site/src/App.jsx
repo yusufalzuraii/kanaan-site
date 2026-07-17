@@ -1697,6 +1697,17 @@ function GlobalStyles() {
       }
       :root { --coral: #FF4522; --teal: #12B3A0; }
 
+      /* This site's light/dark mode is a manual toggle only, never tied to
+         the OS setting (see the header switch) — so this block doesn't
+         redefine any colours. Its only job is to make an actual
+         @media (prefers-color-scheme) rule exist in the stylesheet, because
+         some Android browsers use "does this page reference
+         prefers-color-scheme at all" as their signal for "this site already
+         handles its own dark mode, don't force one on top of it." */
+      @media (prefers-color-scheme: dark) {
+        html { color-scheme: light dark; }
+      }
+
       .font-display { font-family: 'Space Grotesk', sans-serif; }
       .font-body { font-family: 'Inter', sans-serif; }
       .font-num { font-family: 'Space Grotesk', sans-serif; }

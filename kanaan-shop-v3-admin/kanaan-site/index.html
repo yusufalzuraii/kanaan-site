@@ -11,9 +11,21 @@
          person picked light. This tells the browser the page is themed
          itself, so it leaves our colours alone. The default here is "light"
          because that's the app's default theme; the in-app toggle handles
-         the rest via the CSS rule below. -->
+         the rest via the CSS rule in App.jsx's GlobalStyles.
+
+         This is set on <html> itself, inline, so it's present from the very
+         first paint — before the JS bundle loads and React attaches
+         data-theme to anything. Belt and braces: some Android browsers
+         decide whether to force-dark a page early, before the app has had
+         a chance to mount. A bare @media query is also declared so any
+         browser that only checks for "does this page mention
+         prefers-color-scheme at all" sees that it does. -->
     <meta name="color-scheme" content="light" />
     <meta name="theme-color" content="#F2F2F4" />
+    <style>
+      html { color-scheme: light; background-color: #F2F2F4; }
+      @media (prefers-color-scheme: dark) { html { color-scheme: light dark; } }
+    </style>
     <!-- Fonts: preconnect + stylesheet here instead of a CSS @import inside
          the app bundle — the browser starts fetching them immediately with
          the page, not after JS parses. display=swap keeps text visible. -->

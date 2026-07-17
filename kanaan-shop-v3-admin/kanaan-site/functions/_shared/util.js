@@ -1,10 +1,38 @@
 /* Shared helpers for all API functions. */
 
-export const CATEGORY_IDS = ["tshirts", "shirts", "jeans", "pants", "sets", "shorts", "underwear", "shoes"];
+/* Categories, in the order they appear everywhere: tops, then bottoms,
+   then sets/underwear, then footwear, then accessories and the
+   Old Money edit last. */
+export const CATEGORY_IDS = [
+  "tshirts", "shirts", "jeans", "pants", "shorts",
+  "sets", "underwear", "shoes", "slippers", "accessories", "oldmoney",
+];
 export const CATEGORY_LABELS = {
   tshirts: "T-Shirts", shirts: "Shirts", jeans: "Jeans", pants: "Pants",
-  sets: "Sets", shorts: "Shorts", underwear: "Underwear", shoes: "Shoes",
+  shorts: "Shorts", sets: "Sets", underwear: "Underwear", shoes: "Shoes",
+  slippers: "Slippers", accessories: "Accessories", oldmoney: "Old Money Collection",
 };
+
+/* Sub-categories (fits). Only these two categories have them; everything
+   else just has an empty subcategory. */
+export const SUBCATEGORIES = {
+  tshirts: [
+    { id: "oversized", label: "Oversized" },
+    { id: "regular", label: "Regular fit" },
+  ],
+  jeans: [
+    { id: "baggy", label: "Baggy" },
+    { id: "regular", label: "Regular" },
+  ],
+};
+
+export function subcategoriesFor(category) {
+  return SUBCATEGORIES[category] || [];
+}
+
+export function isValidSub(category, sub) {
+  return subcategoriesFor(category).some((s) => s.id === sub);
+}
 
 /* Keep in sync with src/palette.js — never remove a key, products
    in the database point at these. */
@@ -34,9 +62,10 @@ export function slugify(str) {
 
 // Which placeholder icon a category uses when a product has no photo.
 export function iconForCategory(category) {
-  if (category === "shoes") return "shoe";
-  if (category === "shirts") return "shirt-button";
+  if (category === "shoes" || category === "slippers") return "shoe";
+  if (category === "shirts" || category === "oldmoney") return "shirt-button";
   if (category === "underwear") return "underwear";
+  if (category === "accessories") return "accessory";
   if (category === "jeans" || category === "pants" || category === "shorts") return "pants";
   return "shirt";
 }
@@ -112,6 +141,7 @@ export function rowToProduct(r) {
     slug: r.id,
     name: r.name,
     category: r.category,
+    subcategory: r.subcategory || "",
     price: Math.round(Number(r.price) || 0),
     colors: colors.length ? colors : ["black"],
     sizes: sizes.length ? sizes : ["One Size"],
@@ -134,6 +164,9 @@ export function payloadToRow(body) {
 
   const name = clean(body.name);
   const category = CATEGORY_IDS.includes(clean(body.category)) ? clean(body.category) : "tshirts";
+  // A fit only sticks if it's actually offered for this category.
+  const subRaw = clean(body.subcategory);
+  const subcategory = isValidSub(category, subRaw) ? subRaw : "";
   const price = Math.max(0, Math.round(Number(body.price) || 0));
   const colors = list(body.colors).filter((c) => COLOR_KEYS.includes(c));
   const sizes = list(body.sizes);
@@ -145,6 +178,7 @@ export function payloadToRow(body) {
   return {
     name,
     category,
+    subcategory,
     price,
     colors: colors.join(","),
     sizes: sizes.join(","),

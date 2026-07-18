@@ -18,7 +18,11 @@ const esc = (s) =>
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 
-import { parseImages } from "../_shared/util.js";
+// Safe to drop straight into a <script type="application/ld+json">: escapes
+// the one sequence that would otherwise break out of the tag early.
+const jsonLd = (obj) => JSON.stringify(obj).replace(/</g, "\\u003c");
+
+import { parseImages, CATEGORY_LABELS } from "../_shared/util.js";
 
 export async function onRequestGet(context) {
   const { request, env, params, next } = context;
@@ -40,7 +44,7 @@ export async function onRequestGet(context) {
   let row;
   try {
     row = await env.DB.prepare(
-      "SELECT id, name, description, images, price, badge, discount FROM products WHERE id = ? AND active = 1"
+      "SELECT id, name, category, description, images, price, badge, discount, sold_out, colors FROM products WHERE id = ? AND active = 1"
     ).bind(slug).first();
   } catch {
     return res;
@@ -50,10 +54,11 @@ export async function onRequestGet(context) {
   const origin = new URL(request.url).origin;
   const url = `${origin}/product/${row.id}`;
 
-  const firstImage = parseImages(row.images)[0]?.url || "";
-  const image = firstImage
-    ? (/^https?:\/\//i.test(firstImage) ? firstImage : `${origin}${firstImage.startsWith("/") ? "" : "/"}${firstImage}`)
-    : `${origin}/logo-full.png`;
+  const allImages = parseImages(row.images).map((im) => im.url).filter(Boolean);
+  const firstImage = allImages[0] || "";
+  const absolute = (u) => (u ? (/^https?:\/\//i.test(u) ? u : `${origin}${u.startsWith("/") ? "" : "/"}${u}`) : "");
+  const image = firstImage ? absolute(firstImage) : `${origin}/logo-full.png`;
+  const allImagesAbsolute = allImages.map(absolute);
 
   const price = Math.round(Number(row.price) || 0);
   const discount = row.badge === "sale" ? Number(row.discount) || 0 : 0;
@@ -63,6 +68,43 @@ export async function onRequestGet(context) {
   const descText =
     (row.description && String(row.description).replace(/\s+/g, " ").trim().slice(0, 200)) ||
     `${row.name} — available now at Kanaan Shop. Delivery all over Lebanon, cash on delivery.`;
+
+  // Whether stock tracking has this fully sold out isn't knowable from the
+  // products row alone (that lives in `variants`) — sold_out is the
+  // explicit owner override, which is what search results should reflect.
+  const availability = row.sold_out ? "https://schema.org/OutOfStock" : "https://schema.org/InStock";
+  const categoryLabel = CATEGORY_LABELS[row.category] || "Menswear";
+
+  const productLd = jsonLd({
+    "@context": "https://schema.org",
+    "@type": "Product",
+    name: row.name,
+    description: descText,
+    image: allImagesAbsolute.length ? allImagesAbsolute : [image],
+    sku: row.id,
+    category: categoryLabel,
+    brand: { "@type": "Brand", name: "Kanaan Shop" },
+    offers: {
+      "@type": "Offer",
+      url,
+      priceCurrency: "USD",
+      price: finalPrice,
+      availability,
+      itemCondition: "https://schema.org/NewCondition",
+      areaServed: { "@type": "Country", name: "Lebanon" },
+      seller: { "@type": "Organization", name: "Kanaan Shop" },
+    },
+  });
+
+  const breadcrumbLd = jsonLd({
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "Shop", item: `${origin}/shop` },
+      { "@type": "ListItem", position: 2, name: categoryLabel, item: `${origin}/shop/${row.category}` },
+      { "@type": "ListItem", position: 3, name: row.name, item: url },
+    ],
+  });
 
   const tags = `
     <title>${esc(title)}</title>
@@ -82,6 +124,8 @@ export async function onRequestGet(context) {
     <meta name="twitter:title" content="${esc(title)}" />
     <meta name="twitter:description" content="${esc(descText)}" />
     <meta name="twitter:image" content="${esc(image)}" />
+    <script type="application/ld+json">${productLd}</script>
+    <script type="application/ld+json">${breadcrumbLd}</script>
   `;
 
   let html = await res.text();

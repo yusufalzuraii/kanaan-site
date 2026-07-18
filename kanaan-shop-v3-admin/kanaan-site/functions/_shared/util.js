@@ -335,3 +335,70 @@ export function rowToOrder(r) {
     updatedAt: Number(r.updated_at) || 0,
   };
 }
+
+/* ============================================================
+   STORIES ("The Edit")
+   ------------------------------------------------------------
+   One DB row = one slide. Several rows sharing `ring_id` form one ring.
+   "Auto" rings (Sale / New In) aren't stored at all — they're computed
+   fresh from the live products table on every request, so they update
+   themselves and can never show a sold-out or stale item.
+   ============================================================ */
+
+export function rowToStorySlide(r) {
+  let tags = [];
+  try {
+    const parsed = JSON.parse(r.tags || "[]");
+    if (Array.isArray(parsed)) {
+      tags = parsed
+        .map((t) => ({
+          productId: String(t.productId || ""),
+          x: Math.max(2, Math.min(98, Number(t.x))),
+          y: Math.max(2, Math.min(98, Number(t.y))),
+        }))
+        .filter((t) => t.productId && Number.isFinite(t.x) && Number.isFinite(t.y));
+    }
+  } catch { /* keep empty */ }
+
+  return {
+    id: r.id,
+    ringId: r.ring_id,
+    ringTitle: r.ring_title || "",
+    ringType: r.ring_type === "compare" ? "compare" : "editorial",
+    pinned: !!r.pinned,
+    expiresAt: r.expires_at || null,
+    sortOrder: Number(r.sort_order) || 0,
+    kind: r.ring_type === "compare" ? "compare" : "image",
+    image: r.image || "",
+    imageB: r.image_b || "",
+    labelA: r.label_a || "",
+    labelB: r.label_b || "",
+    ctaCategory: r.cta_category || "",
+    ctaSubcategory: r.cta_subcategory || "",
+    caption: r.caption || "",
+    tags,
+    createdAt: Number(r.created_at) || 0,
+  };
+}
+
+// Group flat slide rows into rings, preserving the order rings were
+// first created in, and slide order within each ring.
+export function groupIntoRings(slides) {
+  const byRing = new Map();
+  for (const s of slides) {
+    if (!byRing.has(s.ringId)) {
+      byRing.set(s.ringId, {
+        id: s.ringId,
+        title: s.ringTitle,
+        kind: s.ringType, // 'editorial' | 'compare'
+        pinned: s.pinned,
+        expiresAt: s.expiresAt,
+        slides: [],
+      });
+    }
+    byRing.get(s.ringId).slides.push(s);
+  }
+  const rings = [...byRing.values()];
+  for (const r of rings) r.slides.sort((a, b) => a.sortOrder - b.sortOrder);
+  return rings.filter((r) => r.slides.length > 0);
+}

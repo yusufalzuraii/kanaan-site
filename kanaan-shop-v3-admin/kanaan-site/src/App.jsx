@@ -1508,6 +1508,7 @@ function KanaanShop() {
 
   const [products, setProducts] = useState([]);
   const [catalogLoading, setCatalogLoading] = useState(true);
+  const [storyRings, setStoryRings] = useState([]);
 
   useEffect(() => {
     let alive = true;
@@ -1518,6 +1519,18 @@ function KanaanShop() {
         if (alive && Array.isArray(data.products)) setProducts(data.products);
       } catch { /* offline or API not ready */ }
       if (alive) setCatalogLoading(false);
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const res = await fetch("/api/stories");
+        const data = await res.json();
+        if (alive && Array.isArray(data.rings)) setStoryRings(data.rings);
+      } catch { /* The Edit is a bonus feature — never block the shop on it */ }
     })();
     return () => { alive = false; };
   }, []);
@@ -1535,6 +1548,12 @@ function KanaanShop() {
   const toggleLike = (id) => setLikes((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
   const cartKey = (pid, size, colorKey) => `${pid}-${size}-${colorKey}`;
+
+  // Which ring "The Edit" viewer is showing, if any. Storing the ring id
+  // (not the object) means it always reflects the freshest fetched data.
+  const [openRingId, setOpenRingId] = useState(null);
+  const openStory = (ringId) => setOpenRingId(ringId);
+  const closeStory = () => setOpenRingId(null);
 
   // colorKey = the palette key we track stock against ("black")
   // colorLabel = what the shopper reads ("Black")
@@ -1603,7 +1622,7 @@ function KanaanShop() {
       <Header cartCount={cartCount} onHome={goHome} onCart={() => setCartOpen(true)} onSearch={() => setSearchOpen(true)} onSale={goSale} menuOpen={menuOpen} setMenuOpen={setMenuOpen} goCatalog={goCatalog} />
       <main>
         {route.type === "home" && (
-          <HomeView products={products} loading={catalogLoading} goCatalog={goCatalog} goSale={goSale} openProduct={openProduct} likes={likes} toggleLike={toggleLike} />
+          <HomeView products={products} loading={catalogLoading} goCatalog={goCatalog} goSale={goSale} openProduct={openProduct} likes={likes} toggleLike={toggleLike} storyRings={storyRings} openStory={openStory} />
         )}
         {route.type === "sale" && (
           <SaleView products={products} loading={catalogLoading} goCatalog={goCatalog} openProduct={openProduct} likes={likes} toggleLike={toggleLike} />
@@ -1639,6 +1658,16 @@ function KanaanShop() {
         )}
         {route.type === "checkout" && orderPlaced && <ConfirmationView order={lastOrder} goHome={goHome} />}
       </main>
+
+      <StoryViewer
+        rings={storyRings}
+        openRingId={openRingId}
+        onClose={closeStory}
+        products={products}
+        addToCart={addToCart}
+        openProduct={(p) => { closeStory(); openProduct(p); }}
+        goCatalog={(cat, sub) => { closeStory(); goCatalog(cat, sub); }}
+      />
       <Footer goCatalog={goCatalog} goSale={goSale} />
       <WhatsAppFab raised={route.type === "product"} />
       <SearchOverlay
@@ -1827,6 +1856,32 @@ function GlobalStyles() {
         opacity: 0; animation: chipIn 0.5s ease 0.8s both;
       }
 
+      /* The Edit — story tag dot + compare-slide chip */
+      @keyframes tagPing {
+        0% { transform: translate(-50%,-50%) scale(0.6); opacity: 0.55; }
+        70%, 100% { transform: translate(-50%,-50%) scale(2.2); opacity: 0; }
+      }
+      .tag-dot-ping {
+        position: absolute; top: 50%; left: 50%; width: 22px; height: 22px;
+        border-radius: 9999px; background: rgba(255,255,255,0.9);
+        animation: tagPing 1.8s ease-out infinite;
+      }
+      .tag-dot {
+        position: absolute; top: 50%; left: 50%; width: 22px; height: 22px;
+        border-radius: 9999px; transform: translate(-50%,-50%);
+        background: rgba(255,255,255,0.95);
+        border: 1.5px solid rgba(0,0,0,0.15);
+        box-shadow: 0 2px 10px rgba(0,0,0,0.35);
+      }
+      .tag-dot::after {
+        content: ''; position: absolute; inset: 6px; border-radius: 9999px; background: var(--coral);
+      }
+      .a-story-chip {
+        display: inline-block; padding: 4px 12px; border-radius: 9999px; font-family: 'Inter', sans-serif;
+        font-size: 0.7rem; font-weight: 500; color: #fff; background: rgba(0,0,0,0.4);
+        backdrop-filter: blur(6px); border: 1px solid rgba(255,255,255,0.25);
+      }
+
       /* Sale card */
       @keyframes saleGlow {
         0%, 100% { transform: translate(-10%, -10%) scale(1); opacity: 0.55; }
@@ -1846,7 +1901,7 @@ function GlobalStyles() {
       .sale-card:hover { transform: translateY(-3px); border-color: rgba(255,69,34,0.9); }
 
       @media (prefers-reduced-motion: reduce) {
-        .mesh-blob, .hero-fade-1, .hero-fade-2, .hero-fade-3, .hero-fade-4, .dock-in, .fab-pulse, .search-fade, .search-rise, .sale-glow, .promise-divider { animation: none !important; }
+        .mesh-blob, .hero-fade-1, .hero-fade-2, .hero-fade-3, .hero-fade-4, .dock-in, .fab-pulse, .search-fade, .search-rise, .sale-glow, .promise-divider, .tag-dot-ping { animation: none !important; }
         .promise-chip { animation: none !important; opacity: 1 !important; }
         .promise-divider { opacity: 1 !important; }
       }
@@ -1949,7 +2004,413 @@ function Header({ cartCount, onHome, onCart, onSearch, onSale, menuOpen, setMenu
 /* ============================================================
    HOME
    ============================================================ */
-function HomeView({ products, loading, goCatalog, goSale, openProduct, likes, toggleLike }) {
+/* ============================================================
+   THE EDIT — story rail + full-screen viewer
+   ------------------------------------------------------------
+   Deliberately NOT an Instagram clone: tiles are 4:5 (the same ratio
+   as every product photo on the site, not circles), the ring colour
+   tells you what kind of content it is before you even tap, and the
+   viewer itself is a second storefront — every tagged garment can be
+   added to the cart without ever leaving the story.
+   ============================================================ */
+const RING_ACCENT = {
+  sale: { border: "var(--coral)", label: "coral" },
+  new: { border: "var(--teal)", label: "teal" },
+  compare: { border: "var(--teal)", label: "teal" },
+  editorial: { border: "var(--fg-muted)", label: "neutral" },
+};
+
+function StoryRail({ rings, onOpen }) {
+  return (
+    <section className="px-4 sm:px-6 pt-1 pb-3">
+      <div className="max-w-6xl mx-auto">
+        <div className="flex gap-3.5 overflow-x-auto pb-1" style={{ WebkitOverflowScrolling: "touch" }}>
+          {rings.map((ring, i) => (
+            <Reveal key={ring.id} delay={i * 60} className="flex-shrink-0">
+              <StoryTile ring={ring} onOpen={() => onOpen(ring.id)} />
+            </Reveal>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function StoryTile({ ring, onOpen }) {
+  const accent = RING_ACCENT[ring.kind] || RING_ACCENT.editorial;
+  const cover = ring.slides[0];
+  const [ok, setOk] = useState(true);
+
+  return (
+    <button onClick={onOpen} className="text-left tap-scale flex-shrink-0" style={{ width: 96 }}>
+      <div
+        className="relative rounded-2xl overflow-hidden"
+        style={{ aspectRatio: "4/5", border: `2px solid ${accent.border}`, padding: 3 }}
+      >
+        <div className="relative w-full h-full rounded-xl overflow-hidden" style={{ background: "#1A1A1E" }}>
+          {cover.kind === "compare" ? (
+            <div className="absolute inset-0 flex">
+              <div className="w-1/2 h-full overflow-hidden">{ok && <img src={cover.image} alt="" className="w-full h-full" style={{ objectFit: "cover" }} onError={() => setOk(false)} />}</div>
+              <div className="w-1/2 h-full overflow-hidden">{ok && <img src={cover.imageB} alt="" className="w-full h-full" style={{ objectFit: "cover" }} onError={() => setOk(false)} />}</div>
+            </div>
+          ) : ok ? (
+            <img src={cover.image} alt="" className="absolute inset-0 w-full h-full" style={{ objectFit: "cover" }} loading="lazy" onError={() => setOk(false)} />
+          ) : (
+            <div className="absolute inset-0 flex items-center justify-center"><Sparkles className="w-6 h-6" style={{ color: "rgba(255,255,255,0.4)" }} /></div>
+          )}
+          <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, transparent 50%, rgba(0,0,0,0.55))" }} />
+        </div>
+      </div>
+      <p className="font-body text-xs text-center mt-1.5 truncate">{ring.title}</p>
+    </button>
+  );
+}
+
+/* ---------- Full-screen viewer ---------- */
+const SLIDE_MS = 5000;
+
+function StoryViewer({ rings, openRingId, onClose, products, addToCart, openProduct, goCatalog }) {
+  const [ringIdx, setRingIdx] = useState(0);
+  const [slideIdx, setSlideIdx] = useState(0);
+  const [paused, setPaused] = useState(false);
+  const [activeTag, setActiveTag] = useState(null); // { productId } | null
+  const [progress, setProgress] = useState(0); // 0..1 within the current slide
+  const rafRef = useRef(null);
+  const startRef = useRef(0);
+  const pausedAtRef = useRef(0);
+  const touchStartY = useRef(null);
+  const touchStartX = useRef(null);
+
+  const openIdx = openRingId ? rings.findIndex((r) => r.id === openRingId) : -1;
+  const open = openIdx !== -1;
+
+  // Sync to whichever ring was requested.
+  useEffect(() => {
+    if (open) { setRingIdx(openIdx); setSlideIdx(0); setActiveTag(null); }
+  }, [openRingId]); // eslint-disable-line
+
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, [open]);
+
+  const ring = open ? rings[ringIdx] : null;
+  const slide = ring ? ring.slides[slideIdx] : null;
+
+  const goNextSlide = () => {
+    if (!ring) return;
+    if (slideIdx < ring.slides.length - 1) { setSlideIdx((i) => i + 1); setActiveTag(null); return; }
+    // last slide of this ring — roll into the next ring, or close.
+    if (ringIdx < rings.length - 1) { setRingIdx((i) => i + 1); setSlideIdx(0); setActiveTag(null); }
+    else onClose();
+  };
+  const goPrevSlide = () => {
+    if (!ring) return;
+    if (slideIdx > 0) { setSlideIdx((i) => i - 1); setActiveTag(null); return; }
+    if (ringIdx > 0) { const prevRing = rings[ringIdx - 1]; setRingIdx((i) => i - 1); setSlideIdx(prevRing.slides.length - 1); setActiveTag(null); }
+  };
+
+  // Auto-advance progress (rAF, pausable). A held tap or an open product
+  // sheet pauses it — nobody wants the story to run away while they're
+  // reading a price.
+  useEffect(() => {
+    if (!open || paused || activeTag) return;
+    setProgress(0);
+    startRef.current = performance.now();
+    const tick = (t) => {
+      const elapsed = t - startRef.current;
+      const p = Math.min(1, elapsed / SLIDE_MS);
+      setProgress(p);
+      if (p >= 1) { goNextSlide(); return; }
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [open, ringIdx, slideIdx, paused, activeTag]); // eslint-disable-line
+
+  const onKeyDown = (e) => {
+    if (e.key === "Escape") onClose();
+    if (e.key === "ArrowRight") goNextSlide();
+    if (e.key === "ArrowLeft") goPrevSlide();
+  };
+
+  const onTouchStart = (e) => { touchStartY.current = e.touches[0].clientY; touchStartX.current = e.touches[0].clientX; setPaused(true); };
+  const onTouchEnd = (e) => {
+    setPaused(false);
+    if (touchStartY.current == null) return;
+    const dy = e.changedTouches[0].clientY - touchStartY.current;
+    const dx = e.changedTouches[0].clientX - touchStartX.current;
+    if (dy > 80 && Math.abs(dx) < 60) { onClose(); return; } // swipe down closes
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) { dx < 0 ? goNextSlide() : goPrevSlide(); }
+  };
+
+  if (!open || !slide) return null;
+
+  const taggedProduct = activeTag ? products.find((p) => p.id === activeTag) : null;
+
+  return (
+    <div
+      className="fixed inset-0 z-[70] search-fade"
+      style={{ background: "#050505" }}
+      onKeyDown={onKeyDown}
+      tabIndex={-1}
+      ref={(el) => el?.focus()}
+    >
+      <div
+        className="relative w-full h-full mx-auto overflow-hidden"
+        style={{ maxWidth: 460 }}
+        onTouchStart={onTouchStart}
+        onTouchEnd={onTouchEnd}
+      >
+        <StorySlideView slide={slide} onTagTap={(pid) => { setActiveTag(pid); setPaused(true); }} />
+
+        {/* Progress bars — one segment per slide in the current ring */}
+        <div className="absolute top-3 left-3 right-3 flex gap-1.5 z-10">
+          {ring.slides.map((_, i) => (
+            <div key={i} className="flex-1 rounded-full overflow-hidden" style={{ height: 2.5, background: "rgba(255,255,255,0.28)" }}>
+              <div
+                className="h-full rounded-full"
+                style={{
+                  width: i < slideIdx ? "100%" : i === slideIdx ? `${progress * 100}%` : "0%",
+                  background: "#fff",
+                  transition: i === slideIdx ? "none" : "width 0.2s",
+                }}
+              />
+            </div>
+          ))}
+        </div>
+
+        {/* Header: ring title + close */}
+        <div className="absolute top-7 left-3 right-3 flex items-center justify-between z-10">
+          <div className="flex items-center gap-2">
+            <span className="font-body text-white text-sm font-medium" style={{ textShadow: "0 1px 4px rgba(0,0,0,0.5)" }}>{ring.title}</span>
+          </div>
+          <button onClick={onClose} className="rounded-full p-2 tap-scale" style={{ background: "rgba(0,0,0,0.35)" }} aria-label="Close">
+            <X className="w-4 h-4 text-white" />
+          </button>
+        </div>
+
+        {/* Tap zones for prev/next — kept below the tag layer via z-index */}
+        <button className="absolute top-0 left-0 h-full z-[5]" style={{ width: "35%" }} onClick={goPrevSlide} aria-label="Previous" />
+        <button className="absolute top-0 right-0 h-full z-[5]" style={{ width: "35%" }} onClick={goNextSlide} aria-label="Next" />
+
+        {/* Caption */}
+        {slide.caption && (
+          <div className="absolute left-4 right-4 z-10" style={{ bottom: taggedProduct ? "auto" : 84 }}>
+            <p className="font-body text-white text-sm" style={{ textShadow: "0 1px 6px rgba(0,0,0,0.6)" }}>{slide.caption}</p>
+          </div>
+        )}
+
+        {/* Complete the look — related pieces, shown whenever this slide has a tag */}
+        {slide.tags.length > 0 && !activeTag && (
+          <CompleteTheLook slide={slide} products={products} onPick={(pid) => { setActiveTag(pid); setPaused(true); }} />
+        )}
+
+        {/* Quick-add bottom sheet for the tapped product */}
+        {taggedProduct && (
+          <StoryQuickAdd
+            product={taggedProduct}
+            onClose={() => { setActiveTag(null); setPaused(false); }}
+            addToCart={addToCart}
+            openProduct={openProduct}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function StorySlideView({ slide, onTagTap }) {
+  if (slide.kind === "compare") return <CompareSlide slide={slide} />;
+  return (
+    <div className="absolute inset-0">
+      <img src={slide.image} alt="" className="absolute inset-0 w-full h-full" style={{ objectFit: "cover" }} />
+      <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, rgba(0,0,0,0.35) 0%, transparent 20%, transparent 60%, rgba(0,0,0,0.55) 100%)" }} />
+      {slide.tags.map((tag) => (
+        <TagDot key={tag.productId + tag.x + tag.y} tag={tag} onTap={() => onTagTap(tag.productId)} />
+      ))}
+    </div>
+  );
+}
+
+function TagDot({ tag, onTap }) {
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); onTap(); }}
+      className="absolute z-[6] tap-scale"
+      style={{ left: `${tag.x}%`, top: `${tag.y}%`, transform: "translate(-50%, -50%)" }}
+      aria-label="Shop this piece"
+    >
+      <span className="tag-dot-ping" aria-hidden="true" />
+      <span className="tag-dot" aria-hidden="true" />
+    </button>
+  );
+}
+
+/* Comparison slide: drag the vertical handle to reveal Oversized vs Regular
+   (or Baggy vs Regular) on the same garment — the one thing here nobody
+   else can build, since it needs the fit/subcategory data this shop already
+   tracks. */
+function CompareSlide({ slide }) {
+  const [pos, setPos] = useState(50); // 0..100, % revealed of image B from the right
+  const wrapRef = useRef(null);
+  const dragging = useRef(false);
+
+  const setFromClientX = (clientX) => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const pct = ((clientX - rect.left) / rect.width) * 100;
+    setPos(Math.max(6, Math.min(94, pct)));
+  };
+
+  return (
+    <div
+      ref={wrapRef}
+      className="absolute inset-0 select-none"
+      onMouseDown={(e) => { dragging.current = true; setFromClientX(e.clientX); }}
+      onMouseMove={(e) => { if (dragging.current) setFromClientX(e.clientX); }}
+      onMouseUp={() => { dragging.current = false; }}
+      onMouseLeave={() => { dragging.current = false; }}
+      onTouchMove={(e) => setFromClientX(e.touches[0].clientX)}
+    >
+      <img src={slide.image} alt={slide.labelA} className="absolute inset-0 w-full h-full" style={{ objectFit: "cover" }} draggable={false} />
+      <div className="absolute inset-0" style={{ clipPath: `inset(0 0 0 ${pos}%)` }}>
+        <img src={slide.imageB} alt={slide.labelB} className="absolute inset-0 w-full h-full" style={{ objectFit: "cover" }} draggable={false} />
+      </div>
+      <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, rgba(0,0,0,0.3) 0%, transparent 25%, transparent 65%, rgba(0,0,0,0.5) 100%)" }} />
+
+      {/* Handle */}
+      <div className="absolute top-0 bottom-0 z-[6]" style={{ left: `${pos}%`, transform: "translateX(-50%)", width: 2, background: "rgba(255,255,255,0.85)" }}>
+        <div
+          className="absolute top-1/2 left-1/2 rounded-full flex items-center justify-center"
+          style={{ width: 40, height: 40, transform: "translate(-50%,-50%)", background: "rgba(255,255,255,0.95)", boxShadow: "0 4px 14px rgba(0,0,0,0.35)" }}
+        >
+          <span style={{ fontSize: 14 }}>↔</span>
+        </div>
+      </div>
+
+      {/* Labels */}
+      <div className="absolute top-16 left-4 z-[6]"><span className="a-story-chip">{slide.labelA}</span></div>
+      <div className="absolute top-16 right-4 z-[6]"><span className="a-story-chip">{slide.labelB}</span></div>
+
+      {slide.ctaCategory && (
+        <div className="absolute left-4 right-4 z-[6] flex gap-2" style={{ bottom: 84 }}>
+          <a href={`/shop/${slide.ctaCategory}${slide.ctaSubcategory ? `/${slide.ctaSubcategory}` : ""}`} className="flex-1 text-center rounded-full font-body text-xs py-2.5 tap-scale" style={{ background: "rgba(255,255,255,0.16)", backdropFilter: "blur(8px)", color: "#fff", border: "1px solid rgba(255,255,255,0.3)" }}>
+            Shop {slide.labelA}
+          </a>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Small strip suggesting nearby pieces so the story keeps the shopping
+// going, not just a single pop-up sheet.
+function CompleteTheLook({ slide, products, onPick }) {
+  const tagged = slide.tags.map((t) => products.find((p) => p.id === t.productId)).filter(Boolean);
+  if (tagged.length === 0) return null;
+  const category = tagged[0].category;
+  const excludeIds = new Set(tagged.map((p) => p.id));
+  const more = products.filter((p) => p.category === category && !excludeIds.has(p.id)).slice(0, 4);
+  const strip = [...tagged, ...more].slice(0, 5);
+
+  return (
+    <div className="absolute left-0 right-0 z-[6] px-4" style={{ bottom: 20 }}>
+      <p className="font-body text-white text-xs mb-2" style={{ opacity: 0.85, textShadow: "0 1px 4px rgba(0,0,0,0.5)" }}>Shop this look</p>
+      <div className="flex gap-2 overflow-x-auto pb-1" style={{ WebkitOverflowScrolling: "touch" }}>
+        {strip.map((p) => (
+          <button key={p.id} onClick={(e) => { e.stopPropagation(); onPick(p.id); }} className="flex-shrink-0 rounded-xl overflow-hidden tap-scale" style={{ width: 52, height: 65, border: "1.5px solid rgba(255,255,255,0.5)" }}>
+            {p.images?.[0]?.url ? (
+              <img src={p.images[0].url} alt="" className="w-full h-full" style={{ objectFit: "cover" }} />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center" style={{ background: "#222" }}><Shirt className="w-4 h-4 text-white" style={{ opacity: 0.5 }} /></div>
+            )}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Bottom sheet: colour/size/qty/Add to cart, without leaving the story.
+function StoryQuickAdd({ product, onClose, addToCart, openProduct }) {
+  const [color, setColor] = useState(() => product.colors.find((c) => colorHasStock(product, c)) || product.colors[0]);
+  const [size, setSize] = useState(() => product.sizes.find((s) => stockFor(product, color, s) > 0) || product.sizes[0]);
+  const [added, setAdded] = useState(false);
+
+  useEffect(() => {
+    if (stockFor(product, color, size) <= 0) {
+      const s = product.sizes.find((sz) => stockFor(product, color, sz) > 0);
+      if (s) setSize(s);
+    }
+  }, [color]); // eslint-disable-line
+
+  const available = stockFor(product, color, size);
+  const outOfStock = product.soldOut || !productHasStock(product);
+  const canAdd = !outOfStock && available > 0;
+
+  const handleAdd = () => {
+    if (!canAdd) return;
+    addToCart(product, size, color, COLORS[color]?.label || color, 1);
+    setAdded(true);
+    setTimeout(() => setAdded(false), 1400);
+  };
+
+  return (
+    <div className="absolute inset-x-0 bottom-0 z-20 search-rise" onClick={(e) => e.stopPropagation()}>
+      <div className="glass rounded-t-3xl px-4 pt-4 pb-5" style={{ background: "rgba(20,20,24,0.88)", backdropFilter: "blur(20px)", borderColor: "rgba(255,255,255,0.14)" }}>
+        <div className="flex justify-center mb-3"><span style={{ width: 36, height: 4, borderRadius: 4, background: "rgba(255,255,255,0.25)" }} /></div>
+        <div className="flex items-center gap-3 mb-3">
+          {product.images?.[0]?.url && (
+            <img src={product.images[0].url} alt="" className="rounded-xl flex-shrink-0" style={{ width: 52, height: 65, objectFit: "cover" }} />
+          )}
+          <div className="flex-1 min-w-0">
+            <p className="font-body text-white text-sm font-medium truncate">{product.name}</p>
+            <p className="font-num text-white text-base">{money(effectivePrice(product))}
+              {product.discount > 0 && <span className="font-num text-xs ml-2" style={{ color: "rgba(255,255,255,0.5)", textDecoration: "line-through" }}>{money(product.price)}</span>}
+            </p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-full tap-scale flex-shrink-0" style={{ background: "rgba(255,255,255,0.1)" }} aria-label="Close"><X className="w-3.5 h-3.5 text-white" /></button>
+        </div>
+
+        <div className="flex gap-1.5 mb-3 flex-wrap">
+          {product.colors.map((c) => {
+            const inStock = colorHasStock(product, c);
+            return (
+              <button key={c} onClick={() => inStock && setColor(c)} disabled={!inStock} className="rounded-full tap-scale" style={{ width: 26, height: 26, border: color === c ? "2px solid #fff" : "1px solid rgba(255,255,255,0.3)", opacity: inStock ? 1 : 0.3 }}>
+                <span className="block w-full h-full rounded-full" style={{ background: swatchBackground(c) }} />
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex gap-1.5 mb-4 flex-wrap">
+          {product.sizes.map((s) => {
+            const inStock = stockFor(product, color, s) > 0;
+            return (
+              <button key={s} onClick={() => inStock && setSize(s)} disabled={!inStock} className="font-num text-xs px-3 py-1.5 rounded-full tap-scale" style={size === s ? { background: "#fff", color: "#111" } : { background: "rgba(255,255,255,0.1)", color: "#fff", opacity: inStock ? 1 : 0.35, textDecoration: inStock ? "none" : "line-through" }}>
+                {s}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="flex gap-2">
+          <button onClick={() => openProduct(product)} className="rounded-full font-body text-sm px-4 py-3 tap-scale" style={{ border: "1px solid rgba(255,255,255,0.3)", color: "#fff" }}>
+            View
+          </button>
+          <button onClick={handleAdd} disabled={!canAdd} className="flex-1 rounded-full font-body font-medium text-sm py-3 tap-scale flex items-center justify-center gap-2" style={{ background: canAdd ? "var(--coral)" : "rgba(255,255,255,0.15)", color: "#fff", opacity: canAdd ? 1 : 0.6 }}>
+            {added ? <><Check className="w-4 h-4" /> Added</> : outOfStock || !canAdd ? "Out of stock" : <><ShoppingCart className="w-4 h-4" /> Add to cart</>}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HomeView({ products, loading, goCatalog, goSale, openProduct, likes, toggleLike, storyRings, openStory }) {
   useEffect(() => {
     document.title = `${STORE_NAME} — Menswear from Saida, Lebanon`;
   }, []);
@@ -2007,6 +2468,8 @@ function HomeView({ products, loading, goCatalog, goSale, openProduct, likes, to
           </div>
         </div>
       </section>
+
+      {storyRings.length > 0 && <StoryRail rings={storyRings} onOpen={openStory} />}
 
       <section className="max-w-6xl mx-auto px-4 sm:px-6 py-10">
         <div className="grid grid-cols-2 lg:grid-cols-4 lg:grid-rows-2 gap-4">

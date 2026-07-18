@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Plus, Trash2, Pencil, X, Check, Upload, LogOut, ArrowLeft, Star, Loader2, ImageOff,
   Package, ClipboardList, Phone, MapPin, Clock, CheckCircle2, XCircle, ChevronDown, AlertTriangle,
+  Sparkles, Image as ImageIcon, GripVertical, Pin, Layers,
 } from "lucide-react";
 
 import { COLORS, COLOR_KEYS, groupedColors, swatchBackground, colorLabel } from "./palette.js";
@@ -177,8 +178,8 @@ function Dashboard({ onExit, onLogout }) {
   };
 
   useEffect(() => {
-    if (tab === "products") load();
-    else loadOrders();
+    if (tab === "orders") loadOrders();
+    else load(); // Stories tab needs the product list too, for tagging.
   }, [tab]); // eslint-disable-line
 
   const pendingCount = orders.filter((o) => o.status === "pending").length;
@@ -251,9 +252,18 @@ function Dashboard({ onExit, onLogout }) {
             </span>
           )}
         </button>
+        <button
+          onClick={() => setTab("stories")}
+          className="flex-1 rounded-full py-2 font-body text-sm tap-scale flex items-center justify-center gap-2"
+          style={tab === "stories" ? { background: "var(--fg)", color: "var(--bg)" } : { color: "var(--fg-muted)" }}
+        >
+          <Sparkles className="w-4 h-4" /> The Edit
+        </button>
       </div>
 
-      {tab === "orders" ? (
+      {tab === "stories" ? (
+        <StoriesTab products={products} onLogout={onLogout} />
+      ) : tab === "orders" ? (
         <OrdersTab orders={orders} loading={loading} reload={loadOrders} />
       ) : (
         <>
@@ -347,6 +357,478 @@ function ConfirmDialog({ open, busy, title, body, confirmLabel, onCancel, onConf
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   STORIES TAB — "The Edit"
+   ------------------------------------------------------------
+   Two ways in: quick "Find your fit" comparison ring (two photos,
+   side by side), or a regular editorial ring (a lookbook / behind
+   the scenes moment) where each photo can be tagged with the
+   products it's showing — tap the photo to drop a pin, then pick
+   which product that pin points to.
+   ============================================================ */
+const RING_TYPE_META = {
+  editorial: { icon: Sparkles, label: "Editorial" },
+  compare: { icon: Layers, label: "Find your fit" },
+};
+
+function StoriesTab({ products, onLogout }) {
+  const [rings, setRings] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(null); // 'editorial' | 'compare' | null
+  const [managingRing, setManagingRing] = useState(null); // ring object | null
+  const [pendingDeleteRing, setPendingDeleteRing] = useState(null);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await fetch("/api/admin/stories");
+      if (r.status === 401) { onLogout(); return; }
+      const d = await r.json();
+      setRings(Array.isArray(d.rings) ? d.rings : []);
+    } catch { /* ignore */ }
+    setLoading(false);
+  };
+  useEffect(() => { load(); }, []); // eslint-disable-line
+
+  const deleteRing = async () => {
+    if (!pendingDeleteRing) return;
+    try {
+      await fetch("/api/admin/stories", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "deleteRing", ringId: pendingDeleteRing.id }),
+      });
+    } catch { /* ignore */ }
+    setPendingDeleteRing(null);
+    load();
+  };
+
+  if (creating) {
+    return (
+      <StoryRingEditor
+        products={products}
+        ringType={creating}
+        onCancel={() => setCreating(null)}
+        onSaved={() => { setCreating(null); load(); }}
+      />
+    );
+  }
+  if (managingRing) {
+    return (
+      <StoryRingEditor
+        products={products}
+        ringType={managingRing.kind}
+        existingRing={managingRing}
+        onCancel={() => setManagingRing(null)}
+        onSaved={() => { setManagingRing(null); load(); }}
+      />
+    );
+  }
+
+  return (
+    <div>
+      <p className="font-body text-sm text-muted mb-4 leading-6">
+        "The Edit" is the story rail on your homepage. <strong style={{ color: "var(--fg)" }}>On Sale</strong> and{" "}
+        <strong style={{ color: "var(--fg)" }}>New In</strong> build themselves from your products — nothing to manage.
+        Add editorial moments or fit comparisons below.
+      </p>
+
+      <div className="grid grid-cols-2 gap-3 mb-6">
+        <button
+          onClick={() => setCreating("editorial")}
+          className="glass-btn rounded-2xl py-4 tap-scale flex flex-col items-center gap-2"
+          style={{ background: "var(--coral)", color: "#fff" }}
+        >
+          <Sparkles className="w-5 h-5" />
+          <span className="font-body text-sm font-medium">New editorial</span>
+        </button>
+        <button
+          onClick={() => setCreating("compare")}
+          className="glass rounded-2xl py-4 tap-scale flex flex-col items-center gap-2"
+        >
+          <Layers className="w-5 h-5" />
+          <span className="font-body text-sm font-medium">New fit comparison</span>
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 spin text-muted" /></div>
+      ) : rings.length === 0 ? (
+        <p className="font-body text-muted text-center py-12">No editorial stories yet — add your first one above.</p>
+      ) : (
+        <div className="space-y-3">
+          {rings.map((ring) => {
+            const meta = RING_TYPE_META[ring.kind] || RING_TYPE_META.editorial;
+            const Icon = meta.icon;
+            const cover = ring.slides[0];
+            return (
+              <div key={ring.id} className="glass rounded-2xl p-3 flex items-center gap-3">
+                <div className="rounded-xl overflow-hidden flex-shrink-0" style={{ width: 52, height: 65, background: "#1A1A1E" }}>
+                  {cover?.image && <img src={cover.image} alt="" className="w-full h-full" style={{ objectFit: "cover" }} />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-body font-medium text-sm truncate">{ring.title}</p>
+                  <p className="font-body text-xs text-muted flex items-center gap-1.5">
+                    <Icon className="w-3 h-3" /> {meta.label} · {ring.slides.length} {ring.slides.length === 1 ? "slide" : "slides"}
+                    {ring.pinned ? (
+                      <span className="inline-flex items-center gap-0.5"><Pin className="w-3 h-3" /> Pinned</span>
+                    ) : ring.expiresAt ? (
+                      <span style={{ color: ring.expiresAt < Date.now() ? "var(--coral)" : undefined }}>
+                        {ring.expiresAt < Date.now() ? "Expired" : `Expires ${new Date(ring.expiresAt).toLocaleDateString()}`}
+                      </span>
+                    ) : null}
+                  </p>
+                </div>
+                <button onClick={() => setManagingRing(ring)} className="glass rounded-full p-2 tap-scale" aria-label="Manage"><Pencil className="w-4 h-4" /></button>
+                <button onClick={() => setPendingDeleteRing(ring)} className="glass rounded-full p-2 tap-scale" aria-label="Delete"><Trash2 className="w-4 h-4" style={{ color: "var(--coral)" }} /></button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={!!pendingDeleteRing}
+        title="Delete this story?"
+        body={pendingDeleteRing ? `“${pendingDeleteRing.title}” and all its photos will be removed for good.` : ""}
+        confirmLabel="Yes, delete"
+        onCancel={() => setPendingDeleteRing(null)}
+        onConfirm={deleteRing}
+      />
+    </div>
+  );
+}
+
+// Searchable product picker used when assigning a tag to a spot on a photo.
+function ProductPicker({ products, onPick, onClose }) {
+  const [q, setQ] = useState("");
+  const query = q.trim().toLowerCase();
+  const results = query
+    ? products.filter((p) => p.name.toLowerCase().includes(query)).slice(0, 30)
+    : products.slice(0, 30);
+
+  return (
+    <div className="absolute inset-0 z-30 flex items-end justify-center" style={{ background: "rgba(0,0,0,0.5)" }} onClick={onClose}>
+      <div className="glass rounded-t-3xl w-full p-4" style={{ maxHeight: "70%", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3">
+          <p className="font-body font-medium text-sm">Which product is this?</p>
+          <button onClick={onClose} className="p-1 tap-scale text-muted"><X className="w-4 h-4" /></button>
+        </div>
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search products…" className="a-field mb-3" autoFocus />
+        <div className="space-y-2">
+          {results.map((p) => (
+            <button key={p.id} onClick={() => onPick(p.id)} className="w-full flex items-center gap-3 p-2 rounded-xl tap-scale text-left" style={{ background: "var(--glass-bg)" }}>
+              <Thumb src={p.image} />
+              <span className="flex-1 min-w-0">
+                <span className="block font-body text-sm truncate">{p.name}</span>
+                <span className="block font-body text-xs text-muted">{money(p.price)}</span>
+              </span>
+            </button>
+          ))}
+          {results.length === 0 && <p className="font-body text-xs text-muted text-center py-6">No products match.</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// One editable photo: click to drop a tag pin, tap an existing pin to
+// reassign or remove it.
+function TaggableImage({ image, tags, onChangeTags, products }) {
+  const imgRef = useRef(null);
+  const [placing, setPlacing] = useState(null); // { x, y } while choosing a product
+  const [editingIdx, setEditingIdx] = useState(null);
+
+  const onImageClick = (e) => {
+    if (!imgRef.current) return;
+    const rect = imgRef.current.getBoundingClientRect();
+    const x = Math.round(((e.clientX - rect.left) / rect.width) * 100);
+    const y = Math.round(((e.clientY - rect.top) / rect.height) * 100);
+    setPlacing({ x, y });
+  };
+
+  const assign = (productId) => {
+    if (placing) {
+      onChangeTags([...tags, { productId, x: placing.x, y: placing.y }]);
+      setPlacing(null);
+    } else if (editingIdx != null) {
+      onChangeTags(tags.map((t, i) => (i === editingIdx ? { ...t, productId } : t)));
+      setEditingIdx(null);
+    }
+  };
+  const removeTag = (idx) => { onChangeTags(tags.filter((_, i) => i !== idx)); setEditingIdx(null); };
+
+  return (
+    <div className="relative rounded-2xl overflow-hidden" style={{ aspectRatio: "4/5", background: "#1A1A1E" }}>
+      {image ? (
+        <img ref={imgRef} src={image} alt="" className="absolute inset-0 w-full h-full cursor-crosshair" style={{ objectFit: "cover" }} onClick={onImageClick} />
+      ) : (
+        <div className="absolute inset-0 flex items-center justify-center"><ImageIcon className="w-8 h-8" style={{ color: "rgba(255,255,255,0.3)" }} /></div>
+      )}
+      {tags.map((t, i) => {
+        const p = products.find((pp) => pp.id === t.productId);
+        return (
+          <button
+            key={i}
+            onClick={(e) => { e.stopPropagation(); setEditingIdx(i); }}
+            className="absolute rounded-full flex items-center justify-center tap-scale"
+            style={{ left: `${t.x}%`, top: `${t.y}%`, transform: "translate(-50%,-50%)", width: 22, height: 22, background: "#fff", border: "2px solid var(--coral)" }}
+            title={p?.name || "Unknown product"}
+          >
+            <span style={{ width: 8, height: 8, borderRadius: 9999, background: "var(--coral)" }} />
+          </button>
+        );
+      })}
+      {image && (
+        <p className="absolute bottom-2 left-2 right-2 font-body text-center" style={{ fontSize: "0.65rem", color: "rgba(255,255,255,0.65)" }}>
+          Tap the photo to tag a piece
+        </p>
+      )}
+      {placing && <ProductPicker products={products} onPick={assign} onClose={() => setPlacing(null)} />}
+      {editingIdx != null && (
+        <div className="absolute inset-0 z-30 flex items-end justify-center" style={{ background: "rgba(0,0,0,0.5)" }} onClick={() => setEditingIdx(null)}>
+          <div className="glass rounded-t-3xl w-full p-4" onClick={(e) => e.stopPropagation()}>
+            <p className="font-body text-sm mb-3">
+              Tagged: <strong>{products.find((p) => p.id === tags[editingIdx]?.productId)?.name || "—"}</strong>
+            </p>
+            <div className="flex gap-2">
+              <button onClick={() => setPlacing({ x: tags[editingIdx].x, y: tags[editingIdx].y }) || setEditingIdx(null)} className="flex-1 rounded-full font-body text-sm py-2.5 tap-scale" style={{ border: "1px solid var(--border)" }}>
+                Change product
+              </button>
+              <button onClick={() => removeTag(editingIdx)} className="flex-1 rounded-full font-body text-sm py-2.5 tap-scale" style={{ background: "var(--coral)", color: "#fff" }}>
+                Remove tag
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Create OR manage (add slides to / edit settings of) one ring.
+function StoryRingEditor({ products, ringType, existingRing, onCancel, onSaved }) {
+  const isCompare = ringType === "compare";
+  const [ringTitle, setRingTitle] = useState(existingRing?.title || (isCompare ? "Find Your Fit" : ""));
+  const [pinned, setPinned] = useState(existingRing?.pinned !== false);
+  const [expiresInHours, setExpiresInHours] = useState(24);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const fileRef = useRef(null);
+  const fileBRef = useRef(null);
+  const [uploading, setUploading] = useState(false);
+
+  // New-slide draft (used both for the ring's first slide and for
+  // appending more slides to an existing ring).
+  const blankSlide = () => ({ image: "", imageB: "", labelA: "Oversized", labelB: "Regular", caption: "", ctaCategory: "", ctaSubcategory: "", tags: [] });
+  const [draft, setDraft] = useState(blankSlide());
+
+  const uploadOne = async (file, which) => {
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const r = await fetch("/api/admin/upload", { method: "POST", body: fd });
+      const d = await r.json();
+      if (r.ok && d.url) setDraft((p) => ({ ...p, [which]: d.url }));
+    } catch { /* ignore */ }
+    setUploading(false);
+  };
+
+  const addOrCreate = async () => {
+    if (!draft.image) { setError("Add a photo first."); return; }
+    if (isCompare && !draft.imageB) { setError("The comparison needs a second photo."); return; }
+    setError(""); setSaving(true);
+    try {
+      if (!existingRing) {
+        const r = await fetch("/api/admin/stories", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "createRing", ringTitle, ringType, pinned, expiresInHours, slide: draft }),
+        });
+        const d = await r.json();
+        if (!r.ok) { setError(d.error || "Something went wrong."); setSaving(false); return; }
+        onSaved();
+      } else {
+        const r = await fetch("/api/admin/stories", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "addSlide", ringId: existingRing.id, slide: draft }),
+        });
+        const d = await r.json();
+        if (!r.ok) { setError(d.error || "Something went wrong."); setSaving(false); return; }
+        setDraft(blankSlide());
+        onSaved();
+      }
+    } catch { setError("Network error."); }
+    setSaving(false);
+  };
+
+  const saveRingSettings = async () => {
+    if (!existingRing) return;
+    setSaving(true);
+    try {
+      await fetch("/api/admin/stories", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "updateRing", ringId: existingRing.id, ringTitle, pinned, expiresInHours }),
+      });
+      onSaved();
+    } catch { /* ignore */ }
+    setSaving(false);
+  };
+
+  const deleteSlide = async (slideId) => {
+    setSaving(true);
+    try {
+      await fetch("/api/admin/stories", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "deleteSlide", id: slideId }),
+      });
+      onSaved();
+    } catch { /* ignore */ }
+    setSaving(false);
+  };
+
+  return (
+    <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6">
+      <button onClick={onCancel} className="flex items-center gap-1.5 font-body text-sm text-muted hover:text-coral tap-scale mb-4">
+        <ArrowLeft className="w-4 h-4" /> Back to The Edit
+      </button>
+
+      <h1 className="font-display font-bold text-xl mb-1">
+        {existingRing ? existingRing.title : isCompare ? "New fit comparison" : "New editorial story"}
+      </h1>
+      <p className="font-body text-xs text-muted mb-5">
+        {isCompare
+          ? "Two photos of the same piece — the shopper drags to compare the fits."
+          : "A photo (or a few) with the pieces it's showing tagged directly on the image."}
+      </p>
+
+      {/* Existing slides, when managing a ring */}
+      {existingRing && (
+        <div className="mb-6">
+          <p className="font-body text-sm font-medium mb-2">Slides ({existingRing.slides.length})</p>
+          <div className="flex gap-3 overflow-x-auto pb-1">
+            {existingRing.slides.map((s) => (
+              <div key={s.id} className="relative flex-shrink-0" style={{ width: 90 }}>
+                <div className="rounded-xl overflow-hidden" style={{ aspectRatio: "4/5", background: "#1A1A1E" }}>
+                  {s.image && <img src={s.image} alt="" className="w-full h-full" style={{ objectFit: "cover" }} />}
+                </div>
+                <button onClick={() => deleteSlide(s.id)} className="absolute -top-1.5 -right-1.5 rounded-full p-1" style={{ background: "var(--coral)" }} aria-label="Delete slide">
+                  <X className="w-3 h-3" style={{ color: "#fff" }} />
+                </button>
+                {s.tags.length > 0 && (
+                  <span className="absolute bottom-1 left-1 a-chip" style={{ fontSize: "0.6rem", padding: "0 6px" }}>{s.tags.length} tagged</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Ring settings */}
+      <Group label="Story title">
+        <input className="a-field" value={ringTitle} onChange={(e) => setRingTitle(e.target.value)} placeholder={isCompare ? "Find Your Fit" : "Old Money Edit"} />
+      </Group>
+
+      <Group label="How long should it stay up?">
+        <div className="flex gap-2 flex-wrap">
+          <button onClick={() => setPinned(true)} className="font-body text-sm px-4 py-2 rounded-full tap-scale flex items-center gap-1.5" style={pinned ? { background: "var(--fg)", color: "var(--bg)" } : { background: "var(--glass-bg)", border: "1px solid var(--border)" }}>
+            <Pin className="w-3.5 h-3.5" /> Pinned (until you remove it)
+          </button>
+          <button onClick={() => setPinned(false)} className="font-body text-sm px-4 py-2 rounded-full tap-scale" style={!pinned ? { background: "var(--fg)", color: "var(--bg)" } : { background: "var(--glass-bg)", border: "1px solid var(--border)" }}>
+            Limited time
+          </button>
+        </div>
+        {!pinned && (
+          <div className="flex gap-2 mt-2">
+            {[24, 48, 72].map((h) => (
+              <button key={h} onClick={() => setExpiresInHours(h)} className="font-num text-xs px-3 py-1.5 rounded-full tap-scale" style={expiresInHours === h ? { background: "var(--coral)", color: "#fff" } : { background: "var(--glass-bg)", border: "1px solid var(--border)" }}>
+                {h}h
+              </button>
+            ))}
+          </div>
+        )}
+      </Group>
+
+      {existingRing && (
+        <button onClick={saveRingSettings} disabled={saving} className="font-body text-sm text-coral hover:underline mb-6">
+          Save these settings
+        </button>
+      )}
+
+      <div className="my-6" style={{ borderTop: "1px solid var(--border)" }} />
+
+      <p className="font-body text-sm font-medium mb-3">{existingRing ? "Add another slide" : "First slide"}</p>
+
+      {!isCompare ? (
+        <>
+          <Group label="Photo">
+            <div className="flex items-center gap-3">
+              <div style={{ width: 140 }}>
+                <TaggableImage image={draft.image} tags={draft.tags} onChangeTags={(tags) => setDraft((p) => ({ ...p, tags }))} products={products} />
+              </div>
+              <button onClick={() => fileRef.current?.click()} disabled={uploading} className="glass rounded-full px-4 py-2.5 tap-scale font-body text-sm flex items-center gap-2">
+                {uploading ? <Loader2 className="w-4 h-4 spin" /> : <Upload className="w-4 h-4" />} {draft.image ? "Replace photo" : "Upload photo"}
+              </button>
+              <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => e.target.files[0] && uploadOne(e.target.files[0], "image")} />
+            </div>
+          </Group>
+          <Group label="Caption (optional)">
+            <input className="a-field" value={draft.caption} onChange={(e) => setDraft((p) => ({ ...p, caption: e.target.value }))} placeholder="Tailored looks for the weekend" maxLength={200} />
+          </Group>
+        </>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 gap-3">
+            <Group label="Photo A">
+              <div style={{ width: "100%", maxWidth: 160 }}>
+                <div className="relative rounded-2xl overflow-hidden" style={{ aspectRatio: "4/5", background: "#1A1A1E" }}>
+                  {draft.image && <img src={draft.image} alt="" className="absolute inset-0 w-full h-full" style={{ objectFit: "cover" }} />}
+                </div>
+              </div>
+              <button onClick={() => fileRef.current?.click()} disabled={uploading} className="glass rounded-full px-3 py-2 tap-scale font-body text-xs mt-2 flex items-center gap-1.5">
+                {uploading ? <Loader2 className="w-3.5 h-3.5 spin" /> : <Upload className="w-3.5 h-3.5" />} {draft.image ? "Replace" : "Upload"}
+              </button>
+              <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => e.target.files[0] && uploadOne(e.target.files[0], "image")} />
+              <input className="a-field mt-2" value={draft.labelA} onChange={(e) => setDraft((p) => ({ ...p, labelA: e.target.value }))} placeholder="Oversized" />
+            </Group>
+            <Group label="Photo B">
+              <div style={{ width: "100%", maxWidth: 160 }}>
+                <div className="relative rounded-2xl overflow-hidden" style={{ aspectRatio: "4/5", background: "#1A1A1E" }}>
+                  {draft.imageB && <img src={draft.imageB} alt="" className="absolute inset-0 w-full h-full" style={{ objectFit: "cover" }} />}
+                </div>
+              </div>
+              <button onClick={() => fileBRef.current?.click()} disabled={uploading} className="glass rounded-full px-3 py-2 tap-scale font-body text-xs mt-2 flex items-center gap-1.5">
+                {uploading ? <Loader2 className="w-3.5 h-3.5 spin" /> : <Upload className="w-3.5 h-3.5" />} {draft.imageB ? "Replace" : "Upload"}
+              </button>
+              <input ref={fileBRef} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => e.target.files[0] && uploadOne(e.target.files[0], "imageB")} />
+              <input className="a-field mt-2" value={draft.labelB} onChange={(e) => setDraft((p) => ({ ...p, labelB: e.target.value }))} placeholder="Regular" />
+            </Group>
+          </div>
+          <Group label="Link to (optional — adds a 'Shop' button)">
+            <div className="flex gap-2 flex-wrap">
+              <select className="a-field" style={{ maxWidth: 160 }} value={draft.ctaCategory} onChange={(e) => setDraft((p) => ({ ...p, ctaCategory: e.target.value, ctaSubcategory: "" }))}>
+                <option value="">No link</option>
+                {CATEGORIES.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+              </select>
+              {draft.ctaCategory && subsFor(draft.ctaCategory).length > 0 && (
+                <select className="a-field" style={{ maxWidth: 140 }} value={draft.ctaSubcategory} onChange={(e) => setDraft((p) => ({ ...p, ctaSubcategory: e.target.value }))}>
+                  <option value="">Any fit</option>
+                  {subsFor(draft.ctaCategory).map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+                </select>
+              )}
+            </div>
+          </Group>
+        </>
+      )}
+
+      {error && <p className="font-body text-sm text-coral mb-3">{error}</p>}
+
+      <button onClick={addOrCreate} disabled={saving || uploading} className="glass-btn w-full rounded-full font-body font-medium py-3 tap-scale flex items-center justify-center gap-2" style={{ background: "var(--coral)", color: "#fff" }}>
+        {saving ? <Loader2 className="w-4 h-4 spin" /> : (existingRing ? "Add this slide" : "Publish story")}
+      </button>
     </div>
   );
 }

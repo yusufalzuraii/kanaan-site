@@ -132,6 +132,89 @@ export function loadCheckoutInfo() {
 }
 
 /* ----------------------------------------------------------
+   "شفتها مؤخراً" — تخصيص حقيقي حصري للتطبيق. كل ما المستخدم يفتح
+   صفحة منتج، بنسجّل الـ id، وبنعرض آخر 10 بالهوم. أحدث منتج
+   بيصير الأول (بنشيلو إذا كان موجود قبل، وبنحطو بأول القائمة).
+   ---------------------------------------------------------- */
+const RECENTLY_VIEWED_KEY = "kanaan-recently-viewed";
+const RECENTLY_VIEWED_MAX = 10;
+
+export function addRecentlyViewed(productId) {
+  if (!isNativeApp || !productId) return;
+  try {
+    const list = getRecentlyViewed().filter((id) => id !== productId);
+    list.unshift(productId);
+    localStorage.setItem(RECENTLY_VIEWED_KEY, JSON.stringify(list.slice(0, RECENTLY_VIEWED_MAX)));
+  } catch { /* تجاهل */ }
+}
+
+export function getRecentlyViewed() {
+  if (!isNativeApp) return [];
+  try {
+    const saved = localStorage.getItem(RECENTLY_VIEWED_KEY);
+    const list = saved ? JSON.parse(saved) : [];
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
+/* ----------------------------------------------------------
+   سحب من حافة الشاشة للرجوع (edge-swipe back) — زي آيفون وأغلب
+   تطبيقات أندرويد الاحترافية. بنتتبع بس اللمسات يلي بتبلش قريبة
+   جداً من الحافة اليسرى (أول ~24px)، وإذا انسحبت لليمين مسافة
+   كافية بسرعة معقولة، منعتبرها "رجوع" ومنستدعي onTrigger().
+   ---------------------------------------------------------- */
+export function registerEdgeSwipeBack(onTrigger) {
+  if (!isNativeApp) return () => {};
+
+  const EDGE_ZONE = 24; // px من الحافة اليسرى يلي فيها اللمسة لازم تبلش
+  const THRESHOLD = 80; // px أقل مسافة سحب حتى تعتبر "رجوع"
+  let startX = null;
+  let startY = null;
+  let tracking = false;
+
+  const onStart = (e) => {
+    const t = e.touches[0];
+    if (t.clientX <= EDGE_ZONE) {
+      startX = t.clientX;
+      startY = t.clientY;
+      tracking = true;
+    } else {
+      tracking = false;
+    }
+  };
+
+  const onMove = (e) => {
+    if (!tracking || startX == null) return;
+    const t = e.touches[0];
+    const dx = t.clientX - startX;
+    const dy = Math.abs(t.clientY - startY);
+    // سحب أفقي واضح بمسافة كافية، وحركة رأسية محدودة (مش سكرول عمودي)
+    if (dx > THRESHOLD && dy < 60) {
+      tracking = false;
+      startX = null;
+      onTrigger();
+    }
+  };
+
+  const onEnd = () => {
+    tracking = false;
+    startX = null;
+  };
+
+  window.addEventListener("touchstart", onStart, { passive: true });
+  window.addEventListener("touchmove", onMove, { passive: true });
+  window.addEventListener("touchend", onEnd, { passive: true });
+
+  return () => {
+    window.removeEventListener("touchstart", onStart);
+    window.removeEventListener("touchmove", onMove);
+    window.removeEventListener("touchend", onEnd);
+  };
+}
+
+/* ----------------------------------------------------------
    إشعارات Push — طلب الإذن، تسجيل توكن الجهاز عند سيرفرنا، والتعامل
    مع ضغطة المستخدم على إشعار (بيفتح رابط معيّن إذا كان مرفق فيه).
    بيستدعى مرة وحدة لما التطبيق يفتح — إذا المستخدم رفض الإذن أو

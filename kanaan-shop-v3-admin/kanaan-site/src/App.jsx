@@ -35,6 +35,7 @@ import {
   ChevronDown,
   Tag,
   ArrowRight,
+  ArrowLeft,
   Home as HomeIcon,
 } from "lucide-react";
 import Admin from "./Admin.jsx";
@@ -50,6 +51,9 @@ import {
   saveCheckoutInfo,
   loadCheckoutInfo,
   registerPushNotifications,
+  addRecentlyViewed,
+  getRecentlyViewed,
+  registerEdgeSwipeBack,
 } from "./native.js";
 
 /* ============================================================
@@ -1529,6 +1533,16 @@ function KanaanShop() {
     return () => cleanup();
   }, []);
 
+  // سحب من حافة الشاشة اليسرى للرجوع — بس إذا في فعلاً وين نرجع
+  useEffect(() => {
+    return registerEdgeSwipeBack(() => {
+      if (canGoBack()) {
+        hapticLight();
+        window.history.back();
+      }
+    });
+  }, []);
+
   // Belt and braces on the scroll reset: navigate() jumps immediately, and
   // this runs again once the new page has actually rendered, so a tall
   // catalog can't leave you stranded halfway down the product page.
@@ -1581,14 +1595,18 @@ function KanaanShop() {
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [storyRings, setStoryRings] = useState([]);
 
+  const refreshProducts = async () => {
+    try {
+      const res = await fetch(`${apiBase}/api/products`);
+      const data = await res.json();
+      if (Array.isArray(data.products)) setProducts(data.products);
+    } catch { /* offline or API not ready */ }
+  };
+
   useEffect(() => {
     let alive = true;
     (async () => {
-      try {
-        const res = await fetch(`${apiBase}/api/products`);
-        const data = await res.json();
-        if (alive && Array.isArray(data.products)) setProducts(data.products);
-      } catch { /* offline or API not ready */ }
+      await refreshProducts();
       if (alive) setCatalogLoading(false);
     })();
     return () => { alive = false; };
@@ -1699,11 +1717,23 @@ function KanaanShop() {
       style={isNativeApp ? { paddingBottom: "calc(56px + env(safe-area-inset-bottom))" } : undefined}
     >
       <GlobalStyles />
-      <Header cartCount={cartCount} onHome={goHome} onCart={() => setCartOpen(true)} onSearch={() => setSearchOpen(true)} onSale={goSale} menuOpen={menuOpen} setMenuOpen={setMenuOpen} goCatalog={goCatalog} />
+      {isNativeApp ? (
+        route.type !== "home" && (
+          <AppTopBar
+            title={routeTitle(route, currentProduct)}
+            canGoBack={canGoBack()}
+            onBack={() => window.history.back()}
+            cartCount={cartCount}
+            onCart={() => setCartOpen(true)}
+          />
+        )
+      ) : (
+        <Header cartCount={cartCount} onHome={goHome} onCart={() => setCartOpen(true)} onSearch={() => setSearchOpen(true)} onSale={goSale} menuOpen={menuOpen} setMenuOpen={setMenuOpen} goCatalog={goCatalog} />
+      )}
       <main>
         <PageTransition path={path} direction={navDirection}>
         {route.type === "home" && isNativeApp && (
-          <NativeHomeView products={products} loading={catalogLoading} goCatalog={goCatalog} goSale={goSale} openProduct={openProduct} likes={likes} toggleLike={toggleLike} storyRings={storyRings} openStory={openStory} goFavorites={goFavorites} onCart={() => setCartOpen(true)} cartCount={cartCount} />
+          <NativeHomeView products={products} loading={catalogLoading} goCatalog={goCatalog} goSale={goSale} openProduct={openProduct} likes={likes} toggleLike={toggleLike} storyRings={storyRings} openStory={openStory} goFavorites={goFavorites} onCart={() => setCartOpen(true)} cartCount={cartCount} onRefresh={refreshProducts} />
         )}
         {route.type === "home" && !isNativeApp && (
           <HomeView products={products} loading={catalogLoading} goCatalog={goCatalog} goSale={goSale} openProduct={openProduct} likes={likes} toggleLike={toggleLike} storyRings={storyRings} openStory={openStory} />
@@ -1756,7 +1786,7 @@ function KanaanShop() {
         openProduct={(p) => { closeStory(); openProduct(p); }}
         goCatalog={(cat, sub) => { closeStory(); goCatalog(cat, sub); }}
       />
-      <Footer goCatalog={goCatalog} goSale={goSale} />
+      {isNativeApp ? <AppFootnote /> : <Footer goCatalog={goCatalog} goSale={goSale} />}
       <WhatsAppFab raised={route.type === "product"} />
       <SearchOverlay
         open={searchOpen}
@@ -2689,7 +2719,64 @@ function HomeView({ products, loading, goCatalog, goSale, openProduct, likes, to
    ترحيب، وصول سريع لكل قسم ببلاطات، وشريط "جديد" أفقي. أول ثانية
    بتفتح فيها التطبيق لازم تحس فرق واضح عن فتح الموقع بالمتصفح.
    ============================================================ */
-function NativeHomeView({ products, loading, goCatalog, goSale, openProduct, likes, toggleLike, storyRings, openStory, goFavorites, onCart, cartCount }) {
+/* ============================================================
+   SPOTLIGHT CARD — بطاقة تحريرية بمنتج واحد مميز، بصورة حقيقية
+   كبيرة، بدل ما كل شي عالهوم يبين متل بعضه بشبكة موحّدة.
+   ============================================================ */
+function SpotlightCard({ product, onOpen }) {
+  const img = getImages(product)[0];
+  return (
+    <button
+      onClick={() => onOpen(product)}
+      className="relative w-full rounded-3xl overflow-hidden text-left tap-scale block"
+      style={{ aspectRatio: "16/11" }}
+    >
+      {img ? (
+        <img src={img} alt={product.name} className="absolute inset-0 w-full h-full object-cover" />
+      ) : (
+        <div className="absolute inset-0" style={{ background: "linear-gradient(135deg, var(--coral), #ff7a52)" }} />
+      )}
+      <div className="absolute inset-0" style={{ background: "linear-gradient(to top, rgba(10,10,12,0.85), rgba(10,10,12,0.05) 60%)" }} />
+      <div className="absolute bottom-0 left-0 right-0 p-4">
+        <GlassChip tone="coral">Just landed</GlassChip>
+        <p className="font-display font-bold text-xl mt-2 leading-tight" style={{ color: "#fff" }}>{product.name}</p>
+        <p className="font-num text-base mt-0.5" style={{ color: "rgba(255,255,255,0.9)" }}>{money(effectivePrice(product))}</p>
+      </div>
+    </button>
+  );
+}
+
+/* بديل بسيط "Pull to refresh" — سحبة من فوق (بس والمستخدم أصلاً
+   بأعلى الصفحة) بتعمل تحديث. بلا مكتبة خارجية، لمسة تفاعل بس. */
+function usePullToRefresh(onRefresh) {
+  const [pulling, setPulling] = useState(false);
+  const startY = useRef(null);
+  const triggered = useRef(false);
+
+  const onTouchStart = (e) => {
+    if (window.scrollY <= 0) startY.current = e.touches[0].clientY;
+  };
+  const onTouchMove = (e) => {
+    if (startY.current == null) return;
+    const dy = e.touches[0].clientY - startY.current;
+    if (dy > 70 && !triggered.current) {
+      triggered.current = true;
+      setPulling(true);
+      hapticLight();
+      Promise.resolve(onRefresh()).finally(() => {
+        setTimeout(() => setPulling(false), 400);
+      });
+    }
+  };
+  const onTouchEnd = () => {
+    startY.current = null;
+    triggered.current = false;
+  };
+
+  return { pulling, handlers: { onTouchStart, onTouchMove, onTouchEnd } };
+}
+
+function NativeHomeView({ products, loading, goCatalog, goSale, openProduct, likes, toggleLike, storyRings, openStory, goFavorites, onCart, cartCount, onRefresh }) {
   useEffect(() => {
     document.title = `${STORE_NAME} — Menswear from Saida, Lebanon`;
   }, []);
@@ -2697,16 +2784,38 @@ function NativeHomeView({ products, loading, goCatalog, goSale, openProduct, lik
   const hour = new Date().getHours();
   const greeting = hour < 5 ? "Still up?" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
 
-  const featured = products.slice(0, 10);
+  const spotlight = products.find((p) => p.badge === "new") || products[0] || null;
+  const featured = products.filter((p) => !spotlight || p.id !== spotlight.id).slice(0, 10);
   const onSale = useMemo(() => products.filter(isOnSale), [products]);
   const saleCount = onSale.length;
   const maxDiscount = saleCount ? Math.max(...onSale.map((p) => p.discount)) : 0;
 
+  const recentIds = getRecentlyViewed();
+  const recentProducts = recentIds.map((id) => products.find((p) => p.id === id)).filter(Boolean).slice(0, 8);
+
+  const { pulling, handlers } = usePullToRefresh(onRefresh);
+
   return (
-    <div className="pb-4">
-      {/* ترحيب — بديل الهيرو التسويقي، هوية "أنا تطبيق" فوراً */}
-      <section className="px-4 sm:px-6 pt-6 pb-4">
-        <div className="flex items-center justify-between">
+    <div className="pb-4" {...handlers}>
+      {pulling && (
+        <div className="flex justify-center py-3">
+          <Loader2 className="w-5 h-5 spin text-coral" />
+        </div>
+      )}
+
+      {/* ترحيب — بديل الهيرو التسويقي، هوية "أنا تطبيق" فوراً. توهج
+          خفيف دايم خلف الترحيب (بغض النظر عن الثيم) — إشارة بصرية
+          صغيرة بس ثابتة إنو هاد تطبيق إلو شخصيته، مش نسخة من الموقع. */}
+      <section className="relative px-4 sm:px-6 pt-6 pb-4 overflow-hidden">
+        <div
+          className="absolute pointer-events-none"
+          style={{
+            top: -60, right: -40, width: 220, height: 220, borderRadius: "50%",
+            background: "radial-gradient(circle, var(--coral) 0%, transparent 70%)",
+            opacity: 0.16, filter: "blur(40px)",
+          }}
+        />
+        <div className="relative flex items-center justify-between">
           <div>
             <p className="font-body text-sm text-muted">{greeting} 👋</p>
             <h1 className="font-display font-bold text-2xl mt-0.5">What are you after today?</h1>
@@ -2741,30 +2850,64 @@ function NativeHomeView({ products, loading, goCatalog, goSale, openProduct, lik
 
       {storyRings.length > 0 && <StoryRail rings={storyRings} onOpen={openStory} />}
 
-      {/* شريط فئات أفقي — وصول لأي قسم بضغطة، بدون ما تفوت لصفحة الشوب */}
+      {/* بطاقة Spotlight — منتج واحد مميز بصورة حقيقية كبيرة */}
+      {spotlight && !loading && (
+        <section className="px-4 sm:px-6 pb-6">
+          <SpotlightCard product={spotlight} onOpen={openProduct} />
+        </section>
+      )}
+
+      {/* شبكة فئات بصفّين، بألوان متبادلة كورال/تيل — أحيا بصرياً
+          من رمادي موحّد، وبنفس ألوان الهوية بدون إضافة لون جديد */}
       <section className="pb-6">
         <div className="px-4 sm:px-6 flex items-center justify-between mb-3">
           <h2 className="font-display font-bold text-lg">Browse</h2>
           <button onClick={() => goCatalog("all")} className="font-body text-sm text-coral">See all</button>
         </div>
-        <div className="flex gap-3 overflow-x-auto px-4 sm:px-6 pb-1" style={{ scrollbarWidth: "none" }}>
-          {CATEGORIES.map((c) => (
-            <button
-              key={c.id}
-              onClick={() => goCatalog(c.id)}
-              className="glass rounded-2xl flex flex-col items-center justify-center gap-2 tap-scale flex-shrink-0"
-              style={{ width: 78, height: 78 }}
-            >
-              <IconFor type={iconForCategory(c.id)} className="w-6 h-6" style={{ color: "var(--fg-muted)" }} />
-              <span className="font-body text-[10px] text-center leading-tight px-1">{c.label}</span>
-            </button>
-          ))}
+        <div className="px-4 sm:px-6 grid grid-cols-6 gap-2">
+          {CATEGORIES.map((c, i) => {
+            const coral = i % 2 === 0;
+            return (
+              <button
+                key={c.id}
+                onClick={() => goCatalog(c.id)}
+                className="glass rounded-xl flex flex-col items-center justify-center gap-1 tap-scale"
+                style={{ aspectRatio: "1/1" }}
+              >
+                <span
+                  className="rounded-lg flex items-center justify-center"
+                  style={{ width: 22, height: 22, background: coral ? "rgba(255,69,34,0.14)" : "rgba(18,179,160,0.14)" }}
+                >
+                  <IconFor type={iconForCategory(c.id)} className="w-3 h-3" style={{ color: coral ? "var(--coral)" : "var(--teal)" }} />
+                </span>
+                <span className="font-body text-[8.5px] text-center leading-tight px-0.5">{c.label}</span>
+              </button>
+            );
+          })}
         </div>
       </section>
 
       {saleCount > 0 && (
         <section className="px-4 sm:px-6 pb-6">
           <SaleCard onOpen={goSale} count={saleCount} maxDiscount={maxDiscount} />
+        </section>
+      )}
+
+      {/* "شفتها مؤخراً" — تخصيص حقيقي، حصري للتطبيق، ما بيظهر أبداً
+          إذا ما في تاريخ تصفّح لسا */}
+      {recentProducts.length > 0 && (
+        <section className="pb-8">
+          <div className="px-4 sm:px-6 flex items-center gap-2 mb-3">
+            <RotateCcw className="w-4 h-4 text-muted" />
+            <h2 className="font-display font-bold text-lg">Recently viewed</h2>
+          </div>
+          <div className="flex gap-4 overflow-x-auto px-4 sm:px-6 pb-1" style={{ scrollbarWidth: "none" }}>
+            {recentProducts.map((p) => (
+              <div key={p.id} className="flex-shrink-0" style={{ width: 130 }}>
+                <ProductCard product={p} onOpen={openProduct} liked={likes.includes(p.id)} onToggleLike={() => toggleLike(p.id)} />
+              </div>
+            ))}
+          </div>
         </section>
       )}
 
@@ -2976,6 +3119,7 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
     setSize(product.sizes.find((s) => stockFor(product, firstColor, s) > 0) || product.sizes[0]);
     setQty(1);
     setAdded(false);
+    addRecentlyViewed(product.id);
   }, [product.id]); // eslint-disable-line
 
   useEffect(() => {
@@ -3520,6 +3664,69 @@ function ConfirmationView({ order, goHome }) {
 }
 
 /* ============================================================
+   APP TOP BAR — بديل خفيف للهيدر الكامل، حصري للتطبيق. يظهر بس
+   بالصفحات غير الرئيسية (الهوم إلها ترحيبها الخاص، ما بتحتاج
+   شريط فوقها). زر رجوع + عنوان الصفحة + سلة صغيرة، وخلص —
+   ولا شعار كبير ولا قائمة ولا تبديل ثيم (هدول انتقلوا لمكان تاني).
+   ============================================================ */
+function routeTitle(route, currentProduct) {
+  if (route.type === "catalog") {
+    if (route.category === "all") return "Shop";
+    return CATEGORIES.find((c) => c.id === route.category)?.label || "Shop";
+  }
+  if (route.type === "favorites") return "Favorites";
+  if (route.type === "sale") return "On Sale";
+  if (route.type === "product") return currentProduct?.name || "";
+  if (route.type === "checkout") return "Checkout";
+  return "";
+}
+
+function AppTopBar({ title, canGoBack, onBack, cartCount, onCart }) {
+  return (
+    <div className="sticky top-0 z-30 px-3 pt-3">
+      <div className="glass rounded-2xl flex items-center justify-between px-2 py-2">
+        <button
+          onClick={onBack}
+          className="p-2 tap-scale flex-shrink-0"
+          aria-label="Back"
+          style={{ visibility: canGoBack ? "visible" : "hidden" }}
+        >
+          <ArrowLeft className="w-5 h-5" />
+        </button>
+        <h1 className="font-display font-bold text-[15px] truncate px-2 flex-1 text-center">{title}</h1>
+        <button onClick={onCart} className="relative p-2 tap-scale flex-shrink-0" aria-label="Cart">
+          <ShoppingBag className="w-5 h-5" />
+          {cartCount > 0 && (
+            <span
+              className="absolute top-0.5 right-0.5 bg-coral text-white text-[9px] font-num rounded-full flex items-center justify-center"
+              style={{ minWidth: 15, height: 15 }}
+            >
+              {cartCount}
+            </span>
+          )}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   APP FOOTNOTE — بديل مصغّر للفوتر الكامل، حصري للتطبيق. الفوتر
+   الأصلي (شعار + وصف + قائمة فئات نصية) مكرر مع الشريط السفلي
+   وبلاطات الفئات يلي أصلاً موجودين — هون بس تذكير بسيط للمساعدة.
+   ============================================================ */
+function AppFootnote() {
+  const href = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(`Hi ${STORE_NAME}! I have a question`)}`;
+  return (
+    <div className="px-4 sm:px-6 pb-6 pt-2 text-center">
+      <a href={href} target="_blank" rel="noopener noreferrer" className="font-body text-xs text-muted hover:text-coral transition-colors">
+        Need help? Chat with us on WhatsApp
+      </a>
+    </div>
+  );
+}
+
+/* ============================================================
    PAGE TRANSITION — حصري للتطبيق. كل صفحة بتنزلق للداخل باتجاه
    منطقي (يمين لقدام، يسار لرجوع) بدل التبديل الفوري، زي أي
    تطبيق نيتف حقيقي. عالموقع ما في تغيير — بيضل التبديل فوري
@@ -3527,10 +3734,15 @@ function ConfirmationView({ order, goHome }) {
    ============================================================ */
 function PageTransition({ path, direction, children }) {
   const { reducedMotion } = useApp();
+  const [animating, setAnimating] = useState(true);
   if (!isNativeApp || reducedMotion) return <>{children}</>;
   const animClass = direction === "back" ? "page-slide-back" : "page-slide-forward";
+  // مهم: بعد ما تخلص الحركة منشيل الـ class نهائياً (مش نخليها "both" وبس).
+  // أي transform باقي مطبّق — حتى لو translateX(0) بلا تأثير بصري — بيكسر
+  // أي عنصر position:fixed جوا الصفحة (زي شريط "Add to cart" العائم)،
+  // لأنو بيصير "ثابت نسبة لهاد العنصر" مش نسبة للشاشة كلها.
   return (
-    <div key={path} className={animClass}>
+    <div key={path} className={animating ? animClass : ""} onAnimationEnd={() => setAnimating(false)}>
       {children}
     </div>
   );
@@ -3549,16 +3761,35 @@ function BottomTabBar({ activeType, goHome, goCatalog, onSearch, goFavorites, on
     { key: "favorites", label: "Favorites", Icon: Heart, onPress: goFavorites, active: activeType === "favorites", badge: likesCount },
     { key: "cart", label: "Cart", Icon: ShoppingCart, onPress: onCart, active: false, badge: cartCount },
   ];
+  const activeIndex = tabs.findIndex((t) => t.active);
+
+  const press = (fn) => () => {
+    hapticLight();
+    fn();
+  };
 
   return (
     <nav
-      className="native-tab-bar glass fixed left-0 right-0 bottom-0 z-40 flex items-stretch"
+      className="native-tab-bar glass fixed left-0 right-0 bottom-0 z-40 flex items-stretch relative"
       style={{ borderRadius: 0, borderLeft: "none", borderRight: "none", borderBottom: "none" }}
     >
+      {/* مؤشر منزلق تحت التبويب النشط — بيتحرك بسلاسة بدل ما يقفز */}
+      {activeIndex >= 0 && (
+        <span
+          aria-hidden="true"
+          className="absolute top-0 rounded-full"
+          style={{
+            height: 3, width: `calc(${100 / tabs.length}% - 28px)`,
+            left: `calc(${(activeIndex * 100) / tabs.length}% + 14px)`,
+            background: "var(--coral)",
+            transition: "left 0.3s cubic-bezier(0.2,0.9,0.2,1)",
+          }}
+        />
+      )}
       {tabs.map(({ key, label, Icon, onPress, active, badge }) => (
         <button
           key={key}
-          onClick={onPress}
+          onClick={press(onPress)}
           className="flex-1 flex flex-col items-center justify-center gap-0.5 tap-scale relative"
           style={{ paddingTop: 8, paddingBottom: 4, color: active ? "var(--coral)" : "var(--fg-muted)" }}
           aria-label={label}

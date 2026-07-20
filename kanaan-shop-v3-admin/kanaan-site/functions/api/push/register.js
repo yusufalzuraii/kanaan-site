@@ -1,4 +1,4 @@
-import { json } from "../_shared/util.js";
+import { json } from "../../_shared/util.js";
 
 /* POST /api/push/register
    ------------------------------------------------------------

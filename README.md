@@ -1,2 +1,0 @@
-# kanaan-site
-kanaan store

@@ -194,26 +194,46 @@ function useRouter() {
       return "/";
     }
   });
+  // اتجاه آخر تنقّل — 'forward' لما نفتح صفحة جديدة، 'back' لما نرجع.
+  // بيستخدمه مكوّن الانتقال بين الصفحات ليقرر اتجاه الحركة (يمين/يسار).
+  const [direction, setDirection] = useState("none");
 
   useEffect(() => {
-    const onPop = () => setPath(window.location.pathname || "/");
+    // نعطي أول صفحة "عمق = 0" — هيك منقدر نميّز "القاعدة" (الصفحة
+    // الأولى يلي فتح عليها التطبيق) عن أي صفحة توصلها عبر navigate().
+    // هاد بالضبط الأساس يلي زر الرجوع الفيزيائي بأندرويد بيعتمد عليه
+    // ليقرر "ارجع جوا التطبيق" أو "اطلع من التطبيق".
+    if (!window.history.state || typeof window.history.state.depth !== "number") {
+      try { window.history.replaceState({ depth: 0 }, "", window.location.pathname); } catch (e) { /* ignore */ }
+    }
+
+    const onPop = () => {
+      setDirection("back");
+      setPath(window.location.pathname || "/");
+    };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
   const navigate = (to) => {
+    const depth = (window.history.state?.depth || 0) + 1;
     try {
-      window.history.pushState({}, "", to);
+      window.history.pushState({ depth }, "", to);
     } catch (e) {
       /* ignore */
     }
+    setDirection("forward");
     setPath(to);
     // Jump, don't glide: smooth-scrolling from deep down a long catalog
     // took a visible moment and left people mid-page on the new one.
     window.scrollTo(0, 0);
   };
 
-  return [path, navigate];
+  // true إذا فيه صفحات فوق بالتاريخ نقدر نرجعلها جوا التطبيق نفسو —
+  // false يعني إحنا بالصفحة الأولى، وزر الرجوع لازم يطلع من التطبيق.
+  const canGoBack = () => (window.history.state?.depth || 0) > 0;
+
+  return [path, navigate, direction, canGoBack];
 }
 
 function parseRoute(path) {
@@ -1464,7 +1484,7 @@ export default function KanaanShopRoot() {
 
 function KanaanShop() {
   const { theme } = useApp();
-  const [path, navigate] = useRouter();
+  const [path, navigate, navDirection, canGoBack] = useRouter();
   const route = parseRoute(path);
 
   const [cart, setCart] = useState([]);
@@ -1500,6 +1520,7 @@ function KanaanShop() {
   useEffect(() => {
     let cleanup = () => {};
     registerBackButtonHandler({
+      canGoBack,
       onBackWithinApp: () => window.history.back(),
       onExitApp: () => {
         import("@capacitor/app").then(({ App }) => App.exitApp());
@@ -1680,7 +1701,11 @@ function KanaanShop() {
       <GlobalStyles />
       <Header cartCount={cartCount} onHome={goHome} onCart={() => setCartOpen(true)} onSearch={() => setSearchOpen(true)} onSale={goSale} menuOpen={menuOpen} setMenuOpen={setMenuOpen} goCatalog={goCatalog} />
       <main>
-        {route.type === "home" && (
+        <PageTransition path={path} direction={navDirection}>
+        {route.type === "home" && isNativeApp && (
+          <NativeHomeView products={products} loading={catalogLoading} goCatalog={goCatalog} goSale={goSale} openProduct={openProduct} likes={likes} toggleLike={toggleLike} storyRings={storyRings} openStory={openStory} goFavorites={goFavorites} onCart={() => setCartOpen(true)} cartCount={cartCount} />
+        )}
+        {route.type === "home" && !isNativeApp && (
           <HomeView products={products} loading={catalogLoading} goCatalog={goCatalog} goSale={goSale} openProduct={openProduct} likes={likes} toggleLike={toggleLike} storyRings={storyRings} openStory={openStory} />
         )}
         {route.type === "sale" && (
@@ -1719,6 +1744,7 @@ function KanaanShop() {
           />
         )}
         {route.type === "checkout" && orderPlaced && <ConfirmationView order={lastOrder} goHome={goHome} />}
+        </PageTransition>
       </main>
 
       <StoryViewer
@@ -1989,6 +2015,20 @@ function GlobalStyles() {
         padding-bottom: env(safe-area-inset-bottom, 0px);
         height: calc(56px + env(safe-area-inset-bottom, 0px));
       }
+
+      /* انتقالات الصفحات — حصري للتطبيق. الصفحة الجديدة بتنزلق من
+         اليمين لما نفتح شي جديد، ومن اليسار لما نرجع، بدل ما تظهر
+         فجأة. */
+      @keyframes pageSlideForward {
+        from { opacity: 0; transform: translateX(28px); }
+        to   { opacity: 1; transform: translateX(0); }
+      }
+      @keyframes pageSlideBack {
+        from { opacity: 0; transform: translateX(-28px); }
+        to   { opacity: 1; transform: translateX(0); }
+      }
+      .page-slide-forward { animation: pageSlideForward 0.32s cubic-bezier(0.16,1,0.3,1) both; }
+      .page-slide-back { animation: pageSlideBack 0.32s cubic-bezier(0.16,1,0.3,1) both; }
       .tap-scale:active { transform: scale(0.94); }
 
       ::selection { background: var(--coral); color: #fff; }
@@ -2637,6 +2677,120 @@ function HomeView({ products, loading, goCatalog, goSale, openProduct, likes, to
             </div>
           </div>
         </Reveal>
+      </section>
+    </div>
+  );
+}
+
+/* ============================================================
+   NATIVE HOME — الصفحة الرئيسية الحصرية للتطبيق (أندرويد/آيفون).
+   عمداً مبنية مختلفة تماماً عن هوم الموقع: مش صفحة تسويقية بمقدمة
+   وشرح، إنما "dashboard" سريع بأسلوب تطبيقات التسوق الحقيقية —
+   ترحيب، وصول سريع لكل قسم ببلاطات، وشريط "جديد" أفقي. أول ثانية
+   بتفتح فيها التطبيق لازم تحس فرق واضح عن فتح الموقع بالمتصفح.
+   ============================================================ */
+function NativeHomeView({ products, loading, goCatalog, goSale, openProduct, likes, toggleLike, storyRings, openStory, goFavorites, onCart, cartCount }) {
+  useEffect(() => {
+    document.title = `${STORE_NAME} — Menswear from Saida, Lebanon`;
+  }, []);
+
+  const hour = new Date().getHours();
+  const greeting = hour < 5 ? "Still up?" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+
+  const featured = products.slice(0, 10);
+  const onSale = useMemo(() => products.filter(isOnSale), [products]);
+  const saleCount = onSale.length;
+  const maxDiscount = saleCount ? Math.max(...onSale.map((p) => p.discount)) : 0;
+
+  return (
+    <div className="pb-4">
+      {/* ترحيب — بديل الهيرو التسويقي، هوية "أنا تطبيق" فوراً */}
+      <section className="px-4 sm:px-6 pt-6 pb-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="font-body text-sm text-muted">{greeting} 👋</p>
+            <h1 className="font-display font-bold text-2xl mt-0.5">What are you after today?</h1>
+          </div>
+          <LogoMark variant="compact" className="h-7 w-auto opacity-90" />
+        </div>
+      </section>
+
+      {/* بلاطتين سريعتين — سلة ومفضلة، بدل ما تدور عليهم بالهيدر */}
+      <section className="px-4 sm:px-6 pb-5">
+        <div className="grid grid-cols-2 gap-3">
+          <button onClick={goFavorites} className="glass rounded-2xl p-4 flex items-center gap-3 tap-scale text-left">
+            <div className="glass rounded-xl p-2" style={{ background: "rgba(255,69,34,0.12)" }}>
+              <Heart className="w-5 h-5 text-coral" />
+            </div>
+            <div>
+              <p className="font-display font-bold text-lg leading-none">{likes.length}</p>
+              <p className="font-body text-xs text-muted mt-1">Favorites</p>
+            </div>
+          </button>
+          <button onClick={onCart} className="glass rounded-2xl p-4 flex items-center gap-3 tap-scale text-left">
+            <div className="glass rounded-xl p-2" style={{ background: "rgba(18,179,160,0.12)" }}>
+              <ShoppingCart className="w-5 h-5 text-teal" />
+            </div>
+            <div>
+              <p className="font-display font-bold text-lg leading-none">{cartCount}</p>
+              <p className="font-body text-xs text-muted mt-1">In your cart</p>
+            </div>
+          </button>
+        </div>
+      </section>
+
+      {storyRings.length > 0 && <StoryRail rings={storyRings} onOpen={openStory} />}
+
+      {/* شريط فئات أفقي — وصول لأي قسم بضغطة، بدون ما تفوت لصفحة الشوب */}
+      <section className="pb-6">
+        <div className="px-4 sm:px-6 flex items-center justify-between mb-3">
+          <h2 className="font-display font-bold text-lg">Browse</h2>
+          <button onClick={() => goCatalog("all")} className="font-body text-sm text-coral">See all</button>
+        </div>
+        <div className="flex gap-3 overflow-x-auto px-4 sm:px-6 pb-1" style={{ scrollbarWidth: "none" }}>
+          {CATEGORIES.map((c) => (
+            <button
+              key={c.id}
+              onClick={() => goCatalog(c.id)}
+              className="glass rounded-2xl flex flex-col items-center justify-center gap-2 tap-scale flex-shrink-0"
+              style={{ width: 78, height: 78 }}
+            >
+              <IconFor type={iconForCategory(c.id)} className="w-6 h-6" style={{ color: "var(--fg-muted)" }} />
+              <span className="font-body text-[10px] text-center leading-tight px-1">{c.label}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {saleCount > 0 && (
+        <section className="px-4 sm:px-6 pb-6">
+          <SaleCard onOpen={goSale} count={saleCount} maxDiscount={maxDiscount} />
+        </section>
+      )}
+
+      {/* شريط "جديد" أفقي — قابل للسحب، بدل شبكة ثابتة، إحساس تطبيق أكتر */}
+      <section className="pb-8">
+        <div className="px-4 sm:px-6 flex items-center justify-between mb-3">
+          <h2 className="font-display font-bold text-lg">New in</h2>
+          <button onClick={() => goCatalog("all")} className="font-body text-sm text-coral">See all</button>
+        </div>
+        {loading && products.length === 0 ? (
+          <div className="flex gap-4 px-4 sm:px-6 overflow-x-hidden">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="rounded-2xl glass flex-shrink-0" style={{ width: 150, aspectRatio: "4/5", opacity: 0.5 }} />
+            ))}
+          </div>
+        ) : featured.length === 0 ? (
+          <p className="font-body text-sm text-muted px-4 sm:px-6">Products are on their way — check back soon.</p>
+        ) : (
+          <div className="flex gap-4 overflow-x-auto px-4 sm:px-6 pb-1" style={{ scrollbarWidth: "none" }}>
+            {featured.map((p) => (
+              <div key={p.id} className="flex-shrink-0" style={{ width: 150 }}>
+                <ProductCard product={p} onOpen={openProduct} liked={likes.includes(p.id)} onToggleLike={() => toggleLike(p.id)} />
+              </div>
+            ))}
+          </div>
+        )}
       </section>
     </div>
   );
@@ -3361,6 +3515,23 @@ function ConfirmationView({ order, goHome }) {
       <button onClick={goHome} className="glass-btn font-body font-medium px-6 py-3 rounded-full tap-scale" style={{ background: "var(--fg)", color: "var(--bg)" }}>
         Keep shopping
       </button>
+    </div>
+  );
+}
+
+/* ============================================================
+   PAGE TRANSITION — حصري للتطبيق. كل صفحة بتنزلق للداخل باتجاه
+   منطقي (يمين لقدام، يسار لرجوع) بدل التبديل الفوري، زي أي
+   تطبيق نيتف حقيقي. عالموقع ما في تغيير — بيضل التبديل فوري
+   زي ما كان (احتراماً للـ SEO وسرعة التصفح بالمتصفح).
+   ============================================================ */
+function PageTransition({ path, direction, children }) {
+  const { reducedMotion } = useApp();
+  if (!isNativeApp || reducedMotion) return <>{children}</>;
+  const animClass = direction === "back" ? "page-slide-back" : "page-slide-forward";
+  return (
+    <div key={path} className={animClass}>
+      {children}
     </div>
   );
 }

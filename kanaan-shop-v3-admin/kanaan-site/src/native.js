@@ -50,14 +50,12 @@ export async function hapticSuccess() {
    (متل ضغطة "رجوع" بالمتصفح) قبل ما يفكر يقفل التطبيق. بيتوصل
    بالـ App.jsx عبر registerBackButtonHandler(canGoBack, onBack).
    ---------------------------------------------------------- */
-export async function registerBackButtonHandler({ onBackWithinApp, onExitApp }) {
+export async function registerBackButtonHandler({ canGoBack, onBackWithinApp, onExitApp }) {
   if (!isNativeApp) return () => {};
   const { App } = await import("@capacitor/app");
 
   const sub = await App.addListener("backButton", () => {
-    // history.length > 1 مش مضمونة 100% بكل الحالات، فبنعتمد على
-    // علم بسيط: هل إحنا بالصفحة الرئيسية؟ إذا لأ، رجّع بالراوتر.
-    if (window.history.state && window.location.pathname !== "/") {
+    if (canGoBack()) {
       onBackWithinApp();
     } else {
       onExitApp();

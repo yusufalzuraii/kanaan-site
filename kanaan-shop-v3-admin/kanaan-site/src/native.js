@@ -46,6 +46,42 @@ export async function hapticSuccess() {
 }
 
 /* ----------------------------------------------------------
+   صوت نجاح خفيف — بدون أي ملف صوتي خارجي، مولّد مباشرة بالكود عبر
+   Web Audio API (نغمتين قصيرتين صاعدتين، أقل من نص ثانية). هيك
+   ما بنحتاج نحمّل أو نرفع ملف mp3، وما في وزن إضافي على حجم التطبيق.
+   لو المستخدم حاطط جهازو صامت (silent/vibrate mode)، أندرويد
+   بيتكفّل يمنع الصوت تلقائياً — إحنا بس بنطلبه، مش بنفرضه.
+   ---------------------------------------------------------- */
+export function playSuccessChime() {
+  if (!isNativeApp) return;
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    const now = ctx.currentTime;
+
+    const playTone = (freq, start, dur) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0, now + start);
+      gain.gain.linearRampToValueAtTime(0.18, now + start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + start + dur);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now + start);
+      osc.stop(now + start + dur);
+    };
+
+    playTone(660, 0, 0.14);   // نغمة أولى
+    playTone(880, 0.1, 0.22); // نغمة تانية أعلى، إحساس "تمام/نجاح"
+
+    setTimeout(() => ctx.close(), 500);
+  } catch { /* أي مشكلة هون ما لازم توقف تأكيد الطلب */ }
+}
+
+/* ----------------------------------------------------------
    زر الرجوع الفيزيائي بأندرويد — لازم يرجع بالراوتر الداخلي
    (متل ضغطة "رجوع" بالمتصفح) قبل ما يفكر يقفل التطبيق. بيتوصل
    بالـ App.jsx عبر registerBackButtonHandler(canGoBack, onBack).
@@ -249,4 +285,45 @@ export async function registerPushNotifications(apiBaseUrl) {
       if (url) window.location.href = url;
     });
   } catch { /* أي مشكلة هون ما لازم توقف باقي التطبيق */ }
+}
+
+/* ----------------------------------------------------------
+   شاشة الترحيب الأولى — تظهر مرة وحدة بس، أول ما حد يفتح التطبيق
+   لأول مرة، وبتشرح الإشعارات والميزات الحصرية قبل ما نطلب إذن
+   الإشعارات فعلياً (أفضل نشرح القيمة الأول، بعدين نسأل الإذن —
+   معدل موافقة أعلى بكتير من سؤال فجأة بلا سياق).
+   ---------------------------------------------------------- */
+const WELCOME_SEEN_KEY = "kanaan-welcome-seen";
+
+export function hasSeenWelcome() {
+  if (!isNativeApp) return true;
+  try {
+    return localStorage.getItem(WELCOME_SEEN_KEY) === "1";
+  } catch {
+    return true;
+  }
+}
+
+export function markWelcomeSeen() {
+  if (!isNativeApp) return;
+  try {
+    localStorage.setItem(WELCOME_SEEN_KEY, "1");
+  } catch { /* تجاهل */ }
+}
+
+/* ----------------------------------------------------------
+   بادج عدد قطع السلة على أيقونة التطبيق نفسها (خارج التطبيق،
+   عالشاشة الرئيسية لأندرويد) — مو كل مشغّلات أندرويد (launchers)
+   بتدعمها، فبنحاول بهدوء وبنتجاهل لو مش مدعومة، بدون ما نكسر شي.
+   ---------------------------------------------------------- */
+export async function updateAppBadge(count) {
+  if (!isNativeApp) return;
+  try {
+    const { Badge } = await import("@capawesome/capacitor-badge");
+    if (count > 0) {
+      await Badge.set({ count });
+    } else {
+      await Badge.clear();
+    }
+  } catch { /* الجهاز/المشغّل ما بيدعم البادج — تجاهل بهدوء */ }
 }

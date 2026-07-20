@@ -36,6 +36,7 @@ import {
   Tag,
   ArrowRight,
   ArrowLeft,
+  Bell,
   Home as HomeIcon,
 } from "lucide-react";
 import Admin from "./Admin.jsx";
@@ -54,6 +55,10 @@ import {
   addRecentlyViewed,
   getRecentlyViewed,
   registerEdgeSwipeBack,
+  playSuccessChime,
+  updateAppBadge,
+  hasSeenWelcome,
+  markWelcomeSeen,
 } from "./native.js";
 
 /* ============================================================
@@ -1514,10 +1519,19 @@ function KanaanShop() {
     hideSplashScreen();
   }, []);
 
-  // إشعارات Push — بيسأل الإذن مرة وحدة، وبيسجّل توكن الجهاز عندنا
+  // شاشة الترحيب الأولى — تظهر مرة وحدة بس، أول تشغيل للتطبيق
+  const [showWelcome, setShowWelcome] = useState(() => isNativeApp && !hasSeenWelcome());
+
+  // إشعارات Push — بنسأل الإذن بعد ما شاشة الترحيب تتقفل (أو فوراً
+  // لو المستخدم شافها قبل)، مش فجأة بلا سياق أول ما التطبيق يفتح
   useEffect(() => {
-    registerPushNotifications(apiBase);
-  }, []);
+    if (!showWelcome) registerPushNotifications(apiBase);
+  }, [showWelcome]);
+
+  const dismissWelcome = () => {
+    markWelcomeSeen();
+    setShowWelcome(false);
+  };
 
   // زر الرجوع الفيزيائي بأندرويد: يرجع بالراوتر الداخلي (متل صفحة
   // منتج → كتالوج) قبل ما يفكر يقفل التطبيق من الصفحة الرئيسية
@@ -1680,6 +1694,10 @@ function KanaanShop() {
   const removeFromCart = (key) => setCart((prev) => prev.filter((i) => i.key !== key));
 
   const cartCount = cart.reduce((sum, i) => sum + i.qty, 0);
+
+  useEffect(() => {
+    updateAppBadge(cartCount);
+  }, [cartCount]);
   const cartTotal = cart.reduce((sum, i) => sum + i.qty * i.price, 0);
 
   const filteredProducts = useMemo(() => {
@@ -1733,7 +1751,7 @@ function KanaanShop() {
       <main>
         <PageTransition path={path} direction={navDirection}>
         {route.type === "home" && isNativeApp && (
-          <NativeHomeView products={products} loading={catalogLoading} goCatalog={goCatalog} goSale={goSale} openProduct={openProduct} likes={likes} toggleLike={toggleLike} storyRings={storyRings} openStory={openStory} goFavorites={goFavorites} onCart={() => setCartOpen(true)} cartCount={cartCount} onRefresh={refreshProducts} />
+          <NativeHomeView products={products} loading={catalogLoading} goCatalog={goCatalog} goSale={goSale} openProduct={openProduct} likes={likes} toggleLike={toggleLike} storyRings={storyRings} openStory={openStory} goFavorites={goFavorites} onCart={() => setCartOpen(true)} cartCount={cartCount} />
         )}
         {route.type === "home" && !isNativeApp && (
           <HomeView products={products} loading={catalogLoading} goCatalog={goCatalog} goSale={goSale} openProduct={openProduct} likes={likes} toggleLike={toggleLike} storyRings={storyRings} openStory={openStory} />
@@ -1817,6 +1835,7 @@ function KanaanShop() {
           likesCount={likes.length}
         />
       )}
+      {showWelcome && <WelcomeSheet onDismiss={dismissWelcome} />}
     </div>
     </ProductsContext.Provider>
   );
@@ -2746,37 +2765,7 @@ function SpotlightCard({ product, onOpen }) {
   );
 }
 
-/* بديل بسيط "Pull to refresh" — سحبة من فوق (بس والمستخدم أصلاً
-   بأعلى الصفحة) بتعمل تحديث. بلا مكتبة خارجية، لمسة تفاعل بس. */
-function usePullToRefresh(onRefresh) {
-  const [pulling, setPulling] = useState(false);
-  const startY = useRef(null);
-  const triggered = useRef(false);
-
-  const onTouchStart = (e) => {
-    if (window.scrollY <= 0) startY.current = e.touches[0].clientY;
-  };
-  const onTouchMove = (e) => {
-    if (startY.current == null) return;
-    const dy = e.touches[0].clientY - startY.current;
-    if (dy > 70 && !triggered.current) {
-      triggered.current = true;
-      setPulling(true);
-      hapticLight();
-      Promise.resolve(onRefresh()).finally(() => {
-        setTimeout(() => setPulling(false), 400);
-      });
-    }
-  };
-  const onTouchEnd = () => {
-    startY.current = null;
-    triggered.current = false;
-  };
-
-  return { pulling, handlers: { onTouchStart, onTouchMove, onTouchEnd } };
-}
-
-function NativeHomeView({ products, loading, goCatalog, goSale, openProduct, likes, toggleLike, storyRings, openStory, goFavorites, onCart, cartCount, onRefresh }) {
+function NativeHomeView({ products, loading, goCatalog, goSale, openProduct, likes, toggleLike, storyRings, openStory, goFavorites, onCart, cartCount }) {
   useEffect(() => {
     document.title = `${STORE_NAME} — Menswear from Saida, Lebanon`;
   }, []);
@@ -2793,16 +2782,8 @@ function NativeHomeView({ products, loading, goCatalog, goSale, openProduct, lik
   const recentIds = getRecentlyViewed();
   const recentProducts = recentIds.map((id) => products.find((p) => p.id === id)).filter(Boolean).slice(0, 8);
 
-  const { pulling, handlers } = usePullToRefresh(onRefresh);
-
   return (
-    <div className="pb-4" {...handlers}>
-      {pulling && (
-        <div className="flex justify-center py-3">
-          <Loader2 className="w-5 h-5 spin text-coral" />
-        </div>
-      )}
-
+    <div className="pb-4" style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}>
       {/* ترحيب — بديل الهيرو التسويقي، هوية "أنا تطبيق" فوراً. توهج
           خفيف دايم خلف الترحيب (بغض النظر عن الثيم) — إشارة بصرية
           صغيرة بس ثابتة إنو هاد تطبيق إلو شخصيته، مش نسخة من الموقع. */}
@@ -2825,7 +2806,7 @@ function NativeHomeView({ products, loading, goCatalog, goSale, openProduct, lik
       </section>
 
       {/* بلاطتين سريعتين — سلة ومفضلة، بدل ما تدور عليهم بالهيدر */}
-      <section className="px-4 sm:px-6 pb-5">
+      <section className="px-4 sm:px-6 pb-7">
         <div className="grid grid-cols-2 gap-3">
           <button onClick={goFavorites} className="glass rounded-2xl p-4 flex items-center gap-3 tap-scale text-left">
             <div className="glass rounded-xl p-2" style={{ background: "rgba(255,69,34,0.12)" }}>
@@ -2852,14 +2833,14 @@ function NativeHomeView({ products, loading, goCatalog, goSale, openProduct, lik
 
       {/* بطاقة Spotlight — منتج واحد مميز بصورة حقيقية كبيرة */}
       {spotlight && !loading && (
-        <section className="px-4 sm:px-6 pb-6">
+        <section className="px-4 sm:px-6 pb-7">
           <SpotlightCard product={spotlight} onOpen={openProduct} />
         </section>
       )}
 
       {/* شبكة فئات بصفّين، بألوان متبادلة كورال/تيل — أحيا بصرياً
           من رمادي موحّد، وبنفس ألوان الهوية بدون إضافة لون جديد */}
-      <section className="pb-6">
+      <section className="pb-7">
         <div className="px-4 sm:px-6 flex items-center justify-between mb-3">
           <h2 className="font-display font-bold text-lg">Browse</h2>
           <button onClick={() => goCatalog("all")} className="font-body text-sm text-coral">See all</button>
@@ -2888,7 +2869,7 @@ function NativeHomeView({ products, loading, goCatalog, goSale, openProduct, lik
       </section>
 
       {saleCount > 0 && (
-        <section className="px-4 sm:px-6 pb-6">
+        <section className="px-4 sm:px-6 pb-7">
           <SaleCard onOpen={goSale} count={saleCount} maxDiscount={maxDiscount} />
         </section>
       )}
@@ -2896,7 +2877,7 @@ function NativeHomeView({ products, loading, goCatalog, goSale, openProduct, lik
       {/* "شفتها مؤخراً" — تخصيص حقيقي، حصري للتطبيق، ما بيظهر أبداً
           إذا ما في تاريخ تصفّح لسا */}
       {recentProducts.length > 0 && (
-        <section className="pb-8">
+        <section className="pb-7">
           <div className="px-4 sm:px-6 flex items-center gap-2 mb-3">
             <RotateCcw className="w-4 h-4 text-muted" />
             <h2 className="font-display font-bold text-lg">Recently viewed</h2>
@@ -2912,7 +2893,7 @@ function NativeHomeView({ products, loading, goCatalog, goSale, openProduct, lik
       )}
 
       {/* شريط "جديد" أفقي — قابل للسحب، بدل شبكة ثابتة، إحساس تطبيق أكتر */}
-      <section className="pb-8">
+      <section className="pb-7">
         <div className="px-4 sm:px-6 flex items-center justify-between mb-3">
           <h2 className="font-display font-bold text-lg">New in</h2>
           <button onClick={() => goCatalog("all")} className="font-body text-sm text-coral">See all</button>
@@ -3534,6 +3515,7 @@ function CheckoutView({ cart, total, onSubmitted }) {
     window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${msg}`, "_blank");
     setSending(false);
     hapticSuccess();
+    playSuccessChime();
     saveCheckoutInfo(form); // بالتطبيق بس — عشان يتعبّى تلقائياً المرة الجاية
     onSubmitted({ ...form, total: grandTotal, count: cart.reduce((sum, i) => sum + i.qty, 0), orderNumber });
   };
@@ -3664,6 +3646,57 @@ function ConfirmationView({ order, goHome }) {
 }
 
 /* ============================================================
+   WELCOME SHEET — شاشة ترحيب سريعة، مرة وحدة بس (أول تشغيل).
+   بتشرح الميزات الحصرية بالتطبيق قبل ما نسأل عن إذن الإشعارات،
+   حتى المستخدم يفهم القيمة قبل ما يوافق أو يرفض.
+   ============================================================ */
+function WelcomeSheet({ onDismiss }) {
+  const perks = [
+    { Icon: Bell, title: "Be the first to know", desc: "Sales, drops, and restocks — sent straight to you." },
+    { Icon: Sparkles, title: "App-only extras", desc: "Faster checkout with saved details, and pieces you'll only see here." },
+    { Icon: Heart, title: "Keep track of favorites", desc: "Save pieces and pick up right where you left off." },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-center">
+      <div className="absolute inset-0" style={{ background: "rgba(0,0,0,0.5)" }} />
+      <div
+        className="glass relative w-full sm:max-w-sm rounded-t-3xl sm:rounded-3xl p-6"
+        style={{ paddingBottom: "calc(1.5rem + env(safe-area-inset-bottom, 0px))" }}
+      >
+        <div className="flex flex-col items-center text-center mb-6">
+          <LogoMark variant="compact" className="h-8 w-auto mb-4" />
+          <h2 className="font-display font-bold text-xl">Welcome to the app</h2>
+          <p className="font-body text-sm text-muted mt-1">A few things that only work here</p>
+        </div>
+
+        <div className="space-y-4 mb-6">
+          {perks.map(({ Icon, title, desc }) => (
+            <div key={title} className="flex items-start gap-3">
+              <div className="glass rounded-xl p-2 flex-shrink-0" style={{ background: "rgba(255,69,34,0.12)" }}>
+                <Icon className="w-4 h-4 text-coral" />
+              </div>
+              <div>
+                <p className="font-body text-sm font-medium">{title}</p>
+                <p className="font-body text-xs text-muted mt-0.5 leading-5">{desc}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <button
+          onClick={onDismiss}
+          className="glass-btn w-full rounded-full font-body font-medium py-3 tap-scale"
+          style={{ background: "var(--coral)", color: "#fff" }}
+        >
+          Let's go
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
    APP TOP BAR — بديل خفيف للهيدر الكامل، حصري للتطبيق. يظهر بس
    بالصفحات غير الرئيسية (الهوم إلها ترحيبها الخاص، ما بتحتاج
    شريط فوقها). زر رجوع + عنوان الصفحة + سلة صغيرة، وخلص —
@@ -3683,7 +3716,7 @@ function routeTitle(route, currentProduct) {
 
 function AppTopBar({ title, canGoBack, onBack, cartCount, onCart }) {
   return (
-    <div className="sticky top-0 z-30 px-3 pt-3">
+    <div className="sticky top-0 z-30 px-3" style={{ paddingTop: "calc(0.75rem + env(safe-area-inset-top, 0px))" }}>
       <div className="glass rounded-2xl flex items-center justify-between px-2 py-2">
         <button
           onClick={onBack}
@@ -3817,15 +3850,15 @@ function BottomTabBar({ activeType, goHome, goCatalog, onSearch, goFavorites, on
    ============================================================ */
 function WhatsAppFab({ raised }) {
   const { reducedMotion } = useApp();
+  // بالتطبيق ما بنعرض هالزر العائم أبداً — كان يتصادم بصرياً مع شريط
+  // التنقّل السفلي والبطاقات، وأصلاً في رابط "Need help?" بآخر كل
+  // صفحة (AppFootnote) بيغطي نفس الحاجة بدون تراكم.
+  if (isNativeApp) return null;
+
   const href = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(
     `Hi ${STORE_NAME}! I have a question`
   )}`;
-  // بالتطبيق في شريط تنقّل سفلي ثابت — لازم الزر يطلع فوقه دايماً،
-  // فوق الـ "raised" العادي يلي أصلاً موجود لصفحة المنتج.
-  const nativeBase = "calc(72px + env(safe-area-inset-bottom) + 0.75rem)";
-  const bottom = isNativeApp
-    ? (raised ? `calc(${nativeBase} + 4.75rem)` : nativeBase)
-    : (raised ? "6rem" : "1.25rem");
+  const bottom = raised ? "6rem" : "1.25rem";
   return (
     <a
       href={href}

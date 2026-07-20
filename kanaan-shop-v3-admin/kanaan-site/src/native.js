@@ -256,7 +256,7 @@ export function registerEdgeSwipeBack(onTrigger) {
    بيستدعى مرة وحدة لما التطبيق يفتح — إذا المستخدم رفض الإذن أو
    الجهاز ما بيدعم، بنسكت ونكمل عادي، الإشعارات مش وظيفة أساسية.
    ---------------------------------------------------------- */
-export async function registerPushNotifications(apiBaseUrl) {
+export async function registerPushNotifications(apiBaseUrl, onNotificationTap) {
   if (!isNativeApp) return;
   try {
     const { PushNotifications } = await import("@capacitor/push-notifications");
@@ -279,10 +279,13 @@ export async function registerPushNotifications(apiBaseUrl) {
       } catch { /* هيك بس — منجرب تسجيل تاني بالمرة الجاية يفتح فيها التطبيق */ }
     });
 
-    // لما المستخدم يدوس عالإشعار (والتطبيق كان مسكّر أو بالخلفية)
+    // لما المستخدم يدوس عالإشعار (والتطبيق كان مسكّر أو بالخلفية) —
+    // بنفتح الصفحة *جوا التطبيق* عبر الراوتر الداخلي، مش عبر نقلة
+    // صفحة كاملة (يلي كانت بتفتح متصفح خارجي لأنو دومين الموقع
+    // مختلف عن دومين نسخة التطبيق المحلية).
     PushNotifications.addListener("pushNotificationActionPerformed", (action) => {
       const url = action?.notification?.data?.url;
-      if (url) window.location.href = url;
+      if (url && onNotificationTap) onNotificationTap(url);
     });
   } catch { /* أي مشكلة هون ما لازم توقف باقي التطبيق */ }
 }
@@ -316,10 +319,23 @@ export function markWelcomeSeen() {
    عالشاشة الرئيسية لأندرويد) — مو كل مشغّلات أندرويد (launchers)
    بتدعمها، فبنحاول بهدوء وبنتجاهل لو مش مدعومة، بدون ما نكسر شي.
    ---------------------------------------------------------- */
+let badgePermissionAsked = false;
+
 export async function updateAppBadge(count) {
   if (!isNativeApp) return;
   try {
     const { Badge } = await import("@capawesome/capacitor-badge");
+
+    // لازم نطلب إذن البادج قبل أول استخدام — بدونها Badge.set() بيفشل
+    // بصمت على أغلب الأجهزة، وهاد كان سبب عدم ظهور الرقم فعلياً.
+    if (!badgePermissionAsked) {
+      badgePermissionAsked = true;
+      const perm = await Badge.checkPermissions();
+      if (perm.display !== "granted") {
+        await Badge.requestPermissions();
+      }
+    }
+
     if (count > 0) {
       await Badge.set({ count });
     } else {

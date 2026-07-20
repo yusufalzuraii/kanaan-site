@@ -1534,27 +1534,26 @@ function KanaanShop() {
   // إشعارات Push — بنسأل الإذن بعد ما شاشة الترحيب تتقفل (أو فوراً
   // لو المستخدم شافها قبل)، مش فجأة بلا سياق أول ما التطبيق يفتح
   useEffect(() => {
-    if (!showWelcome) registerPushNotifications(apiBase);
+    if (!showWelcome) {
+      registerPushNotifications(apiBase, (url) => {
+        // نستخرج بس المسار من الرابط الكامل ("/sale" من
+        // "https://kanaanshop.com/sale") ونفتحو بالراوتر الداخلي —
+        // هيك ما في نقلة صفحة كاملة لنطاق تاني (يلي كانت بتفتح
+        // متصفح خارجي بدل التطبيق).
+        try {
+          const path = new URL(url, SITE_URL).pathname;
+          navigate(path || "/");
+        } catch {
+          navigate("/");
+        }
+      });
+    }
   }, [showWelcome]);
 
   const dismissWelcome = () => {
     markWelcomeSeen();
     setShowWelcome(false);
   };
-
-  // زر الرجوع الفيزيائي بأندرويد: يرجع بالراوتر الداخلي (متل صفحة
-  // منتج → كتالوج) قبل ما يفكر يقفل التطبيق من الصفحة الرئيسية
-  useEffect(() => {
-    let cleanup = () => {};
-    registerBackButtonHandler({
-      canGoBack,
-      onBackWithinApp: () => window.history.back(),
-      onExitApp: () => {
-        import("@capacitor/app").then(({ App }) => App.exitApp());
-      },
-    }).then((fn) => { cleanup = fn; });
-    return () => cleanup();
-  }, []);
 
   // سحب من حافة الشاشة اليسرى للرجوع — بس إذا في فعلاً وين نرجع
   useEffect(() => {
@@ -1671,6 +1670,31 @@ function KanaanShop() {
   const [openRingId, setOpenRingId] = useState(null);
   const openStory = (ringId) => setOpenRingId(ringId);
   const closeStory = () => setOpenRingId(null);
+
+  // زر الرجوع الفيزيائي بأندرويد — عندو أولويات بالترتيب:
+  // 1) لو في نافذة منبثقة مفتوحة (سلة/بحث/ستوري/قائمة)، سكّرها بس
+  // 2) لو لأ، بس لسا في صفحات نرجعلها جوا الراوتر، ارجع
+  // 3) لو لأ (إحنا بالصفحة الأولى وما في نوافذ مفتوحة)، اطلع من التطبيق
+  // بدون هالترتيب، كانت أي نافذة منبثقة مفتوحة بتخلي زر الرجوع يطلع
+  // من التطبيق كامل بدل ما يسكّر النافذة بس — بالظبط المشكلة يلي صارت.
+  useEffect(() => {
+    let cleanup = () => {};
+    const hasOpenOverlay = cartOpen || searchOpen || !!openRingId || menuOpen;
+    registerBackButtonHandler({
+      canGoBack: () => hasOpenOverlay || canGoBack(),
+      onBackWithinApp: () => {
+        if (cartOpen) { setCartOpen(false); return; }
+        if (searchOpen) { setSearchOpen(false); return; }
+        if (openRingId) { closeStory(); return; }
+        if (menuOpen) { setMenuOpen(false); return; }
+        window.history.back();
+      },
+      onExitApp: () => {
+        import("@capacitor/app").then(({ App }) => App.exitApp());
+      },
+    }).then((fn) => { cleanup = fn; });
+    return () => cleanup();
+  }, [cartOpen, searchOpen, openRingId, menuOpen]);
 
   // colorKey = the palette key we track stock against ("black")
   // colorLabel = what the shopper reads ("Black")
@@ -2239,11 +2263,11 @@ function StoryTile({ ring, onOpen }) {
         <div className="relative w-full h-full rounded-xl overflow-hidden" style={{ background: "#1A1A1E" }}>
           {cover.kind === "compare" ? (
             <div className="absolute inset-0 flex">
-              <div className="w-1/2 h-full overflow-hidden">{ok && <img src={cover.image} alt="" className="w-full h-full" style={{ objectFit: "cover" }} onError={() => setOk(false)} />}</div>
-              <div className="w-1/2 h-full overflow-hidden">{ok && <img src={cover.imageB} alt="" className="w-full h-full" style={{ objectFit: "cover" }} onError={() => setOk(false)} />}</div>
+              <div className="w-1/2 h-full overflow-hidden">{ok && <img src={productImageSrc(cover.image)} alt="" className="w-full h-full" style={{ objectFit: "cover" }} onError={() => setOk(false)} />}</div>
+              <div className="w-1/2 h-full overflow-hidden">{ok && <img src={productImageSrc(cover.imageB)} alt="" className="w-full h-full" style={{ objectFit: "cover" }} onError={() => setOk(false)} />}</div>
             </div>
           ) : ok ? (
-            <img src={cover.image} alt="" className="absolute inset-0 w-full h-full" style={{ objectFit: "cover" }} loading="lazy" onError={() => setOk(false)} />
+            <img src={productImageSrc(cover.image)} alt="" className="absolute inset-0 w-full h-full" style={{ objectFit: "cover" }} loading="lazy" onError={() => setOk(false)} />
           ) : (
             <div className="absolute inset-0 flex items-center justify-center"><Sparkles className="w-6 h-6" style={{ color: "rgba(255,255,255,0.4)" }} /></div>
           )}
@@ -2415,7 +2439,7 @@ function StorySlideView({ slide, onTagTap }) {
   if (slide.kind === "compare") return <CompareSlide slide={slide} />;
   return (
     <div className="absolute inset-0">
-      <img src={slide.image} alt="" className="absolute inset-0 w-full h-full" style={{ objectFit: "cover" }} />
+      <img src={productImageSrc(slide.image)} alt="" className="absolute inset-0 w-full h-full" style={{ objectFit: "cover" }} />
       <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, rgba(0,0,0,0.35) 0%, transparent 20%, transparent 60%, rgba(0,0,0,0.55) 100%)" }} />
       {slide.tags.map((tag) => (
         <TagDot key={tag.productId + tag.x + tag.y} tag={tag} onTap={() => onTagTap(tag.productId)} />
@@ -2465,9 +2489,9 @@ function CompareSlide({ slide }) {
       onMouseLeave={() => { dragging.current = false; }}
       onTouchMove={(e) => setFromClientX(e.touches[0].clientX)}
     >
-      <img src={slide.image} alt={slide.labelA} className="absolute inset-0 w-full h-full" style={{ objectFit: "cover" }} draggable={false} />
+      <img src={productImageSrc(slide.image)} alt={slide.labelA} className="absolute inset-0 w-full h-full" style={{ objectFit: "cover" }} draggable={false} />
       <div className="absolute inset-0" style={{ clipPath: `inset(0 0 0 ${pos}%)` }}>
-        <img src={slide.imageB} alt={slide.labelB} className="absolute inset-0 w-full h-full" style={{ objectFit: "cover" }} draggable={false} />
+        <img src={productImageSrc(slide.imageB)} alt={slide.labelB} className="absolute inset-0 w-full h-full" style={{ objectFit: "cover" }} draggable={false} />
       </div>
       <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, rgba(0,0,0,0.3) 0%, transparent 25%, transparent 65%, rgba(0,0,0,0.5) 100%)" }} />
 
@@ -2507,13 +2531,16 @@ function CompleteTheLook({ slide, products, onPick }) {
   const strip = [...tagged, ...more].slice(0, 5);
 
   return (
-    <div className="absolute left-0 right-0 z-[6] px-4" style={{ bottom: 20 }}>
+    <div
+      className="absolute left-0 right-0 z-[6] px-4"
+      style={{ bottom: isNativeApp ? "calc(20px + env(safe-area-inset-bottom, 0px))" : 20 }}
+    >
       <p className="font-body text-white text-xs mb-2" style={{ opacity: 0.85, textShadow: "0 1px 4px rgba(0,0,0,0.5)" }}>Shop this look</p>
       <div className="flex gap-2 overflow-x-auto pb-1" style={{ WebkitOverflowScrolling: "touch" }}>
         {strip.map((p) => (
           <button key={p.id} onClick={(e) => { e.stopPropagation(); onPick(p.id); }} className="flex-shrink-0 rounded-xl overflow-hidden tap-scale" style={{ width: 52, height: 65, border: "1.5px solid rgba(255,255,255,0.5)" }}>
             {p.images?.[0]?.url ? (
-              <img src={p.images[0].url} alt="" className="w-full h-full" style={{ objectFit: "cover" }} />
+              <img src={productImageSrc(p.images[0].url)} alt="" className="w-full h-full" style={{ objectFit: "cover" }} />
             ) : (
               <div className="w-full h-full flex items-center justify-center" style={{ background: "#222" }}><Shirt className="w-4 h-4 text-white" style={{ opacity: 0.5 }} /></div>
             )}
@@ -2554,7 +2581,7 @@ function StoryQuickAdd({ product, onClose, addToCart, openProduct }) {
         <div className="flex justify-center mb-3"><span style={{ width: 36, height: 4, borderRadius: 4, background: "rgba(255,255,255,0.25)" }} /></div>
         <div className="flex items-center gap-3 mb-3">
           {product.images?.[0]?.url && (
-            <img src={product.images[0].url} alt="" className="rounded-xl flex-shrink-0" style={{ width: 52, height: 65, objectFit: "cover" }} />
+            <img src={productImageSrc(product.images[0].url)} alt="" className="rounded-xl flex-shrink-0" style={{ width: 52, height: 65, objectFit: "cover" }} />
           )}
           <div className="flex-1 min-w-0">
             <p className="font-body text-white text-sm font-medium truncate">{product.name}</p>
@@ -3388,7 +3415,14 @@ function CartDrawer({ open, onClose, cart, updateQty, removeFromCart, total, onC
   return (
     <>
       <div onClick={onClose} className={`fixed inset-0 z-40 transition-opacity ${open ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"}`} style={{ background: "rgba(0,0,0,0.4)", backdropFilter: "blur(2px)" }} />
-      <aside className="glass fixed top-3 bottom-3 right-3 w-[calc(100%-24px)] sm:w-96 z-50 rounded-3xl transition-transform duration-400 flex flex-col" style={{ transform: open ? "translateX(0)" : "translateX(calc(100% + 24px))" }}>
+      <aside
+        className="glass fixed right-3 w-[calc(100%-24px)] sm:w-96 z-50 rounded-3xl transition-transform duration-400 flex flex-col"
+        style={{
+          transform: open ? "translateX(0)" : "translateX(calc(100% + 24px))",
+          top: isNativeApp ? "calc(0.75rem + env(safe-area-inset-top, 0px))" : "0.75rem",
+          bottom: isNativeApp ? "calc(0.75rem + env(safe-area-inset-bottom, 0px))" : "0.75rem",
+        }}
+      >
         <div className="flex items-center justify-between p-5 border-b" style={{ borderColor: "var(--border)" }}>
           <h2 className="font-display font-bold text-lg">Your cart</h2>
           <button onClick={onClose} className="p-1 tap-scale" aria-label="Close">

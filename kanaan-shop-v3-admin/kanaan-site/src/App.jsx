@@ -57,6 +57,13 @@ import {
 const WHATSAPP_NUMBER = "96181445681"; // shop's order number, intl format, no + or leading 0
 const STORE_NAME = "Kanaan Shop";
 const SITE_URL = "https://kanaanshop.com"; // update once the real domain is connected
+
+/* بالتطبيق (Capacitor)، المحتوى بيتحمّل من عنوان داخلي وهمي
+   (https://localhost)، مش من kanaanshop.com — فمسارات نسبية زي
+   "/api/products" أو "/img/..." ما بتلاقي وجهتها الحقيقية. بالموقع
+   العادي apiBase فاضي وكل شي بيضل يشتغل زي ما كان (نسبي لنفس النطاق).
+   بالتطبيق بس، منحط الدومين الحقيقي قبل أي مسار يبلش بـ "/". */
+const apiBase = isNativeApp ? SITE_URL : "";
 const DELIVERY_FEE = 5;
 const INSTAGRAM_URL = "https://www.instagram.com/kanaan.shop";
 const INSTAGRAM_HANDLE = "@kanaan.shop";
@@ -523,8 +530,8 @@ function productImageSrc(image) {
   if (!v) return null;
   // Full URL, or an absolute path like /img/... (served from R2), is used as-is.
   if (/^https?:\/\//i.test(v)) return v;
-  if (v.startsWith("/")) return v;
-  return `/products/${v.replace(/^\/+/, "")}`;
+  if (v.startsWith("/")) return `${apiBase}${v}`;
+  return `${apiBase}/products/${v.replace(/^\/+/, "")}`;
 }
 
 // A product's photos, normalized to a clean array of usable image URLs.
@@ -1551,7 +1558,7 @@ function KanaanShop() {
     let alive = true;
     (async () => {
       try {
-        const res = await fetch("/api/products");
+        const res = await fetch(`${apiBase}/api/products`);
         const data = await res.json();
         if (alive && Array.isArray(data.products)) setProducts(data.products);
       } catch { /* offline or API not ready */ }
@@ -1564,7 +1571,7 @@ function KanaanShop() {
     let alive = true;
     (async () => {
       try {
-        const res = await fetch("/api/stories");
+        const res = await fetch(`${apiBase}/api/stories`);
         const data = await res.json();
         if (alive && Array.isArray(data.rings)) setStoryRings(data.rings);
       } catch { /* The Edit is a bonus feature — never block the shop on it */ }
@@ -3194,7 +3201,7 @@ function CheckoutView({ cart, total, onSubmitted }) {
     // We open WhatsApp with the real order number the server gave us.
     let orderNumber = null;
     try {
-      const res = await fetch("/api/orders", {
+      const res = await fetch(`${apiBase}/api/orders`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

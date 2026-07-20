@@ -35,9 +35,21 @@ import {
   ChevronDown,
   Tag,
   ArrowRight,
+  Home as HomeIcon,
 } from "lucide-react";
 import Admin from "./Admin.jsx";
 import { COLORS as PALETTE, swatchBackground } from "./palette.js";
+import {
+  isNativeApp,
+  hapticLight,
+  hapticSuccess,
+  registerBackButtonHandler,
+  syncStatusBar,
+  hideSplashScreen,
+  nativeShare,
+  saveCheckoutInfo,
+  loadCheckoutInfo,
+} from "./native.js";
 
 /* ============================================================
    SETTINGS — edit before publishing
@@ -200,6 +212,7 @@ function parseRoute(path) {
   if (path === "/") return { type: "home" };
   if (path.startsWith("/admin")) return { type: "admin" };
   if (path === "/sale") return { type: "sale" };
+  if (path === "/favorites") return { type: "favorites" };
   if (path === "/shop") return { type: "catalog", category: "all", sub: null };
   if (path.startsWith("/shop/")) {
     const [category, sub] = path.slice(6).split("/").filter(Boolean);
@@ -1458,6 +1471,30 @@ function KanaanShop() {
   });
   const [searchOpen, setSearchOpen] = useState(false);
 
+  // شريط الحالة بيتبع الثيم الحالي (بس جوا التطبيق — على الموقع ما في تأثير)
+  useEffect(() => {
+    syncStatusBar(theme);
+  }, [theme]);
+
+  // أول ما التطبيق يخلص أول رندر، منخفي شاشة الـ splash — هيك ما في
+  // ومضة شاشة بيضا بين الـ splash والمحتوى الحقيقي
+  useEffect(() => {
+    hideSplashScreen();
+  }, []);
+
+  // زر الرجوع الفيزيائي بأندرويد: يرجع بالراوتر الداخلي (متل صفحة
+  // منتج → كتالوج) قبل ما يفكر يقفل التطبيق من الصفحة الرئيسية
+  useEffect(() => {
+    let cleanup = () => {};
+    registerBackButtonHandler({
+      onBackWithinApp: () => window.history.back(),
+      onExitApp: () => {
+        import("@capacitor/app").then(({ App }) => App.exitApp());
+      },
+    }).then((fn) => { cleanup = fn; });
+    return () => cleanup();
+  }, []);
+
   // Belt and braces on the scroll reset: navigate() jumps immediately, and
   // this runs again once the new page has actually rendered, so a tall
   // catalog can't leave you stranded halfway down the product page.
@@ -1542,10 +1579,14 @@ function KanaanShop() {
     setMenuOpen(false);
   };
   const goSale = () => { navigate("/sale"); setMenuOpen(false); };
+  const goFavorites = () => { navigate("/favorites"); setMenuOpen(false); };
   const openProduct = (product) => navigate(`/product/${product.slug}`);
   const goCheckout = () => { setCartOpen(false); setOrderPlaced(false); navigate("/checkout"); };
 
-  const toggleLike = (id) => setLikes((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  const toggleLike = (id) => {
+    hapticLight();
+    setLikes((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
 
   const cartKey = (pid, size, colorKey) => `${pid}-${size}-${colorKey}`;
 
@@ -1571,6 +1612,7 @@ function KanaanShop() {
         size, colorKey, color: colorLabel, qty: Math.min(qty, limit),
       }];
     });
+    hapticLight();
     setCartOpen(true);
   };
 
@@ -1617,7 +1659,11 @@ function KanaanShop() {
 
   return (
     <ProductsContext.Provider value={products}>
-    <div data-theme={theme} className="min-h-screen bg-app text-fg font-body relative">
+    <div
+      data-theme={theme}
+      className="min-h-screen bg-app text-fg font-body relative"
+      style={isNativeApp ? { paddingBottom: "calc(56px + env(safe-area-inset-bottom))" } : undefined}
+    >
       <GlobalStyles />
       <Header cartCount={cartCount} onHome={goHome} onCart={() => setCartOpen(true)} onSearch={() => setSearchOpen(true)} onSale={goSale} menuOpen={menuOpen} setMenuOpen={setMenuOpen} goCatalog={goCatalog} />
       <main>
@@ -1629,6 +1675,9 @@ function KanaanShop() {
         )}
         {route.type === "catalog" && (
           <CatalogView activeCategory={route.category} activeSub={route.sub} loading={catalogLoading} goCatalog={goCatalog} products={filteredProducts} openProduct={openProduct} likes={likes} toggleLike={toggleLike} />
+        )}
+        {route.type === "favorites" && (
+          <FavoritesView products={products} loading={catalogLoading} likes={likes} openProduct={openProduct} toggleLike={toggleLike} goCatalog={goCatalog} />
         )}
         {route.type === "product" && currentProduct && (
           <ProductView product={currentProduct} products={products} addToCart={addToCart} openProduct={openProduct} liked={likes.includes(currentProduct.id)} toggleLike={() => toggleLike(currentProduct.id)} />
@@ -1687,6 +1736,18 @@ function KanaanShop() {
         total={cartTotal}
         onCheckout={goCheckout}
       />
+      {isNativeApp && route.type !== "checkout" && (
+        <BottomTabBar
+          activeType={route.type}
+          goHome={goHome}
+          goCatalog={goCatalog}
+          onSearch={() => setSearchOpen(true)}
+          goFavorites={goFavorites}
+          onCart={() => setCartOpen(true)}
+          cartCount={cartCount}
+          likesCount={likes.length}
+        />
+      )}
     </div>
     </ProductsContext.Provider>
   );
@@ -1907,6 +1968,14 @@ function GlobalStyles() {
       }
 
       .tap-scale { transition: transform 0.15s ease; }
+
+      /* شريط التنقل السفلي — حصري للتطبيق. env(safe-area-inset-bottom)
+         بيحسب مساحة أزرار التنقل الأصلية بأندرويد (gesture bar) حتى
+         الشريط ما يضل ملزوق تحتها مباشرة. */
+      .native-tab-bar {
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+        height: calc(56px + env(safe-area-inset-bottom, 0px));
+      }
       .tap-scale:active { transform: scale(0.94); }
 
       ::selection { background: var(--coral); color: #fff; }
@@ -2561,6 +2630,48 @@ function HomeView({ products, loading, goCatalog, goSale, openProduct, likes, to
 }
 
 /* ============================================================
+   FAVORITES / WISHLIST — الصفحة اللي بتظهر عليها كل المنتجات
+   اللي المستخدم عمل عليها heart. موجودة أساساً للتطبيق (تبويب
+   بالشريط السفلي)، بس بتشتغل بنفس المنطق لو حد وصلها من الموقع.
+   ============================================================ */
+function FavoritesView({ products, loading, likes, openProduct, toggleLike, goCatalog }) {
+  useEffect(() => {
+    document.title = `Favorites — ${STORE_NAME}`;
+  }, []);
+
+  const favProducts = products.filter((p) => likes.includes(p.id));
+
+  return (
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10">
+      <h1 className="font-display font-bold text-3xl mb-1">Favorites</h1>
+      <p className="font-body text-sm text-muted mb-8">Pieces you've saved to come back to.</p>
+
+      {loading && products.length === 0 ? (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="rounded-2xl glass" style={{ aspectRatio: "4/5", opacity: 0.5 }} />
+          ))}
+        </div>
+      ) : favProducts.length === 0 ? (
+        <div className="text-center py-16">
+          <Heart className="w-10 h-10 text-muted mx-auto mb-3" style={{ opacity: 0.3 }} />
+          <p className="font-body text-sm text-muted mb-4">Nothing saved yet — tap the heart on any piece to add it here.</p>
+          <button onClick={() => goCatalog("all")} className="text-coral font-body text-sm hover:underline">Browse the shop</button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
+          {favProducts.map((p, i) => (
+            <Reveal key={p.id} delay={(i % 8) * 50}>
+              <ProductCard product={p} onOpen={openProduct} liked={true} onToggleLike={() => toggleLike(p.id)} />
+            </Reveal>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
    CATALOG
    ============================================================ */
 const PAGE_SIZE = 12;
@@ -2902,7 +3013,15 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
           some Android battery-saver modes, etc.) the whole bar lost its
           transform and got pushed half off-screen, hiding Add to cart
           entirely. This is what happened on the Samsung Internet browser. */}
-      <div className="fixed bottom-4 left-1/2 z-30 sm:hidden" style={{ transform: "translateX(-50%)", width: "calc(100% - 24px)", maxWidth: 420 }}>
+      <div
+        className="fixed left-1/2 z-30 sm:hidden"
+        style={{
+          transform: "translateX(-50%)",
+          width: "calc(100% - 24px)",
+          maxWidth: 420,
+          bottom: isNativeApp ? "calc(72px + env(safe-area-inset-bottom) + 0.75rem)" : "1rem",
+        }}
+      >
         <div className="glass rounded-2xl px-4 py-3 flex items-center gap-3 dock-in">
           <div className="flex-1 min-w-0">
             <p className="font-body text-xs text-muted truncate">{product.name}</p>
@@ -3022,9 +3141,17 @@ function CartDrawer({ open, onClose, cart, updateQty, removeFromCart, total, onC
    CHECKOUT
    ============================================================ */
 function CheckoutView({ cart, total, onSubmitted }) {
-  const [form, setForm] = useState({ name: "", phone: "", area: LEBANON_GOVERNORATES[0], address: "", notes: "" });
+  // بالتطبيق: نعبّي البيانات المحفوظة من طلب سابق تلقائياً (اسم/هاتف/
+  // محافظة/عنوان)، فما في داعي المستخدم يكتبها من جديد كل مرة.
+  // بالموقع، loadCheckoutInfo() برجع null دايماً والنموذج بيضل فاضي
+  // زي ما كان.
+  const [form, setForm] = useState(() => ({
+    name: "", phone: "", area: LEBANON_GOVERNORATES[0], address: "", notes: "",
+    ...loadCheckoutInfo(),
+  }));
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
+  const [autofilled] = useState(() => !!loadCheckoutInfo());
 
   useEffect(() => {
     document.title = `Checkout — ${STORE_NAME}`;
@@ -3095,6 +3222,8 @@ function CheckoutView({ cart, total, onSubmitted }) {
     const msg = encodeURIComponent(buildMessage(orderNumber));
     window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${msg}`, "_blank");
     setSending(false);
+    hapticSuccess();
+    saveCheckoutInfo(form); // بالتطبيق بس — عشان يتعبّى تلقائياً المرة الجاية
     onSubmitted({ ...form, total: grandTotal, count: cart.reduce((sum, i) => sum + i.qty, 0), orderNumber });
   };
 
@@ -3112,6 +3241,11 @@ function CheckoutView({ cart, total, onSubmitted }) {
     <div className="max-w-4xl mx-auto px-4 sm:px-6 py-10 grid md:grid-cols-5 gap-10">
       <form onSubmit={handleSubmit} className="md:col-span-3 space-y-5">
         <h1 className="font-display font-bold text-2xl mb-2">Delivery details</h1>
+        {autofilled && (
+          <p className="font-body text-xs text-teal -mt-2 mb-1">
+            Filled in from your last order — check it's still correct.
+          </p>
+        )}
 
         <Field label="Full name" required>
           <input value={form.name} onChange={set("name")} className="field" placeholder="Your name" />
@@ -3219,6 +3353,51 @@ function ConfirmationView({ order, goHome }) {
 }
 
 /* ============================================================
+   BOTTOM TAB BAR — حصري لتطبيق أندرويد/آيفون (Capacitor).
+   ما بيظهر على الموقع نهائياً — بديل التنقّل الشائع بتطبيقات
+   التسوق، الأصابع بمتناول أسفل الشاشة بدل ما تمد إيدك للهيدر فوق.
+   ============================================================ */
+function BottomTabBar({ activeType, goHome, goCatalog, onSearch, goFavorites, onCart, cartCount, likesCount }) {
+  const tabs = [
+    { key: "home", label: "Home", Icon: HomeIcon, onPress: goHome, active: activeType === "home" },
+    { key: "shop", label: "Shop", Icon: ShoppingBag, onPress: () => goCatalog("all"), active: activeType === "catalog" },
+    { key: "search", label: "Search", Icon: Search, onPress: onSearch, active: false },
+    { key: "favorites", label: "Favorites", Icon: Heart, onPress: goFavorites, active: activeType === "favorites", badge: likesCount },
+    { key: "cart", label: "Cart", Icon: ShoppingCart, onPress: onCart, active: false, badge: cartCount },
+  ];
+
+  return (
+    <nav
+      className="native-tab-bar glass fixed left-0 right-0 bottom-0 z-40 flex items-stretch"
+      style={{ borderRadius: 0, borderLeft: "none", borderRight: "none", borderBottom: "none" }}
+    >
+      {tabs.map(({ key, label, Icon, onPress, active, badge }) => (
+        <button
+          key={key}
+          onClick={onPress}
+          className="flex-1 flex flex-col items-center justify-center gap-0.5 tap-scale relative"
+          style={{ paddingTop: 8, paddingBottom: 4, color: active ? "var(--coral)" : "var(--fg-muted)" }}
+          aria-label={label}
+        >
+          <span className="relative">
+            <Icon className="w-5 h-5" fill={key === "favorites" && active ? "var(--coral)" : "none"} />
+            {!!badge && (
+              <span
+                className="absolute -top-1.5 -right-2 bg-coral text-white text-[9px] font-num rounded-full flex items-center justify-center"
+                style={{ minWidth: 14, height: 14, padding: "0 3px" }}
+              >
+                {badge}
+              </span>
+            )}
+          </span>
+          <span className="font-body" style={{ fontSize: 10 }}>{label}</span>
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+/* ============================================================
    FLOATING WHATSAPP HELP BUTTON
    ============================================================ */
 function WhatsAppFab({ raised }) {
@@ -3226,6 +3405,12 @@ function WhatsAppFab({ raised }) {
   const href = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(
     `Hi ${STORE_NAME}! I have a question`
   )}`;
+  // بالتطبيق في شريط تنقّل سفلي ثابت — لازم الزر يطلع فوقه دايماً،
+  // فوق الـ "raised" العادي يلي أصلاً موجود لصفحة المنتج.
+  const nativeBase = "calc(72px + env(safe-area-inset-bottom) + 0.75rem)";
+  const bottom = isNativeApp
+    ? (raised ? `calc(${nativeBase} + 4.75rem)` : nativeBase)
+    : (raised ? "6rem" : "1.25rem");
   return (
     <a
       href={href}
@@ -3233,7 +3418,7 @@ function WhatsAppFab({ raised }) {
       rel="noopener noreferrer"
       aria-label="Chat with us on WhatsApp"
       className="fab-wrap fixed right-4 z-30 flex items-center"
-      style={{ bottom: raised ? "6rem" : "1.25rem" }}
+      style={{ bottom }}
     >
       <span className="fab-label glass rounded-full font-body text-sm px-3 py-2 mr-1" style={{ boxShadow: "var(--glass-shadow)" }}>
         Need help? Chat with us

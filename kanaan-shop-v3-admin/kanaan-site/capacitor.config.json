@@ -1,0 +1,13 @@
+{
+  "appId": "com.kanaanshop.app",
+  "appName": "Kanaan Shop",
+  "webDir": "dist",
+  "backgroundColor": "#F2F2F4",
+  "android": {
+    "backgroundColor": "#F2F2F4",
+    "allowMixedContent": false
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}

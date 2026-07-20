@@ -20,3 +20,13 @@ CREATE TABLE IF NOT EXISTS products (
 
 CREATE INDEX IF NOT EXISTS idx_products_active ON products (active, sort_order);
 CREATE INDEX IF NOT EXISTS idx_products_category ON products (category);
+
+-- أجهزة تطبيق أندرويد/آيفون اللي وافقت تستقبل إشعارات (Firebase Cloud
+-- Messaging). كل صف = جهاز واحد. توكن الجهاز بيتغيّر أحياناً (لما يمسح
+-- بيانات التطبيق مثلاً)، فمنحدّثه بمكانه بدل ما نضيف صف مكرر.
+CREATE TABLE IF NOT EXISTS push_tokens (
+  token       TEXT PRIMARY KEY,
+  platform    TEXT NOT NULL DEFAULT 'android',
+  created_at  INTEGER NOT NULL DEFAULT 0,
+  updated_at  INTEGER NOT NULL DEFAULT 0
+);

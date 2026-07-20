@@ -327,3 +327,58 @@ export async function updateAppBadge(count) {
     }
   } catch { /* الجهاز/المشغّل ما بيدعم البادج — تجاهل بهدوء */ }
 }
+
+/* ----------------------------------------------------------
+   نغمة خفيفة جداً — لضغطات بسيطة متكررة (مفضلة، إضافة للسلة).
+   أخف وأقصر بكتير من نغمة النجاح الكاملة، حتى ما تصير مزعجة لو
+   المستخدم عم يضيف كذا قطعة ورا بعض بسرعة.
+   ---------------------------------------------------------- */
+export function playTapChime() {
+  if (!isNativeApp) return;
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = 740;
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.14, now + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.11);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.12);
+    setTimeout(() => ctx.close(), 250);
+  } catch { /* تجاهل */ }
+}
+
+/* ----------------------------------------------------------
+   حالة الاتصال بالإنترنت — بنستخدمها لعرض بانر بسيط بدل ما نخلي
+   الصفحات تظهر فاضية بصمت أو نعتمد على شاشة خطأ المتصفح المزعجة.
+   بما إنو الواجهة هلق محزّمة محلياً جوا التطبيق (مش محمّلة لايف)،
+   هي بتفتح طبيعي حتى بلا إنترنت — بس البيانات الحية (منتجات جديدة،
+   إرسال طلب...) ما بتشتغل، فبنعلم المستخدم بهدوء بدل ما نسكت.
+   ---------------------------------------------------------- */
+export async function registerNetworkListener(onChange) {
+  if (!isNativeApp) return () => {};
+  try {
+    const { Network } = await import("@capacitor/network");
+    const status = await Network.getStatus();
+    onChange(status.connected);
+    const sub = await Network.addListener("networkStatusChange", (s) => onChange(s.connected));
+    return () => sub.remove();
+  } catch {
+    // الإضافة مش متوفرة لأي سبب — منعتمد على navigator.onLine كبديل بسيط
+    const handler = () => onChange(navigator.onLine);
+    window.addEventListener("online", handler);
+    window.addEventListener("offline", handler);
+    handler();
+    return () => {
+      window.removeEventListener("online", handler);
+      window.removeEventListener("offline", handler);
+    };
+  }
+}

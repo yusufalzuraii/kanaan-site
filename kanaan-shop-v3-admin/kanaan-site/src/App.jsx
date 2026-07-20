@@ -59,6 +59,8 @@ import {
   updateAppBadge,
   hasSeenWelcome,
   markWelcomeSeen,
+  playTapChime,
+  registerNetworkListener,
 } from "./native.js";
 
 /* ============================================================
@@ -1522,6 +1524,13 @@ function KanaanShop() {
   // شاشة الترحيب الأولى — تظهر مرة وحدة بس، أول تشغيل للتطبيق
   const [showWelcome, setShowWelcome] = useState(() => isNativeApp && !hasSeenWelcome());
 
+  // حالة الاتصال — بانر بسيط بدل ما نسكت أو نخلي المستخدم يشوف
+  // شاشة خطأ المتصفح المزعجة
+  const [isOffline, setIsOffline] = useState(false);
+  useEffect(() => {
+    return registerNetworkListener((connected) => setIsOffline(!connected));
+  }, []);
+
   // إشعارات Push — بنسأل الإذن بعد ما شاشة الترحيب تتقفل (أو فوراً
   // لو المستخدم شافها قبل)، مش فجأة بلا سياق أول ما التطبيق يفتح
   useEffect(() => {
@@ -1651,6 +1660,7 @@ function KanaanShop() {
 
   const toggleLike = (id) => {
     hapticLight();
+    playTapChime();
     setLikes((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   };
 
@@ -1679,6 +1689,7 @@ function KanaanShop() {
       }];
     });
     hapticLight();
+    playTapChime();
     setCartOpen(true);
   };
 
@@ -1732,7 +1743,7 @@ function KanaanShop() {
     <div
       data-theme={theme}
       className="min-h-screen bg-app text-fg font-body relative"
-      style={isNativeApp ? { paddingBottom: "calc(56px + env(safe-area-inset-bottom))" } : undefined}
+      style={isNativeApp ? { paddingBottom: "calc(84px + env(safe-area-inset-bottom))" } : undefined}
     >
       <GlobalStyles />
       {isNativeApp ? (
@@ -1747,6 +1758,14 @@ function KanaanShop() {
         )
       ) : (
         <Header cartCount={cartCount} onHome={goHome} onCart={() => setCartOpen(true)} onSearch={() => setSearchOpen(true)} onSale={goSale} menuOpen={menuOpen} setMenuOpen={setMenuOpen} goCatalog={goCatalog} />
+      )}
+      {isNativeApp && isOffline && (
+        <div className="px-4 sm:px-6" style={{ paddingTop: route.type === "home" ? "calc(0.75rem + env(safe-area-inset-top, 0px))" : 8 }}>
+          <div className="glass rounded-2xl px-4 py-2.5 flex items-center gap-2">
+            <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--coral)", flexShrink: 0 }} />
+            <p className="font-body text-xs text-muted">You're offline — showing what's saved on your phone.</p>
+          </div>
+        </div>
       )}
       <main>
         <PageTransition path={path} direction={navDirection}>
@@ -2061,8 +2080,7 @@ function GlobalStyles() {
          بيحسب مساحة أزرار التنقل الأصلية بأندرويد (gesture bar) حتى
          الشريط ما يضل ملزوق تحتها مباشرة. */
       .native-tab-bar {
-        padding-bottom: env(safe-area-inset-bottom, 0px);
-        height: calc(56px + env(safe-area-inset-bottom, 0px));
+        height: 60px;
       }
 
       /* انتقالات الصفحات — حصري للتطبيق. الصفحة الجديدة بتنزلق من
@@ -3311,7 +3329,7 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
           transform: "translateX(-50%)",
           width: "calc(100% - 24px)",
           maxWidth: 420,
-          bottom: isNativeApp ? "calc(72px + env(safe-area-inset-bottom) + 0.75rem)" : "1rem",
+          bottom: isNativeApp ? "calc(80px + env(safe-area-inset-bottom) + 0.75rem)" : "1rem",
         }}
       >
         <div className="glass rounded-2xl px-4 py-3 flex items-center gap-3 dock-in">
@@ -3512,11 +3530,16 @@ function CheckoutView({ cart, total, onSubmitted }) {
     }
 
     const msg = encodeURIComponent(buildMessage(orderNumber));
-    window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${msg}`, "_blank");
-    setSending(false);
+    // الصوت والاهتزاز *قبل* فتح واتساب، مع تأخير بسيط — لأنو فتح
+    // واتساب بيبعد التطبيق عن الواجهة فوراً، وإذا فتحناه أول، الصوت
+    // ما بيلحق يتسمع أصلاً (الـ WebView بيصير بالخلفية قبل ما يشتغل).
     hapticSuccess();
     playSuccessChime();
+    setSending(false);
     saveCheckoutInfo(form); // بالتطبيق بس — عشان يتعبّى تلقائياً المرة الجاية
+    setTimeout(() => {
+      window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${msg}`, "_blank");
+    }, isNativeApp ? 380 : 0);
     onSubmitted({ ...form, total: grandTotal, count: cart.reduce((sum, i) => sum + i.qty, 0), orderNumber });
   };
 
@@ -3803,19 +3826,23 @@ function BottomTabBar({ activeType, goHome, goCatalog, onSearch, goFavorites, on
 
   return (
     <nav
-      className="native-tab-bar glass fixed left-0 right-0 bottom-0 z-40 flex items-stretch relative"
-      style={{ borderRadius: 0, borderLeft: "none", borderRight: "none", borderBottom: "none" }}
+      className="native-tab-bar glass fixed left-3 right-3 z-40 flex items-stretch rounded-full"
+      style={{ bottom: "calc(10px + env(safe-area-inset-bottom, 0px))" }}
     >
-      {/* مؤشر منزلق تحت التبويب النشط — بيتحرك بسلاسة بدل ما يقفز */}
+      {/* البلاطة المنزلقة — بديل "liquid glass" الحقيقي بدل خط تحتي رفيع.
+          الحركة عندها overshoot خفيف (cubic-bezier مرن) — إحساس "مطاطي"
+          ناعم بدل ما تقفز بشكل ميكانيكي من تبويب لتاني. */}
       {activeIndex >= 0 && (
         <span
           aria-hidden="true"
-          className="absolute top-0 rounded-full"
+          className="absolute rounded-full"
           style={{
-            height: 3, width: `calc(${100 / tabs.length}% - 28px)`,
-            left: `calc(${(activeIndex * 100) / tabs.length}% + 14px)`,
+            top: 6, bottom: 6,
+            width: `calc(${100 / tabs.length}% - 10px)`,
+            left: `calc(${(activeIndex * 100) / tabs.length}% + 5px)`,
             background: "var(--coral)",
-            transition: "left 0.3s cubic-bezier(0.2,0.9,0.2,1)",
+            boxShadow: "0 4px 14px rgba(255,69,34,0.35)",
+            transition: "left 0.45s cubic-bezier(0.34, 1.56, 0.64, 1)",
           }}
         />
       )}
@@ -3823,22 +3850,27 @@ function BottomTabBar({ activeType, goHome, goCatalog, onSearch, goFavorites, on
         <button
           key={key}
           onClick={press(onPress)}
-          className="flex-1 flex flex-col items-center justify-center gap-0.5 tap-scale relative"
-          style={{ paddingTop: 8, paddingBottom: 4, color: active ? "var(--coral)" : "var(--fg-muted)" }}
+          className="relative flex-1 flex flex-col items-center justify-center gap-0.5 tap-scale"
+          style={{ paddingTop: 9, paddingBottom: 9, zIndex: 1 }}
           aria-label={label}
         >
-          <span className="relative">
-            <Icon className="w-5 h-5" fill={key === "favorites" && active ? "var(--coral)" : "none"} />
+          <span className="relative transition-colors duration-300" style={{ color: active ? "#fff" : "var(--fg-muted)" }}>
+            <Icon className="w-5 h-5" fill={key === "favorites" && active ? "#fff" : "none"} />
             {!!badge && (
               <span
-                className="absolute -top-1.5 -right-2 bg-coral text-white text-[9px] font-num rounded-full flex items-center justify-center"
-                style={{ minWidth: 14, height: 14, padding: "0 3px" }}
+                className="absolute -top-1.5 -right-2 text-white text-[9px] font-num rounded-full flex items-center justify-center"
+                style={{ minWidth: 14, height: 14, padding: "0 3px", background: active ? "rgba(255,255,255,0.35)" : "var(--coral)" }}
               >
                 {badge}
               </span>
             )}
           </span>
-          <span className="font-body" style={{ fontSize: 10 }}>{label}</span>
+          <span
+            className="font-body transition-colors duration-300"
+            style={{ fontSize: 10, color: active ? "#fff" : "var(--fg-muted)" }}
+          >
+            {label}
+          </span>
         </button>
       ))}
     </nav>

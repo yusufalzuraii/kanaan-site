@@ -8,8 +8,6 @@
     "allowMixedContent": false
   },
   "server": {
-    "androidScheme": "https",
-    "url": "https://kanaanshop.com",
-    "cleartext": false
+    "androidScheme": "https"
   }
 }

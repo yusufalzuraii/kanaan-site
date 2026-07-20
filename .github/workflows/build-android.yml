@@ -1,77 +1,15 @@
-name: Build Android APK
-
-# بيشتغل تلقائياً كل ما توصل تحديثات لـ main، وكمان فيك تشغّله يدوياً
-# من تبويب Actions بصفحة الريبو (زر "Run workflow")
-on:
-  push:
-    branches: [main]
-    paths:
-      - 'kanaan-shop-v3-admin/kanaan-site/**'
-      - '.github/workflows/build-android.yml'
-  workflow_dispatch:
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: kanaan-shop-v3-admin/kanaan-site
-
-    steps:
-      - name: تنزيل الكود
-        uses: actions/checkout@v4
-
-      - name: تجهيز Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: تجهيز Java (لازم لبناء أندرويد)
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '21'
-
-      - name: تجهيز Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: تثبيت حزم المشروع
-        run: npm ci
-
-      - name: بناء الموقع (Vite)
-        run: npm run build
-
-      - name: إضافة منصة أندرويد (تتولّد من جديد كل مرة، ما بتترفع عالريبو)
-        run: npx cap add android
-
-      - name: إضافة ألوان الهوية الأساسية (colorPrimary/colorAccent) — ثيم أندرويد الافتراضي بيحتاجها
-        run: |
-          cat > android/app/src/main/res/values/colors.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <resources>
-              <color name="colorPrimary">#FF4522</color>
-              <color name="colorPrimaryDark">#CC3419</color>
-              <color name="colorAccent">#12B3A0</color>
-          </resources>
-          EOF
-
-      - name: توليد الأيقونة وشاشة splash من مصادرها بمجلد assets/
-        run: npx capacitor-assets generate --android
-
-      - name: مزامنة Capacitor مع مجلد أندرويد
-        run: npx cap sync android
-
-      - name: صلاحية تشغيل gradlew
-        run: chmod +x android/gradlew
-
-      - name: بناء الـ APK (نسخة تجريبية/debug)
-        run: |
-          cd android
-          ./gradlew assembleDebug
-
-      - name: رفع الـ APK كملف جاهز للتنزيل
-        uses: actions/upload-artifact@v4
-        with:
-          name: kanaan-shop-debug-apk
-          path: kanaan-shop-v3-admin/kanaan-site/android/app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 30
+{
+  "appId": "com.kanaanshop.app",
+  "appName": "Kanaan Shop",
+  "webDir": "dist",
+  "backgroundColor": "#F2F2F4",
+  "android": {
+    "backgroundColor": "#F2F2F4",
+    "allowMixedContent": false
+  },
+  "server": {
+    "androidScheme": "https",
+    "url": "https://kanaanshop.com",
+    "cleartext": false
+  }
+}

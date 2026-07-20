@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Plus, Trash2, Pencil, X, Check, Upload, LogOut, ArrowLeft, Star, Loader2, ImageOff,
   Package, ClipboardList, Phone, MapPin, Clock, CheckCircle2, XCircle, ChevronDown, AlertTriangle,
-  Sparkles, Image as ImageIcon, GripVertical, Pin, Layers,
+  Sparkles, Image as ImageIcon, GripVertical, Pin, Layers, Bell, Send,
 } from "lucide-react";
 
 import { COLORS, COLOR_KEYS, groupedColors, swatchBackground, colorLabel } from "./palette.js";
@@ -259,9 +259,18 @@ function Dashboard({ onExit, onLogout }) {
         >
           <Sparkles className="w-4 h-4" /> The Edit
         </button>
+        <button
+          onClick={() => setTab("notify")}
+          className="flex-1 rounded-full py-2 font-body text-sm tap-scale flex items-center justify-center gap-2"
+          style={tab === "notify" ? { background: "var(--fg)", color: "var(--bg)" } : { color: "var(--fg-muted)" }}
+        >
+          <Bell className="w-4 h-4" /> Notify
+        </button>
       </div>
 
-      {tab === "stories" ? (
+      {tab === "notify" ? (
+        <NotifyTab onLogout={onLogout} />
+      ) : tab === "stories" ? (
         <StoriesTab products={products} onLogout={onLogout} />
       ) : tab === "orders" ? (
         <OrdersTab orders={orders} loading={loading} reload={loadOrders} />
@@ -306,6 +315,103 @@ function Dashboard({ onExit, onLogout }) {
    Used for anything destructive. Deliberately makes Cancel the
    easy, obvious choice.
    ============================================================ */
+/* ============================================================
+   NOTIFY TAB — إرسال إشعار push لكل مستخدمي التطبيق دفعة وحدة.
+   ============================================================ */
+function NotifyTab() {
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [url, setUrl] = useState("");
+  const [sending, setSending] = useState(false);
+  const [result, setResult] = useState(null); // { ok, sent, failed, removed, total } | { error }
+
+  const send = async () => {
+    if (!title.trim() || !body.trim()) {
+      setResult({ error: "لازم تكتب عنوان ونص للإشعار." });
+      return;
+    }
+    setSending(true);
+    setResult(null);
+    try {
+      const r = await fetch("/api/admin/send-notification", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: title.trim(), body: body.trim(), url: url.trim() || undefined }),
+      });
+      const d = await r.json();
+      if (!r.ok) setResult({ error: d.error || "صار خطأ، جرب كمان مرة." });
+      else {
+        setResult(d);
+        setTitle("");
+        setBody("");
+        setUrl("");
+      }
+    } catch {
+      setResult({ error: "مشكلة اتصال. تأكد من الإنترنت وجرب كمان مرة." });
+    }
+    setSending(false);
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="glass rounded-2xl p-5">
+        <p className="font-body text-sm text-muted mb-4">
+          بيوصل هالإشعار لكل مستخدمي تطبيق أندرويد/آيفون اللي وافقوا يستقبلوا إشعارات — مش مستخدمي الموقع بالمتصفح.
+        </p>
+
+        <label className="font-body text-sm font-medium block mb-1.5">Title</label>
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          maxLength={120}
+          className="a-field mb-4"
+          placeholder="مثلاً: تخفيضات الصيف بدأت 🔥"
+        />
+
+        <label className="font-body text-sm font-medium block mb-1.5">Message</label>
+        <textarea
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          maxLength={300}
+          rows={3}
+          className="a-field mb-4 resize-none"
+          placeholder="نص قصير وواضح — هيك بيظهر بالإشعار نفسو"
+        />
+
+        <label className="font-body text-sm font-medium block mb-1.5">Link (optional)</label>
+        <input
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          className="a-field mb-1"
+          placeholder="https://kanaanshop.com/sale"
+        />
+        <p className="font-body text-xs text-muted mb-4">إذا حطيت رابط، بيفتح التطبيق عليه لما حد يدوس عالإشعار.</p>
+
+        <button
+          onClick={send}
+          disabled={sending}
+          className="glass-btn w-full rounded-full font-body font-medium py-3 tap-scale flex items-center justify-center gap-2"
+          style={{ background: "var(--coral)", color: "#fff", opacity: sending ? 0.6 : 1 }}
+        >
+          {sending ? <Loader2 className="w-5 h-5 spin" /> : <Send className="w-5 h-5" />}
+          {sending ? "عم يرسل..." : "ابعت الإشعار"}
+        </button>
+
+        {result?.error && (
+          <p className="font-body text-sm text-coral mt-3 text-center">{result.error}</p>
+        )}
+        {result?.ok && (
+          <p className="font-body text-sm text-teal mt-3 text-center">
+            وصل لـ {result.sent} جهاز من أصل {result.total}
+            {result.failed > 0 ? ` (فشل ${result.failed})` : ""}
+            {result.removed > 0 ? ` — تنضّف ${result.removed} جهاز قديم مش مستخدم` : ""}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ConfirmDialog({ open, busy, title, body, confirmLabel, onCancel, onConfirm }) {
   useEffect(() => {
     if (!open) return;

@@ -49,6 +49,7 @@ import {
   nativeShare,
   saveCheckoutInfo,
   loadCheckoutInfo,
+  registerPushNotifications,
 } from "./native.js";
 
 /* ============================================================
@@ -1487,6 +1488,11 @@ function KanaanShop() {
   // ومضة شاشة بيضا بين الـ splash والمحتوى الحقيقي
   useEffect(() => {
     hideSplashScreen();
+  }, []);
+
+  // إشعارات Push — بيسأل الإذن مرة وحدة، وبيسجّل توكن الجهاز عندنا
+  useEffect(() => {
+    registerPushNotifications(apiBase);
   }, []);
 
   // زر الرجوع الفيزيائي بأندرويد: يرجع بالراوتر الداخلي (متل صفحة

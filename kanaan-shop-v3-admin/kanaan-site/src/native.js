@@ -132,3 +132,40 @@ export function loadCheckoutInfo() {
     return null;
   }
 }
+
+/* ----------------------------------------------------------
+   إشعارات Push — طلب الإذن، تسجيل توكن الجهاز عند سيرفرنا، والتعامل
+   مع ضغطة المستخدم على إشعار (بيفتح رابط معيّن إذا كان مرفق فيه).
+   بيستدعى مرة وحدة لما التطبيق يفتح — إذا المستخدم رفض الإذن أو
+   الجهاز ما بيدعم، بنسكت ونكمل عادي، الإشعارات مش وظيفة أساسية.
+   ---------------------------------------------------------- */
+export async function registerPushNotifications(apiBaseUrl) {
+  if (!isNativeApp) return;
+  try {
+    const { PushNotifications } = await import("@capacitor/push-notifications");
+
+    let perm = await PushNotifications.checkPermissions();
+    if (perm.receive === "prompt" || perm.receive === "prompt-with-rationale") {
+      perm = await PushNotifications.requestPermissions();
+    }
+    if (perm.receive !== "granted") return; // المستخدم رفض — بنحترم قراره
+
+    await PushNotifications.register();
+
+    PushNotifications.addListener("registration", async (token) => {
+      try {
+        await fetch(`${apiBaseUrl}/api/push/register`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token: token.value, platform: "android" }),
+        });
+      } catch { /* هيك بس — منجرب تسجيل تاني بالمرة الجاية يفتح فيها التطبيق */ }
+    });
+
+    // لما المستخدم يدوس عالإشعار (والتطبيق كان مسكّر أو بالخلفية)
+    PushNotifications.addListener("pushNotificationActionPerformed", (action) => {
+      const url = action?.notification?.data?.url;
+      if (url) window.location.href = url;
+    });
+  } catch { /* أي مشكلة هون ما لازم توقف باقي التطبيق */ }
+}

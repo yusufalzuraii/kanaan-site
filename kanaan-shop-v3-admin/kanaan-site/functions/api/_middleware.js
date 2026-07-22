@@ -22,7 +22,7 @@ export async function onRequest(context) {
       headers: {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type",
+        "Access-Control-Allow-Headers": "Content-Type, X-Kanaan-Client",
         "Access-Control-Max-Age": "86400",
       },
     });

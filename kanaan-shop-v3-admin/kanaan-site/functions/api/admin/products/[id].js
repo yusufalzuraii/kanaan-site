@@ -16,10 +16,10 @@ export async function onRequestPut(context) {
 
   await env.DB.prepare(
     `UPDATE products SET name=?, category=?, subcategory=?, price=?, colors=?, sizes=?, description=?,
-       badge=?, discount=?, images=?, sold_out=?, active=? WHERE id=?`
+       badge=?, discount=?, images=?, sold_out=?, active=?, is_spotlight=?, app_exclusive=? WHERE id=?`
   ).bind(
     row.name, row.category, row.subcategory, row.price, row.colors, row.sizes, row.description,
-    row.badge, row.discount, row.images, row.sold_out, row.active, id
+    row.badge, row.discount, row.images, row.sold_out, row.active, row.is_spotlight, row.app_exclusive, id
   ).run();
 
   const updated = await env.DB.prepare("SELECT * FROM products WHERE id = ?").bind(id).first();

@@ -265,6 +265,7 @@ function parseRoute(path) {
   if (path === "/sale") return { type: "sale" };
   if (path === "/favorites") return { type: "favorites" };
   if (path === "/exclusives") return { type: "exclusives" };
+  if (path === "/privacy") return { type: "privacy" };
   if (path === "/shop") return { type: "catalog", category: "all", sub: null };
   if (path.startsWith("/shop/")) {
     const [category, sub] = path.slice(6).split("/").filter(Boolean);
@@ -1842,6 +1843,7 @@ function KanaanShop() {
         {route.type === "exclusives" && (
           <ExclusivesView products={products} loading={catalogLoading} likes={likes} openProduct={openProduct} toggleLike={toggleLike} />
         )}
+        {route.type === "privacy" && <PrivacyPolicyView />}
         {route.type === "product" && currentProduct && (
           <ProductView product={currentProduct} products={products} addToCart={addToCart} openProduct={openProduct} liked={likes.includes(currentProduct.id)} toggleLike={() => toggleLike(currentProduct.id)} />
         )}
@@ -3083,6 +3085,67 @@ function NativeHomeView({ products, loading, goCatalog, goSale, goExclusives, op
 }
 
 /* ============================================================
+   PRIVACY POLICY — صفحة حقيقية منشورة، مطلوبة من Google Play
+   (ومن Apple لاحقاً) كرابط فعلي بصفحة المتجر. النص بيعكس فعلياً
+   شو البيانات يلي بيجمعها الموقع/التطبيق — ما في شي مبالغ فيه أو
+   ناقص عن الواقع.
+   ============================================================ */
+function PrivacyPolicyView() {
+  useEffect(() => {
+    document.title = `Privacy Policy — ${STORE_NAME}`;
+  }, []);
+
+  const Section = ({ title, children }) => (
+    <div className="mb-7">
+      <h2 className="font-display font-bold text-lg mb-2">{title}</h2>
+      <div className="font-body text-sm text-muted leading-7 space-y-2">{children}</div>
+    </div>
+  );
+
+  return (
+    <div className="max-w-2xl mx-auto px-4 sm:px-6 py-10">
+      <h1 className="font-display font-bold text-3xl mb-1">Privacy Policy</h1>
+      <p className="font-body text-sm text-muted mb-8">Last updated: {new Date().toLocaleDateString("en-GB", { year: "numeric", month: "long", day: "numeric" })}</p>
+
+      <Section title="Who we are">
+        <p>{STORE_NAME} is a menswear brand based in Saida, Lebanon, operating this website and mobile app. This policy explains what information we collect when you use either, and how it's used.</p>
+      </Section>
+
+      <Section title="Information we collect">
+        <p><strong>When you place an order:</strong> your name, phone number, delivery address, and any notes you add. This is sent as a WhatsApp message to our order number and stored in our order system so we can prepare and track your delivery.</p>
+        <p><strong>Cart, favorites, and recently viewed items:</strong> stored only on your own device (browser or app storage), not on our servers, except for the items in your cart at the moment you check out.</p>
+        <p><strong>Push notifications (app only):</strong> if you allow notifications, we store a device identifier (not tied to your name) so we can send you updates about sales and new arrivals. You can turn this off anytime in your phone's settings.</p>
+        <p><strong>Basic technical data:</strong> standard web request information (like IP address and browser type), handled by our hosting provider for security and performance — not used to build advertising profiles.</p>
+      </Section>
+
+      <Section title="What we don't collect">
+        <p>We don't require an account, a password, or an email address to shop. We don't process online payments — all orders are cash on delivery — so we never see or store card details.</p>
+      </Section>
+
+      <Section title="Who we share information with">
+        <p>Your order details are shared with our delivery process only. We use the following services to run the store, each governed by their own privacy policy: Cloudflare (hosting), Google Firebase (push notification delivery), and WhatsApp (order communication). We do not sell personal information to anyone, and we don't use advertising or tracking networks.</p>
+      </Section>
+
+      <Section title="How long we keep it">
+        <p>Order information is kept for as long as needed for business and inventory records. Push notification identifiers are removed automatically if the app is uninstalled or notifications are disabled.</p>
+      </Section>
+
+      <Section title="Children">
+        <p>{STORE_NAME} is not directed at children, and we don't knowingly collect information from anyone under 13.</p>
+      </Section>
+
+      <Section title="Your choices">
+        <p>You can ask us to delete your order history or stop contacting you at any time by reaching out on WhatsApp. You can also clear your cart, favorites, and browsing history at any time by clearing your browser or app storage.</p>
+      </Section>
+
+      <Section title="Contact us">
+        <p>Questions about this policy or your information? Message us on WhatsApp — the number is on our homepage and checkout page — and we'll get back to you.</p>
+      </Section>
+    </div>
+  );
+}
+
+/* ============================================================
    APP EXCLUSIVES — صفحة "See all" للمنتجات الحصرية. بما إنو الـ
    API أصلاً بتصفّي هالمنتجات عن غير التطبيق (هيدر X-Kanaan-Client)،
    هاي الصفحة عملياً ما رح توصلها فاضية أو خطأ لو حد فتحها بالموقع —
@@ -3977,6 +4040,7 @@ function routeTitle(route, currentProduct) {
   }
   if (route.type === "favorites") return "Favorites";
   if (route.type === "exclusives") return "App Exclusives";
+  if (route.type === "privacy") return "Privacy Policy";
   if (route.type === "sale") return "On Sale";
   if (route.type === "product") return currentProduct?.name || "";
   if (route.type === "checkout") return "Checkout";
@@ -4205,6 +4269,7 @@ function Footer({ goCatalog, goSale }) {
         </div>
         <div className="border-t mt-10 pt-5 text-center" style={{ borderColor: "var(--border)" }}>
           <p className="font-body text-xs text-muted">Designed with care for {STORE_NAME}, 2026.</p>
+          <a href="/privacy" className="font-body text-xs text-muted hover:text-coral transition-colors underline mt-1 inline-block">Privacy Policy</a>
         </div>
       </div>
     </footer>

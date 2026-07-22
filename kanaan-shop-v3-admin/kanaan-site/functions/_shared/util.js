@@ -154,6 +154,8 @@ export function rowToProduct(r) {
     soldOut: !!r.sold_out,
     active: r.active === undefined ? true : !!r.active,
     sortOrder: Number(r.sort_order) || 0,
+    isSpotlight: !!r.is_spotlight,
+    appExclusive: !!r.app_exclusive,
   };
 }
 
@@ -188,6 +190,8 @@ export function payloadToRow(body) {
     images: serializeImages(images),
     sold_out: body.soldOut ? 1 : 0,
     active: body.active === false ? 0 : 1,
+    is_spotlight: body.isSpotlight ? 1 : 0,
+    app_exclusive: body.appExclusive ? 1 : 0,
   };
 }
 

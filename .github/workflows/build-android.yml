@@ -94,7 +94,7 @@ jobs:
         run: |
           cd android
           ./gradlew bundleRelease \
-            -Pandroid.injected.signing.store.file=kanaan-release-key.jks \
+            -Pandroid.injected.signing.store.file="$GITHUB_WORKSPACE/kanaan-shop-v3-admin/kanaan-site/android/app/kanaan-release-key.jks" \
             -Pandroid.injected.signing.store.password="$KEYSTORE_PASSWORD" \
             -Pandroid.injected.signing.key.alias="$KEY_ALIAS" \
             -Pandroid.injected.signing.key.password="$KEY_PASSWORD"

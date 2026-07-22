@@ -1,0 +1,31 @@
+# Cloudflare Pages reads this file automatically and applies these headers
+# to matching responses. This is what stops a visitor's browser from ever
+# getting stuck showing an old, broken version of the site after a new
+# deploy — the exact issue found on 2026-07-22.
+#
+# The problem: the page shell (index.html) was being cached by browsers
+# with no explicit instruction, so some browsers kept serving an old,
+# already-fetched copy indefinitely (closing/reopening the browser does
+# NOT clear this cache — only a hard refresh or a cache expiry does).
+#
+# The fix: tell every browser to always re-check the page shell with the
+# server before using a cached copy (no-cache forces a fast revalidation,
+# not a full re-download every time). The actual JS/CSS/image files Vite
+# builds get a unique hash in their filename on every build — so those are
+# safe to cache "forever"; a new deploy simply produces new filenames, the
+# old cached ones are just never referenced again.
+
+/*
+  Cache-Control: public, max-age=0, must-revalidate
+
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/logo-compact.png
+  Cache-Control: public, max-age=86400
+
+/logo-full.png
+  Cache-Control: public, max-age=86400
+
+/favicon.png
+  Cache-Control: public, max-age=86400

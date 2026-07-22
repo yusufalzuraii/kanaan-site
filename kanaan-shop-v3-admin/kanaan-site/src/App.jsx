@@ -37,6 +37,7 @@ import {
   ArrowRight,
   ArrowLeft,
   Bell,
+  Flame,
   Home as HomeIcon,
 } from "lucide-react";
 import Admin from "./Admin.jsx";
@@ -138,6 +139,17 @@ function slugify(str) {
 /* Colors and categories are fixed sets (used by the shop and the admin form).
    Products themselves come live from the database via /api/products. */
 const CATEGORIES = FALLBACK_CATEGORIES;
+
+// ترتيب مخصص لشبكة "Browse" بالتطبيق: القطع الأكتر تصفّحاً أول (صف
+// أول)، والباقي بصف تاني — و"Old Money Collection" مستثناة عمداً
+// لأنها كولكشن منسّق إلها بطاقة خاصة، مش فئة عادية بالشبكة. هيك
+// الشبكة بتضل 10 عناصر بالضبط = 5 أعمدة × صفّين متوازنين تماماً.
+const BROWSE_GRID_CATEGORIES = [
+  "tshirts", "shirts", "jeans", "pants", "shorts",
+  "sets", "shoes", "slippers", "underwear", "accessories",
+]
+  .map((id) => CATEGORIES.find((c) => c.id === id))
+  .filter(Boolean);
 const COLORS = FALLBACK_COLORS;
 
 const LEBANON_GOVERNORATES = [
@@ -252,6 +264,7 @@ function parseRoute(path) {
   if (path.startsWith("/admin")) return { type: "admin" };
   if (path === "/sale") return { type: "sale" };
   if (path === "/favorites") return { type: "favorites" };
+  if (path === "/exclusives") return { type: "exclusives" };
   if (path === "/shop") return { type: "catalog", category: "all", sub: null };
   if (path.startsWith("/shop/")) {
     const [category, sub] = path.slice(6).split("/").filter(Boolean);
@@ -1531,11 +1544,14 @@ function KanaanShop() {
     return registerNetworkListener((connected) => setIsOffline(!connected));
   }, []);
 
+  // إشعار داخلي بسيط لما يوصل إشعار والتطبيق مفتوح قدام المستخدم
+  const [inAppNotification, setInAppNotification] = useState(null);
+
   // إشعارات Push — بنسأل الإذن بعد ما شاشة الترحيب تتقفل (أو فوراً
   // لو المستخدم شافها قبل)، مش فجأة بلا سياق أول ما التطبيق يفتح
   useEffect(() => {
     if (!showWelcome) {
-      registerPushNotifications(apiBase, (url) => {
+      const openNotificationUrl = (url) => {
         // نستخرج بس المسار من الرابط الكامل ("/sale" من
         // "https://kanaanshop.com/sale") ونفتحو بالراوتر الداخلي —
         // هيك ما في نقلة صفحة كاملة لنطاق تاني (يلي كانت بتفتح
@@ -1546,7 +1562,17 @@ function KanaanShop() {
         } catch {
           navigate("/");
         }
-      });
+      };
+
+      registerPushNotifications(
+        apiBase,
+        openNotificationUrl,
+        (n) => {
+          hapticLight();
+          setInAppNotification(n);
+          setTimeout(() => setInAppNotification(null), 5000);
+        }
+      );
     }
   }, [showWelcome]);
 
@@ -1616,12 +1642,16 @@ function KanaanShop() {
   const [products, setProducts] = useState([]);
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [storyRings, setStoryRings] = useState([]);
+  const [appExclusiveCount, setAppExclusiveCount] = useState(0);
 
   const refreshProducts = async () => {
     try {
-      const res = await fetch(`${apiBase}/api/products`);
+      const res = await fetch(`${apiBase}/api/products`, {
+        headers: isNativeApp ? { "X-Kanaan-Client": "app" } : {},
+      });
       const data = await res.json();
       if (Array.isArray(data.products)) setProducts(data.products);
+      if (typeof data.appExclusiveCount === "number") setAppExclusiveCount(data.appExclusiveCount);
     } catch { /* offline or API not ready */ }
   };
 
@@ -1654,6 +1684,7 @@ function KanaanShop() {
   };
   const goSale = () => { navigate("/sale"); setMenuOpen(false); };
   const goFavorites = () => { navigate("/favorites"); setMenuOpen(false); };
+  const goExclusives = () => { navigate("/exclusives"); setMenuOpen(false); };
   const openProduct = (product) => navigate(`/product/${product.slug}`);
   const goCheckout = () => { setCartOpen(false); setOrderPlaced(false); navigate("/checkout"); };
 
@@ -1794,10 +1825,10 @@ function KanaanShop() {
       <main>
         <PageTransition path={path} direction={navDirection}>
         {route.type === "home" && isNativeApp && (
-          <NativeHomeView products={products} loading={catalogLoading} goCatalog={goCatalog} goSale={goSale} openProduct={openProduct} likes={likes} toggleLike={toggleLike} storyRings={storyRings} openStory={openStory} goFavorites={goFavorites} onCart={() => setCartOpen(true)} cartCount={cartCount} />
+          <NativeHomeView products={products} loading={catalogLoading} goCatalog={goCatalog} goSale={goSale} goExclusives={goExclusives} openProduct={openProduct} likes={likes} toggleLike={toggleLike} storyRings={storyRings} openStory={openStory} goFavorites={goFavorites} onCart={() => setCartOpen(true)} cartCount={cartCount} />
         )}
         {route.type === "home" && !isNativeApp && (
-          <HomeView products={products} loading={catalogLoading} goCatalog={goCatalog} goSale={goSale} openProduct={openProduct} likes={likes} toggleLike={toggleLike} storyRings={storyRings} openStory={openStory} />
+          <HomeView products={products} loading={catalogLoading} goCatalog={goCatalog} goSale={goSale} openProduct={openProduct} likes={likes} toggleLike={toggleLike} storyRings={storyRings} openStory={openStory} appExclusiveCount={appExclusiveCount} />
         )}
         {route.type === "sale" && (
           <SaleView products={products} loading={catalogLoading} goCatalog={goCatalog} openProduct={openProduct} likes={likes} toggleLike={toggleLike} />
@@ -1807,6 +1838,9 @@ function KanaanShop() {
         )}
         {route.type === "favorites" && (
           <FavoritesView products={products} loading={catalogLoading} likes={likes} openProduct={openProduct} toggleLike={toggleLike} goCatalog={goCatalog} />
+        )}
+        {route.type === "exclusives" && (
+          <ExclusivesView products={products} loading={catalogLoading} likes={likes} openProduct={openProduct} toggleLike={toggleLike} />
         )}
         {route.type === "product" && currentProduct && (
           <ProductView product={currentProduct} products={products} addToCart={addToCart} openProduct={openProduct} liked={likes.includes(currentProduct.id)} toggleLike={() => toggleLike(currentProduct.id)} />
@@ -1879,6 +1913,18 @@ function KanaanShop() {
         />
       )}
       {showWelcome && <WelcomeSheet onDismiss={dismissWelcome} />}
+      <InAppNotificationBanner
+        notification={inAppNotification}
+        onDismiss={() => setInAppNotification(null)}
+        onTap={() => {
+          if (inAppNotification?.url) {
+            try {
+              const path = new URL(inAppNotification.url, SITE_URL).pathname;
+              navigate(path || "/");
+            } catch { /* ignore */ }
+          }
+        }}
+      />
     </div>
     </ProductsContext.Provider>
   );
@@ -2626,7 +2672,7 @@ function StoryQuickAdd({ product, onClose, addToCart, openProduct }) {
   );
 }
 
-function HomeView({ products, loading, goCatalog, goSale, openProduct, likes, toggleLike, storyRings, openStory }) {
+function HomeView({ products, loading, goCatalog, goSale, openProduct, likes, toggleLike, storyRings, openStory, appExclusiveCount }) {
   useEffect(() => {
     document.title = `${STORE_NAME} — Menswear from Saida, Lebanon`;
   }, []);
@@ -2758,9 +2804,13 @@ function HomeView({ products, loading, goCatalog, goSale, openProduct, likes, to
                   <Smartphone className="w-7 h-7 text-coral" />
                 </div>
                 <div>
-                  <p className="font-display font-bold text-xl">Coming soon</p>
+                  <p className="font-display font-bold text-xl">
+                    {appExclusiveCount > 0 ? "🔥 App-only prices, waiting" : "Coming soon"}
+                  </p>
                   <p className="font-body text-sm text-muted mt-1 max-w-sm">
-                    The Kanaan Shop app is on its way — a faster, native way to shop from your phone.
+                    {appExclusiveCount > 0
+                      ? `${appExclusiveCount} piece${appExclusiveCount === 1 ? "" : "s"} are priced lower right now — visible only in the Kanaan Shop app.`
+                      : "The Kanaan Shop app is on its way — a faster, native way to shop from your phone."}
                   </p>
                 </div>
               </div>
@@ -2810,7 +2860,7 @@ function SpotlightCard({ product, onOpen }) {
   );
 }
 
-function NativeHomeView({ products, loading, goCatalog, goSale, openProduct, likes, toggleLike, storyRings, openStory, goFavorites, onCart, cartCount }) {
+function NativeHomeView({ products, loading, goCatalog, goSale, goExclusives, openProduct, likes, toggleLike, storyRings, openStory, goFavorites, onCart, cartCount }) {
   useEffect(() => {
     document.title = `${STORE_NAME} — Menswear from Saida, Lebanon`;
   }, []);
@@ -2818,11 +2868,12 @@ function NativeHomeView({ products, loading, goCatalog, goSale, openProduct, lik
   const hour = new Date().getHours();
   const greeting = hour < 5 ? "Still up?" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
 
-  const spotlight = products.find((p) => p.badge === "new") || products[0] || null;
+  const spotlight = products.find((p) => p.isSpotlight) || products.find((p) => p.badge === "new") || products[0] || null;
   const featured = products.filter((p) => !spotlight || p.id !== spotlight.id).slice(0, 10);
   const onSale = useMemo(() => products.filter(isOnSale), [products]);
   const saleCount = onSale.length;
   const maxDiscount = saleCount ? Math.max(...onSale.map((p) => p.discount)) : 0;
+  const exclusives = useMemo(() => products.filter((p) => p.appExclusive), [products]);
 
   const recentIds = getRecentlyViewed();
   const recentProducts = recentIds.map((id) => products.find((p) => p.id === id)).filter(Boolean).slice(0, 8);
@@ -2890,32 +2941,98 @@ function NativeHomeView({ products, loading, goCatalog, goSale, openProduct, lik
           <h2 className="font-display font-bold text-lg">Browse</h2>
           <button onClick={() => goCatalog("all")} className="font-body text-sm text-coral">See all</button>
         </div>
-        <div className="px-4 sm:px-6 grid grid-cols-6 gap-2">
-          {CATEGORIES.map((c, i) => {
+        <div className="px-4 sm:px-6 grid grid-cols-5 gap-2">
+          {BROWSE_GRID_CATEGORIES.map((c, i) => {
             const coral = i % 2 === 0;
             return (
               <button
                 key={c.id}
                 onClick={() => goCatalog(c.id)}
-                className="glass rounded-xl flex flex-col items-center justify-center gap-1 tap-scale"
+                className="glass rounded-xl flex flex-col items-center justify-center gap-1.5 tap-scale"
                 style={{ aspectRatio: "1/1" }}
               >
                 <span
                   className="rounded-lg flex items-center justify-center"
-                  style={{ width: 22, height: 22, background: coral ? "rgba(255,69,34,0.14)" : "rgba(18,179,160,0.14)" }}
+                  style={{ width: 26, height: 26, background: coral ? "rgba(255,69,34,0.14)" : "rgba(18,179,160,0.14)" }}
                 >
-                  <IconFor type={iconForCategory(c.id)} className="w-3 h-3" style={{ color: coral ? "var(--coral)" : "var(--teal)" }} />
+                  <IconFor type={iconForCategory(c.id)} className="w-3.5 h-3.5" style={{ color: coral ? "var(--coral)" : "var(--teal)" }} />
                 </span>
-                <span className="font-body text-[8.5px] text-center leading-tight px-0.5">{c.label}</span>
+                <span className="font-body text-[9px] text-center leading-tight px-0.5">{c.label}</span>
               </button>
             );
           })}
         </div>
+        {/* "Old Money Collection" مو فئة عادية زي الباقي — هي كولكشن
+            منسّق، فبتستاهل بطاقة خاصة أوضح بدل ما تضيع بنفس شبكة
+            الفئات (وهيك كمان الشبكة فوق بتصير متوازنة 5+5 تماماً). */}
+        {(() => {
+          const oldMoney = CATEGORIES.find((c) => c.id === "oldmoney");
+          return oldMoney ? (
+            <button
+              onClick={() => goCatalog(oldMoney.id)}
+              className="glass rounded-2xl mx-4 sm:mx-6 mt-3 p-4 flex items-center gap-3 tap-scale text-left"
+              style={{ background: "linear-gradient(120deg, rgba(20,20,20,0.06), rgba(255,69,34,0.06))" }}
+            >
+              <span className="rounded-xl flex items-center justify-center flex-shrink-0" style={{ width: 40, height: 40, background: "rgba(20,20,20,0.08)" }}>
+                <IconFor type={iconForCategory(oldMoney.id)} className="w-5 h-5" style={{ color: "var(--fg)" }} />
+              </span>
+              <div className="min-w-0">
+                <p className="font-display font-bold text-sm">Old Money Collection</p>
+                <p className="font-body text-xs text-muted">A curated edit, not just another category</p>
+              </div>
+            </button>
+          ) : null;
+        })()}
       </section>
 
       {saleCount > 0 && (
         <section className="px-4 sm:px-6 pb-7">
           <SaleCard onOpen={goSale} count={saleCount} maxDiscount={maxDiscount} />
+        </section>
+      )}
+
+      {/* App Exclusives — حصري 100% للتطبيق، هوية بصرية غامقة مميّزة
+          (مش نفس أسلوب باقي الصفحة) حتى يحس المستخدم إنو داخل "منطقة
+          خاصة" ما بيوصلها أي حدا عالموقع. */}
+      {exclusives.length > 0 && (
+        <section className="pb-7">
+          <div className="px-4 sm:px-6 flex items-center justify-between mb-3">
+            <h2 className="font-display font-bold text-lg flex items-center gap-1.5">
+              🔥 App Exclusives
+            </h2>
+            <button onClick={goExclusives} className="font-body text-sm text-coral">See all</button>
+          </div>
+          <div
+            className="mx-4 sm:mx-6 rounded-3xl p-4 pb-5"
+            style={{ background: "#141416" }}
+          >
+            <p className="font-body text-xs mb-3" style={{ color: "rgba(255,255,255,0.55)" }}>
+              Prices you won't find on the website — app only.
+            </p>
+            <div className="flex gap-3 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
+              {exclusives.slice(0, 8).map((p) => (
+                <button key={p.id} onClick={() => openProduct(p)} className="flex-shrink-0 text-left tap-scale" style={{ width: 118 }}>
+                  <div className="relative rounded-xl overflow-hidden" style={{ aspectRatio: "4/5", background: "#232326" }}>
+                    {getImages(p)[0] ? (
+                      <img src={getImages(p)[0]} alt={p.name} className="absolute inset-0 w-full h-full object-cover" />
+                    ) : (
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <IconFor type={p.icon} className="w-8 h-8" style={{ color: "rgba(255,255,255,0.3)" }} />
+                      </div>
+                    )}
+                    <span
+                      className="absolute top-2 left-2 rounded-full px-2 py-0.5 font-num text-[9px]"
+                      style={{ background: "var(--coral)", color: "#fff" }}
+                    >
+                      🔥 App only
+                    </span>
+                  </div>
+                  <p className="font-body text-xs mt-2 truncate" style={{ color: "rgba(255,255,255,0.9)" }}>{p.name}</p>
+                  <p className="font-num text-sm" style={{ color: "var(--coral)" }}>{money(effectivePrice(p))}</p>
+                </button>
+              ))}
+            </div>
+          </div>
         </section>
       )}
 
@@ -2961,6 +3078,69 @@ function NativeHomeView({ products, loading, goCatalog, goSale, openProduct, lik
           </div>
         )}
       </section>
+    </div>
+  );
+}
+
+/* ============================================================
+   APP EXCLUSIVES — صفحة "See all" للمنتجات الحصرية. بما إنو الـ
+   API أصلاً بتصفّي هالمنتجات عن غير التطبيق (هيدر X-Kanaan-Client)،
+   هاي الصفحة عملياً ما رح توصلها فاضية أو خطأ لو حد فتحها بالموقع —
+   بس منحطلها بوابة صريحة كمان كطبقة حماية إضافية وتوضيح للمستخدم.
+   ============================================================ */
+function ExclusivesView({ products, loading, likes, openProduct, toggleLike }) {
+  useEffect(() => {
+    document.title = `App Exclusives — ${STORE_NAME}`;
+  }, []);
+
+  if (!isNativeApp) return <ExclusivesLockedView />;
+
+  const exclusives = products.filter((p) => p.appExclusive);
+
+  return (
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6">
+      <div className="rounded-3xl p-5 mb-6" style={{ background: "#141416" }}>
+        <h1 className="font-display font-bold text-2xl" style={{ color: "#fff" }}>🔥 App Exclusives</h1>
+        <p className="font-body text-sm mt-1" style={{ color: "rgba(255,255,255,0.6)" }}>
+          Prices only visible here — not on the website, not searchable, app-only.
+        </p>
+      </div>
+
+      {loading && exclusives.length === 0 ? (
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="rounded-2xl glass" style={{ aspectRatio: "4/5", opacity: 0.5 }} />
+          ))}
+        </div>
+      ) : exclusives.length === 0 ? (
+        <p className="font-body text-sm text-muted text-center py-16">Nothing exclusive up right now — check back soon.</p>
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+          {exclusives.map((p) => (
+            <ProductCard key={p.id} product={p} onOpen={openProduct} liked={likes.includes(p.id)} onToggleLike={() => toggleLike(p.id)} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* لو حدا وصل لهالمسار من الموقع (رابط مباشر مثلاً) — رسالة واضحة
+   واحترافية، مش صفحة فاضية أو خطأ غامض. */
+function ExclusivesLockedView() {
+  return (
+    <div className="max-w-lg mx-auto px-4 sm:px-6 py-24 text-center">
+      <div className="glass w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6">
+        <span style={{ fontSize: 26 }}>🔒</span>
+      </div>
+      <h1 className="font-display font-bold text-2xl mb-2">App-only pricing</h1>
+      <p className="font-body text-muted mb-8 max-w-sm mx-auto">
+        This section is exclusive to the Kanaan Shop app — download it on iPhone or Android to see these prices.
+      </p>
+      <div className="flex items-center justify-center gap-2">
+        <GlassChip>Android</GlassChip>
+        <GlassChip>iPhone</GlassChip>
+      </div>
     </div>
   );
 }
@@ -3703,6 +3883,37 @@ function ConfirmationView({ order, goHome }) {
 }
 
 /* ============================================================
+   IN-APP NOTIFICATION BANNER — لما إشعار يوصل والتطبيق مفتوح
+   قدام المستخدم. أندرويد ما بيعرض بانر النظام تلقائياً بهالحالة،
+   فهاد البديل الداخلي — بينزلق من فوق، وبيختفي لحاله بعد كم ثانية.
+   ============================================================ */
+function InAppNotificationBanner({ notification, onTap, onDismiss }) {
+  if (!notification) return null;
+  return (
+    <div
+      className="fixed left-3 right-3 z-[60] search-fade"
+      style={{ top: "calc(0.75rem + env(safe-area-inset-top, 0px))" }}
+    >
+      <button
+        onClick={() => { onTap(); onDismiss(); }}
+        className="glass w-full rounded-2xl p-3.5 flex items-start gap-3 text-left tap-scale"
+      >
+        <div className="glass rounded-xl p-2 flex-shrink-0" style={{ background: "rgba(255,69,34,0.12)" }}>
+          <Bell className="w-4 h-4 text-coral" />
+        </div>
+        <div className="min-w-0 flex-1">
+          {notification.title && <p className="font-body text-sm font-medium truncate">{notification.title}</p>}
+          {notification.body && <p className="font-body text-xs text-muted mt-0.5 line-clamp-2">{notification.body}</p>}
+        </div>
+        <button onClick={(e) => { e.stopPropagation(); onDismiss(); }} className="p-1 flex-shrink-0 tap-scale" aria-label="Dismiss">
+          <X className="w-4 h-4 text-muted" />
+        </button>
+      </button>
+    </div>
+  );
+}
+
+/* ============================================================
    WELCOME SHEET — شاشة ترحيب سريعة، مرة وحدة بس (أول تشغيل).
    بتشرح الميزات الحصرية بالتطبيق قبل ما نسأل عن إذن الإشعارات،
    حتى المستخدم يفهم القيمة قبل ما يوافق أو يرفض.
@@ -3710,7 +3921,7 @@ function ConfirmationView({ order, goHome }) {
 function WelcomeSheet({ onDismiss }) {
   const perks = [
     { Icon: Bell, title: "Be the first to know", desc: "Sales, drops, and restocks — sent straight to you." },
-    { Icon: Sparkles, title: "App-only extras", desc: "Faster checkout with saved details, and pieces you'll only see here." },
+    { Icon: Flame, title: "App Exclusives", desc: "Prices you won't find on the website — app only." },
     { Icon: Heart, title: "Keep track of favorites", desc: "Save pieces and pick up right where you left off." },
   ];
 
@@ -3765,6 +3976,7 @@ function routeTitle(route, currentProduct) {
     return CATEGORIES.find((c) => c.id === route.category)?.label || "Shop";
   }
   if (route.type === "favorites") return "Favorites";
+  if (route.type === "exclusives") return "App Exclusives";
   if (route.type === "sale") return "On Sale";
   if (route.type === "product") return currentProduct?.name || "";
   if (route.type === "checkout") return "Checkout";

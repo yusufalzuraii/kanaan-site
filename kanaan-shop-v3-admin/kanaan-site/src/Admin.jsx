@@ -47,6 +47,7 @@ const money = (n) => `$${Number(n || 0).toFixed(0)}`;
 const emptyProduct = () => ({
   name: "", category: "tshirts", subcategory: "", price: "", colors: [], sizes: ["S", "M", "L", "XL"],
   description: "", badge: "", discount: 0, images: [], soldOut: false, active: true,
+  isSpotlight: false, appExclusive: false,
   variants: {},
 });
 
@@ -1468,6 +1469,7 @@ function ProductForm({ initial, isNew, onCancel, onSaved }) {
       name: f.name, category: f.category, subcategory: f.subcategory || "", price: f.price, colors: f.colors, sizes: f.sizes,
       description: f.description, badge: f.badge, discount: f.discount, images: f.images,
       soldOut: !!f.soldOut, active: f.active !== false, variants: validVariants,
+      isSpotlight: !!f.isSpotlight, appExclusive: !!f.appExclusive,
     };
     try {
       const url = isNew ? "/api/admin/products" : `/api/admin/products/${f.id}`;
@@ -1713,10 +1715,24 @@ function ProductForm({ initial, isNew, onCancel, onSaved }) {
         </Group>
 
         {/* Toggles */}
-        <div className="flex gap-3">
+        <div className="flex gap-3 flex-wrap">
           <Toggle label="Sold out" on={!!f.soldOut} onClick={() => set("soldOut", !f.soldOut)} />
           <Toggle label="Visible in shop" on={f.active !== false} onClick={() => set("active", !(f.active !== false))} />
         </div>
+        <div className="flex gap-3 flex-wrap mt-3">
+          <Toggle label="⭐ Feature on app home" on={!!f.isSpotlight} onClick={() => set("isSpotlight", !f.isSpotlight)} />
+          <Toggle label="🔥 App-exclusive price" on={!!f.appExclusive} onClick={() => set("appExclusive", !f.appExclusive)} />
+        </div>
+        {f.appExclusive && (
+          <p className="font-body text-xs text-muted mt-2">
+            This product will be completely hidden from the website — only visible to app users, under "App Exclusives".
+          </p>
+        )}
+        {f.isSpotlight && (
+          <p className="font-body text-xs text-muted mt-2">
+            If more than one product is marked as featured, the app shows the most recently added one.
+          </p>
+        )}
 
         {error && <p className="font-body text-sm text-coral">{error}</p>}
       </div>

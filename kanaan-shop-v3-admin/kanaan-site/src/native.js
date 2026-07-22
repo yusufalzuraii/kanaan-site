@@ -256,7 +256,7 @@ export function registerEdgeSwipeBack(onTrigger) {
    بيستدعى مرة وحدة لما التطبيق يفتح — إذا المستخدم رفض الإذن أو
    الجهاز ما بيدعم، بنسكت ونكمل عادي، الإشعارات مش وظيفة أساسية.
    ---------------------------------------------------------- */
-export async function registerPushNotifications(apiBaseUrl, onNotificationTap) {
+export async function registerPushNotifications(apiBaseUrl, onNotificationTap, onForegroundNotification) {
   if (!isNativeApp) return;
   try {
     const { PushNotifications } = await import("@capacitor/push-notifications");
@@ -286,6 +286,20 @@ export async function registerPushNotifications(apiBaseUrl, onNotificationTap) {
     PushNotifications.addListener("pushNotificationActionPerformed", (action) => {
       const url = action?.notification?.data?.url;
       if (url && onNotificationTap) onNotificationTap(url);
+    });
+
+    // لما إشعار يوصل *والتطبيق مفتوح قدام المستخدم فعلياً* — أندرويد
+    // ما بيعرض تلقائياً بانر النظام بهالحالة (هيك سلوكو الطبيعي بكل
+    // تطبيق)، فلازم نمسكه إحنا ونعرض بانر داخلي بديل، وإلا كان
+    // الإشعار "بيختفي" بصمت من غير ما المستخدم يحس فيه إطلاقاً.
+    PushNotifications.addListener("pushNotificationReceived", (notification) => {
+      if (onForegroundNotification) {
+        onForegroundNotification({
+          title: notification?.title || "",
+          body: notification?.body || "",
+          url: notification?.data?.url || null,
+        });
+      }
     });
   } catch { /* أي مشكلة هون ما لازم توقف باقي التطبيق */ }
 }

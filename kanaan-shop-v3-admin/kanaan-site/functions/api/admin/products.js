@@ -39,11 +39,11 @@ export async function onRequestPost(context) {
 
   const now = Date.now();
   await env.DB.prepare(
-    `INSERT INTO products (id, name, category, subcategory, price, colors, sizes, description, badge, discount, images, sold_out, active, sort_order, created_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+    `INSERT INTO products (id, name, category, subcategory, price, colors, sizes, description, badge, discount, images, sold_out, active, sort_order, created_at, is_spotlight, app_exclusive)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
   ).bind(
     id, row.name, row.category, row.subcategory, row.price, row.colors, row.sizes, row.description,
-    row.badge, row.discount, row.images, row.sold_out, row.active, 0, now
+    row.badge, row.discount, row.images, row.sold_out, row.active, 0, now, row.is_spotlight, row.app_exclusive
   ).run();
 
   try { await saveVariants(env, id, body.variants); } catch { /* stock optional */ }

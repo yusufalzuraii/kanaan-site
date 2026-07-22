@@ -30,3 +30,10 @@ CREATE TABLE IF NOT EXISTS push_tokens (
   created_at  INTEGER NOT NULL DEFAULT 0,
   updated_at  INTEGER NOT NULL DEFAULT 0
 );
+
+-- is_spotlight: أنت تحدد يدوياً أي منتج يظهر ببطاقة "Just landed"
+-- الكبيرة بالصفحة الرئيسية للتطبيق، بدل ما يُختار تلقائياً.
+-- app_exclusive: سعر/منتج ما بيظهر عالموقع إطلاقاً — حصري لمستخدمي
+-- التطبيق بس (قسم "App Exclusives").
+ALTER TABLE products ADD COLUMN is_spotlight INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE products ADD COLUMN app_exclusive INTEGER NOT NULL DEFAULT 0;

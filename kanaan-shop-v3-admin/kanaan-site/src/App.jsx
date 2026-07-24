@@ -62,6 +62,7 @@ import {
   markWelcomeSeen,
   playTapChime,
   registerNetworkListener,
+  subscribeToRestock,
 } from "./native.js";
 
 /* ============================================================
@@ -3222,12 +3223,78 @@ function CatalogView({ activeCategory, activeSub, loading, goCatalog, products, 
 /* ============================================================
    PRODUCT DETAIL
    ============================================================ */
+/* ============================================================
+   SIZE GUIDE — general clothing/shoe size chart.
+   ⚠️ These are common industry-standard approximations, not measured
+   from Kanaan Shop's actual garments — update the numbers if the
+   real fit differs.
+   ============================================================ */
+const CLOTHING_SIZE_CHART = [
+  { size: "S", chest: "88–92", waist: "74–78" },
+  { size: "M", chest: "96–100", waist: "82–86" },
+  { size: "L", chest: "104–108", waist: "90–94" },
+  { size: "XL", chest: "112–116", waist: "98–102" },
+  { size: "XXL", chest: "120–124", waist: "106–110" },
+];
+const SHOE_SIZE_CHART = [
+  { eu: "40", cm: "25.0" },
+  { eu: "41", cm: "25.7" },
+  { eu: "42", cm: "26.3" },
+  { eu: "43", cm: "27.0" },
+  { eu: "44", cm: "27.7" },
+  { eu: "45", cm: "28.3" },
+];
+
+function SizeGuideModal({ category, onClose }) {
+  const isShoe = category === "shoes";
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-center" onClick={onClose}>
+      <div className="absolute inset-0" style={{ background: "rgba(0,0,0,0.5)" }} />
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="glass relative w-full sm:max-w-sm rounded-t-3xl sm:rounded-3xl p-6"
+        style={{ paddingBottom: "calc(1.5rem + env(safe-area-inset-bottom, 0px))" }}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="font-display font-bold text-lg">Size guide</h2>
+          <button onClick={onClose} className="p-1 tap-scale" aria-label="Close"><X className="w-5 h-5" /></button>
+        </div>
+
+        <table className="w-full font-body text-sm">
+          <thead>
+            <tr className="text-left text-muted" style={{ borderBottom: "1px solid var(--border)" }}>
+              <th className="pb-2 font-medium">{isShoe ? "EU" : "Size"}</th>
+              <th className="pb-2 font-medium">{isShoe ? "Foot length (cm)" : "Chest (cm)"}</th>
+              {!isShoe && <th className="pb-2 font-medium">Waist (cm)</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {(isShoe ? SHOE_SIZE_CHART : CLOTHING_SIZE_CHART).map((row) => (
+              <tr key={row.size || row.eu} style={{ borderBottom: "1px solid var(--border)" }}>
+                <td className="py-2 font-num">{row.size || row.eu}</td>
+                <td className="py-2 font-num text-muted">{row.chest || row.cm}</td>
+                {!isShoe && <td className="py-2 font-num text-muted">{row.waist}</td>}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        <p className="font-body text-xs text-muted mt-4">
+          General guide — fit can vary slightly between styles. Unsure? Message us on WhatsApp before you order.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function ProductView({ product, products, addToCart, openProduct, liked, toggleLike }) {
   const [size, setSize] = useState(product.sizes[0]);
   const [color, setColor] = useState(product.colors[0]);
   const [qty, setQty] = useState(1);
   const [added, setAdded] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [notifyState, setNotifyState] = useState("idle"); // idle | loading | done | unavailable
+  const [showSizeGuide, setShowSizeGuide] = useState(false);
 
   useEffect(() => {
     // Start on a colour/size that's actually in stock where possible.
@@ -3265,6 +3332,13 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
     addToCart(product, size, color, COLORS[color]?.label || color, qty);
     setAdded(true);
     setTimeout(() => setAdded(false), 1800);
+  };
+
+  const handleNotifyRestock = async () => {
+    if (!isNativeApp) return;
+    setNotifyState("loading");
+    const ok = await subscribeToRestock(apiBase, product.id);
+    setNotifyState(ok ? "done" : "unavailable");
   };
 
   const shareWhatsApp = () => {
@@ -3327,7 +3401,10 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
           </div>
 
           <div className="mb-8">
-            <p className="font-body text-sm font-medium mb-2">Size</p>
+            <div className="flex items-center justify-between mb-2">
+              <p className="font-body text-sm font-medium">Size</p>
+              <button onClick={() => setShowSizeGuide(true)} className="font-body text-xs text-coral hover:underline">Size guide</button>
+            </div>
             <div className="flex flex-wrap gap-2">
               {product.sizes.map((sz) => {
                 const left = stockFor(product, color, sz);
@@ -3363,9 +3440,26 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
 
           <div className="hidden sm:flex items-center gap-4">
             {outOfStock ? (
-              <button disabled className="w-full rounded-full font-body font-medium py-3 flex items-center justify-center gap-2 cursor-not-allowed" style={{ background: "var(--glass-bg)", border: "1px solid var(--glass-border)", color: "var(--fg-muted)" }}>
-                Sold out
-              </button>
+              isNativeApp ? (
+                <button
+                  onClick={handleNotifyRestock}
+                  disabled={notifyState === "loading" || notifyState === "done"}
+                  className="w-full rounded-full font-body font-medium py-3 flex items-center justify-center gap-2 tap-scale"
+                  style={{ background: notifyState === "done" ? "var(--teal)" : "var(--fg)", color: "var(--bg)", opacity: notifyState === "loading" ? 0.6 : 1 }}
+                >
+                  {notifyState === "done" ? (
+                    <><Check className="w-5 h-5" /> We'll let you know</>
+                  ) : notifyState === "unavailable" ? (
+                    <>Turn on notifications to get notified</>
+                  ) : (
+                    <><Bell className="w-5 h-5" /> {notifyState === "loading" ? "One sec..." : "Notify me when back"}</>
+                  )}
+                </button>
+              ) : (
+                <button disabled className="w-full rounded-full font-body font-medium py-3 flex items-center justify-center gap-2 cursor-not-allowed" style={{ background: "var(--glass-bg)", border: "1px solid var(--glass-border)", color: "var(--fg-muted)" }}>
+                  Sold out
+                </button>
+              )
             ) : !canAdd ? (
               <button disabled className="w-full rounded-full font-body font-medium py-3 flex items-center justify-center gap-2 cursor-not-allowed" style={{ background: "var(--glass-bg)", border: "1px solid var(--glass-border)", color: "var(--fg-muted)" }}>
                 This size is out of stock
@@ -3455,7 +3549,17 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
             <p className="font-body text-xs text-muted truncate">{product.name}</p>
             <p className="font-num text-base">{outOfStock ? "Sold out" : money(effectivePrice(product))}</p>
           </div>
-          {!canAdd ? (
+          {outOfStock && isNativeApp ? (
+            <button
+              onClick={handleNotifyRestock}
+              disabled={notifyState === "loading" || notifyState === "done"}
+              className="rounded-full font-body font-medium px-5 py-2.5 flex items-center gap-2 flex-shrink-0 tap-scale"
+              style={{ background: notifyState === "done" ? "var(--teal)" : "var(--fg)", color: "var(--bg)", opacity: notifyState === "loading" ? 0.6 : 1 }}
+            >
+              {notifyState === "done" ? <Check className="w-4 h-4" /> : <Bell className="w-4 h-4" />}
+              {notifyState === "done" ? "Notified" : notifyState === "loading" ? "..." : "Notify me"}
+            </button>
+          ) : !canAdd ? (
             <button disabled className="rounded-full font-body font-medium px-5 py-2.5 flex items-center gap-2 flex-shrink-0 cursor-not-allowed" style={{ border: "1px solid var(--glass-border)", color: "var(--fg-muted)" }}>
               {outOfStock ? "Sold out" : "Out of stock"}
             </button>
@@ -3467,6 +3571,8 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
           )}
         </div>
       </div>
+
+      {showSizeGuide && <SizeGuideModal category={product.category} onClose={() => setShowSizeGuide(false)} />}
     </div>
   );
 }

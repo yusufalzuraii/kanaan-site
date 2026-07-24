@@ -1,4 +1,5 @@
 import { json, isAuthed, rowToProduct, payloadToRow, saveVariants, parseImages } from "../../../_shared/util.js";
+import { sendPushToTokens } from "../../../_shared/fcm.js";
 
 // PUT /api/admin/products/:id  -> update
 export async function onRequestPut(context) {
@@ -6,7 +7,7 @@ export async function onRequestPut(context) {
   if (!(await isAuthed(request, env))) return json({ error: "unauthorized" }, 401);
   const id = params.id;
 
-  const existing = await env.DB.prepare("SELECT id FROM products WHERE id = ?").bind(id).first();
+  const existing = await env.DB.prepare("SELECT id, sold_out, name FROM products WHERE id = ?").bind(id).first();
   if (!existing) return json({ error: "not found" }, 404);
 
   let body = {};
@@ -24,6 +25,26 @@ export async function onRequestPut(context) {
 
   const updated = await env.DB.prepare("SELECT * FROM products WHERE id = ?").bind(id).first();
   try { await saveVariants(env, id, body.variants); } catch { /* stock optional */ }
+
+  // "نبّهني لما يرجع متوفر" — لو المنتج كان نافد وهلق صار متوفر،
+  // بنبعت إشعار لكل يلي اشتركوا، وبعدين بنمسح اشتراكاتهم (مرة وحدة).
+  if (existing.sold_out === 1 && row.sold_out === 0) {
+    try {
+      const { results } = await env.DB.prepare(
+        "SELECT token FROM restock_subscriptions WHERE product_id = ?"
+      ).bind(id).all();
+      const tokens = (results || []).map((r) => r.token);
+      if (tokens.length > 0) {
+        await sendPushToTokens(env, tokens, {
+          title: "Back in stock 🎉",
+          body: `${row.name} is back — grab it before it's gone again.`,
+          url: "/shop",
+        });
+        await env.DB.prepare("DELETE FROM restock_subscriptions WHERE product_id = ?").bind(id).run();
+      }
+    } catch { /* الإشعار مش أساسي — ما لازم يوقف حفظ المنتج */ }
+  }
+
   return json({ ok: true, product: rowToProduct(updated) });
 }
 

@@ -62,6 +62,9 @@ import {
   markWelcomeSeen,
   playTapChime,
   registerNetworkListener,
+  scheduleCartReminder,
+  cancelCartReminder,
+  registerAppStateListener,
 } from "./native.js";
 
 /* ============================================================
@@ -1765,6 +1768,29 @@ function KanaanShop() {
   useEffect(() => {
     updateAppBadge(cartCount);
   }, [cartCount]);
+
+  // تذكير السلة المتروكة — بنستخدم ref حتى نضل عارفين آخر عدد
+  // بالسلة داخل مستمع حالة التطبيق، بدون ما نعيد تسجيله كل مرة
+  // السلة تتغيّر (تسجيل واحد بس طول عمر التطبيق).
+  const cartCountRef = useRef(cartCount);
+  useEffect(() => { cartCountRef.current = cartCount; }, [cartCount]);
+
+  useEffect(() => {
+    return registerAppStateListener((isActive) => {
+      if (isActive) {
+        cancelCartReminder();
+      } else if (cartCountRef.current > 0) {
+        scheduleCartReminder(cartCountRef.current);
+      }
+    });
+  }, []);
+
+  // لو السلة فضيت (طلب اتبعت، أو المستخدم مسح كل شي بنفسو) — نلغي
+  // أي تذكير مجدول، حتى ما يوصل إشعار لسلة خلص أمرها
+  useEffect(() => {
+    if (cartCount === 0) cancelCartReminder();
+  }, [cartCount]);
+
   const cartTotal = cart.reduce((sum, i) => sum + i.qty * i.price, 0);
 
   const filteredProducts = useMemo(() => {

@@ -412,3 +412,60 @@ export async function registerNetworkListener(onChange) {
     };
   }
 }
+
+/* ----------------------------------------------------------
+   تذكير السلة المتروكة — تلقائي بالكامل، بلا سيرفر ولا تتبّع.
+   لما التطبيق يروح عالخلفية وفي قطع بالسلة، منجدول إشعار محلي
+   بعد 3 ساعات ("لسا قطعك موجودة"). لو المستخدم رجع فتح التطبيق
+   قبلها، أو فضّى السلة، منلغي الإشعار المجدول فوراً — هيك ما
+   بيوصل إشعار لحدا خلص طلبو أو رجع لحاله.
+   ---------------------------------------------------------- */
+const CART_REMINDER_ID = 90001;
+const CART_REMINDER_DELAY_MS = 3 * 60 * 60 * 1000; // 3 ساعات
+
+export async function scheduleCartReminder(cartCount) {
+  if (!isNativeApp || cartCount <= 0) return;
+  try {
+    const { LocalNotifications } = await import("@capacitor/local-notifications");
+    let perm = await LocalNotifications.checkPermissions();
+    if (perm.display === "prompt" || perm.display === "prompt-with-rationale") {
+      perm = await LocalNotifications.requestPermissions();
+    }
+    if (perm.display !== "granted") return;
+
+    await LocalNotifications.cancel({ notifications: [{ id: CART_REMINDER_ID }] });
+    await LocalNotifications.schedule({
+      notifications: [{
+        id: CART_REMINDER_ID,
+        title: "Still thinking it over? 👀",
+        body: cartCount === 1
+          ? "The piece you picked is still in your cart — grab it before it's gone."
+          : `Your ${cartCount} picks are still in your cart — grab them before they're gone.`,
+        schedule: { at: new Date(Date.now() + CART_REMINDER_DELAY_MS) },
+      }],
+    });
+  } catch { /* تجاهل — الإشعار مش وظيفة أساسية */ }
+}
+
+export async function cancelCartReminder() {
+  if (!isNativeApp) return;
+  try {
+    const { LocalNotifications } = await import("@capacitor/local-notifications");
+    await LocalNotifications.cancel({ notifications: [{ id: CART_REMINDER_ID }] });
+  } catch { /* تجاهل */ }
+}
+
+/* ----------------------------------------------------------
+   مراقبة حالة التطبيق (فاتح بالمقدمة / رايح عالخلفية) — نستخدمها
+   لتشغيل/إلغاء تذكير السلة بالتوقيت الصح.
+   ---------------------------------------------------------- */
+export async function registerAppStateListener(onChange) {
+  if (!isNativeApp) return () => {};
+  try {
+    const { App } = await import("@capacitor/app");
+    const sub = await App.addListener("appStateChange", (state) => onChange(state.isActive));
+    return () => sub.remove();
+  } catch {
+    return () => {};
+  }
+}

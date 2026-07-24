@@ -353,12 +353,60 @@ function NotifyTab() {
     setSending(false);
   };
 
+  const templates = [
+    {
+      label: "🔥 Sale ending soon",
+      title: "Last chance ⏳",
+      body: "The sale wraps up soon — grab your pieces before they're back to full price.",
+      url: "/sale",
+    },
+    {
+      label: "✨ New drop",
+      title: "Just landed ✨",
+      body: "New pieces are in the shop — come see what's new.",
+      url: "/shop",
+    },
+    {
+      label: "🔒 App exclusives reminder",
+      title: "Prices only you can see 🔒",
+      body: "A few pieces are priced lower right now — visible only here, in the app.",
+      url: "/exclusives",
+    },
+    {
+      label: "📦 Restock",
+      title: "Back in stock",
+      body: "A piece you've been eyeing just came back — it won't last long.",
+      url: "/shop",
+    },
+  ];
+
+  const applyTemplate = (t) => {
+    setTitle(t.title);
+    setBody(t.body);
+    setUrl(t.url);
+    setResult(null);
+  };
+
   return (
     <div className="space-y-5">
       <div className="glass rounded-2xl p-5">
         <p className="font-body text-sm text-muted mb-4">
           بيوصل هالإشعار لكل مستخدمي تطبيق أندرويد/آيفون اللي وافقوا يستقبلوا إشعارات — مش مستخدمي الموقع بالمتصفح.
         </p>
+
+        <p className="font-body text-xs text-muted mb-2">قوالب جاهزة — اضغط وحدة لتعبئة النص، وعدّل قبل الإرسال إذا حبيت:</p>
+        <div className="flex flex-wrap gap-2 mb-5">
+          {templates.map((t) => (
+            <button
+              key={t.label}
+              onClick={() => applyTemplate(t)}
+              className="a-chip tap-scale"
+              style={{ cursor: "pointer" }}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
 
         <label className="font-body text-sm font-medium block mb-1.5">Title</label>
         <input

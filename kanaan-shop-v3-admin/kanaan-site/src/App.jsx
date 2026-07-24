@@ -63,6 +63,7 @@ import {
   playTapChime,
   registerNetworkListener,
   subscribeToRestock,
+  checkAppUpdate,
 } from "./native.js";
 
 /* ============================================================
@@ -1358,13 +1359,77 @@ function SaleProductCard({ product, onOpen, liked, onToggleLike }) {
 }
 
 /* ============================================================
+   ERROR BOUNDARY
+   ------------------------------------------------------------
+   If anything anywhere in the app throws during render, React
+   normally unmounts everything and the visitor is left staring at a
+   blank white page with zero explanation — exactly what happened on
+   2026-07-24. This catches that class of crash, shows a plain
+   "something went wrong, reload" screen instead of a blank one, and
+   quietly reports the error so it can be fixed without relying on a
+   customer complaining.
+
+   Deliberately styled with plain inline styles, not Tailwind classes
+   or the app's CSS custom properties — if GlobalStyles itself is
+   what failed to mount, this fallback still has to render correctly
+   on its own.
+   ============================================================ */
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidCatch(error, errorInfo) {
+    try {
+      fetch(`${apiBase}/api/log-error`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: String(error?.message || error || "Unknown error"),
+          stack: String(error?.stack || ""),
+          componentStack: String(errorInfo?.componentStack || ""),
+          url: typeof window !== "undefined" && window.location ? window.location.href : "",
+          platform: isNativeApp ? "app" : "web",
+        }),
+      }).catch(() => { /* best effort — never let logging itself throw */ });
+    } catch { /* ignore */ }
+  }
+  render() {
+    if (!this.state.hasError) return this.props.children;
+    return (
+      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "24px", background: "#F2F2F4", fontFamily: "Inter, sans-serif" }}>
+        <div style={{ textAlign: "center", maxWidth: 340 }}>
+          <p style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 22, color: "#14141A", marginBottom: 8 }}>
+            Something went wrong
+          </p>
+          <p style={{ fontSize: 14, color: "rgba(20,20,26,0.6)", marginBottom: 24, lineHeight: 1.6 }}>
+            Sorry about that — please try reloading the page. If it keeps happening, message us on WhatsApp and we'll sort it out.
+          </p>
+          <button
+            onClick={() => window.location.reload()}
+            style={{ background: "#FF4522", color: "#fff", border: "none", borderRadius: 999, padding: "12px 28px", fontFamily: "Inter, sans-serif", fontWeight: 500, fontSize: 14, cursor: "pointer" }}
+          >
+            Reload
+          </button>
+        </div>
+      </div>
+    );
+  }
+}
+
+/* ============================================================
    ROOT
    ============================================================ */
 export default function KanaanShopRoot() {
   return (
-    <AppProvider>
-      <KanaanShop />
-    </AppProvider>
+    <ErrorBoundary>
+      <AppProvider>
+        <KanaanShop />
+      </AppProvider>
+    </ErrorBoundary>
   );
 }
 
@@ -1502,6 +1567,7 @@ function KanaanShop() {
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [storyRings, setStoryRings] = useState([]);
   const [appExclusiveCount, setAppExclusiveCount] = useState(0);
+  const [updateInfo, setUpdateInfo] = useState({ available: false });
 
   const refreshProducts = async () => {
     try {
@@ -1531,6 +1597,16 @@ function KanaanShop() {
         const data = await res.json();
         if (alive && Array.isArray(data.rings)) setStoryRings(data.rings);
       } catch { /* The Edit is a bonus feature — never block the shop on it */ }
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!isNativeApp) return;
+    let alive = true;
+    (async () => {
+      const info = await checkAppUpdate(apiBase);
+      if (alive) setUpdateInfo(info);
     })();
     return () => { alive = false; };
   }, []);
@@ -1669,6 +1745,25 @@ function KanaanShop() {
           <div className="glass rounded-2xl px-4 py-2.5 flex items-center gap-2">
             <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--coral)", flexShrink: 0 }} />
             <p className="font-body text-xs text-muted">You're offline — showing what's saved on your phone.</p>
+          </div>
+        </div>
+      )}
+      {isNativeApp && !isOffline && updateInfo.available && (
+        <div className="px-4 sm:px-6" style={{ paddingTop: route.type === "home" ? "calc(0.75rem + env(safe-area-inset-top, 0px))" : 8 }}>
+          <div className="glass rounded-2xl px-4 py-2.5 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--teal)", flexShrink: 0 }} />
+              <p className="font-body text-xs text-muted truncate">A new version of the app is available.</p>
+            </div>
+            <a
+              href="https://play.google.com/store/apps/details?id=com.kanaanshop.app"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-body text-xs font-medium flex-shrink-0"
+              style={{ color: "var(--coral)" }}
+            >
+              Update
+            </a>
           </div>
         </div>
       )}

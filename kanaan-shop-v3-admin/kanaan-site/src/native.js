@@ -493,3 +493,27 @@ export async function subscribeToRestock(apiBaseUrl, productId) {
     return false;
   }
 }
+
+/* ----------------------------------------------------------
+   "تحديث متوفر" — بيقارن رقم نسخة أندرويد المثبتة فعلياً (من
+   Capacitor نفسه، مش رقم مكتوب يدوياً بالكود — هيك ما فيه خطر
+   يصير الرقمين غير متزامنين) مع آخر رقم حطيته بـ/admin. لو
+   المثبت أقدم، بترجع true فتظهر الواجهة بانر "نسخة جديدة متوفرة".
+   ---------------------------------------------------------- */
+export async function checkAppUpdate(apiBaseUrl) {
+  if (!isNativeApp) return { available: false };
+  try {
+    const { App } = await import("@capacitor/app");
+    const info = await App.getInfo();
+    const installed = parseInt(info.build, 10) || 0;
+    if (!installed) return { available: false };
+
+    const res = await fetch(`${apiBaseUrl}/api/app-version`);
+    const data = await res.json();
+    const latest = parseInt(data.latest, 10) || 0;
+
+    return { available: latest > installed, installed, latest };
+  } catch {
+    return { available: false };
+  }
+}

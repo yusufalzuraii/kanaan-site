@@ -267,10 +267,19 @@ function Dashboard({ onExit, onLogout }) {
         >
           <Bell className="w-4 h-4" /> Notify
         </button>
+        <button
+          onClick={() => setTab("errors")}
+          className="flex-1 rounded-full py-2 font-body text-sm tap-scale flex items-center justify-center gap-2"
+          style={tab === "errors" ? { background: "var(--fg)", color: "var(--bg)" } : { color: "var(--fg-muted)" }}
+        >
+          <AlertTriangle className="w-4 h-4" /> Errors
+        </button>
       </div>
 
       {tab === "notify" ? (
         <NotifyTab onLogout={onLogout} />
+      ) : tab === "errors" ? (
+        <ErrorsTab />
       ) : tab === "stories" ? (
         <StoriesTab products={products} onLogout={onLogout} />
       ) : tab === "orders" ? (
@@ -325,6 +334,33 @@ function NotifyTab() {
   const [url, setUrl] = useState("");
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState(null); // { ok, sent, failed, removed, total } | { error }
+
+  const [appVersion, setAppVersion] = useState(null);
+  const [versionSaving, setVersionSaving] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch("/api/admin/app-version");
+        const d = await r.json();
+        setAppVersion(d.latest ?? 1);
+      } catch { setAppVersion(1); }
+    })();
+  }, []);
+
+  const bumpVersion = async () => {
+    setVersionSaving(true);
+    try {
+      const next = (appVersion || 1) + 1;
+      await fetch("/api/admin/app-version", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ latest: next }),
+      });
+      setAppVersion(next);
+    } catch { /* تجاهل */ }
+    setVersionSaving(false);
+  };
 
   const send = async () => {
     if (!title.trim() || !body.trim()) {
@@ -457,6 +493,87 @@ function NotifyTab() {
           </p>
         )}
       </div>
+
+      <div className="glass rounded-2xl p-5">
+        <p className="font-body text-sm font-medium mb-1">بانر "تحديث متوفر" بالتطبيق</p>
+        <p className="font-body text-xs text-muted mb-3">
+          بعد ما ترفع APK/AAB جديد فيه إصلاح مهم لـ Google Play، اضغط الزر تحت — هيك أي مستخدم عندو نسخة أقدم بيشوفلو بانر لطيف يقترح عليه يحدّث.
+        </p>
+        <div className="flex items-center gap-3">
+          <span className="font-num text-sm">النسخة الحالية المعروفة: {appVersion ?? "..."}</span>
+          <button
+            onClick={bumpVersion}
+            disabled={versionSaving || appVersion === null}
+            className="a-chip tap-scale"
+            style={{ cursor: "pointer", opacity: versionSaving ? 0.6 : 1 }}
+          >
+            {versionSaving ? "..." : "🔔 أعلن عن نسخة جديدة"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   ERRORS TAB — آخر 30 خطأ برمجي حقيقي صار للزباين (موقع أو
+   تطبيق). شبكة أمان بسيطة حتى ما تعتمد بس على شكاوى الناس.
+   ============================================================ */
+function ErrorsTab() {
+  const [errors, setErrors] = useState(null);
+  const [expandedId, setExpandedId] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch("/api/admin/errors");
+        const d = await r.json();
+        setErrors(Array.isArray(d.errors) ? d.errors : []);
+      } catch {
+        setErrors([]);
+      }
+    })();
+  }, []);
+
+  const timeAgo = (ts) => {
+    const diff = Date.now() - ts;
+    const mins = Math.floor(diff / 60000);
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    return `${Math.floor(hrs / 24)}d ago`;
+  };
+
+  return (
+    <div className="glass rounded-2xl p-5">
+      <p className="font-body text-sm text-muted mb-4">
+        آخر 30 خطأ برمجي حقيقي صار لزباين الموقع أو التطبيق — بيتسجّل تلقائياً، بلا ما حدا يشتكي.
+      </p>
+
+      {errors === null ? (
+        <p className="font-body text-sm text-muted">عم يحمّل...</p>
+      ) : errors.length === 0 ? (
+        <p className="font-body text-sm text-teal">✓ ولا خطأ مسجّل لهلق — تمام.</p>
+      ) : (
+        <div className="space-y-2">
+          {errors.map((e) => (
+            <div key={e.id} className="rounded-xl p-3" style={{ background: "var(--field-bg)", border: "1px solid var(--border)" }}>
+              <button onClick={() => setExpandedId(expandedId === e.id ? null : e.id)} className="w-full text-left">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-body text-sm font-medium truncate">{e.message || "Unknown error"}</p>
+                  <span className="a-chip flex-shrink-0" style={{ fontSize: "0.65rem" }}>{e.platform || "web"}</span>
+                </div>
+                <p className="font-body text-xs text-muted mt-1">{timeAgo(e.created_at)} · {e.url}</p>
+              </button>
+              {expandedId === e.id && (
+                <pre className="font-num text-[10px] text-muted mt-2 whitespace-pre-wrap break-all" style={{ maxHeight: 200, overflow: "auto" }}>
+                  {e.stack || "(no stack trace)"}
+                </pre>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

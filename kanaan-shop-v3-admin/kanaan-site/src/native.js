@@ -13,6 +13,7 @@ import { Capacitor } from "@capacitor/core";
 // true بس جوا تطبيق أندرويد/آيفون المبني، false على أي متصفح
 // (بما فيه لما تفتح نفس الموقع من متصفح الموبايل نفسه)
 export const isNativeApp = Capacitor.isNativePlatform();
+const PUSH_TOKEN_KEY = "kanaan-push-token";
 
 /* ----------------------------------------------------------
    اهتزاز خفيف (Haptics) — بلحظات محددة بس، مش بكل ضغطة، حتى يضل
@@ -270,6 +271,7 @@ export async function registerPushNotifications(apiBaseUrl, onNotificationTap, o
     await PushNotifications.register();
 
     PushNotifications.addListener("registration", async (token) => {
+      try { localStorage.setItem(PUSH_TOKEN_KEY, token.value); } catch { /* تجاهل */ }
       try {
         await fetch(`${apiBaseUrl}/api/push/register`, {
           method: "POST",
@@ -467,5 +469,27 @@ export async function registerAppStateListener(onChange) {
     return () => sub.remove();
   } catch {
     return () => {};
+  }
+}
+
+/* ----------------------------------------------------------
+   "نبّهني لما يرجع متوفر" — بيستخدم نفس توكن الإشعارات المخزّن
+   محلياً من registerPushNotifications. لو المستخدم ما وافق على
+   الإشعارات أصلاً، ما رح يكون في توكن — بنرجع false ونخلي
+   الواجهة تعرض رسالة توضيحية بدل ما تفشل بصمت.
+   ---------------------------------------------------------- */
+export async function subscribeToRestock(apiBaseUrl, productId) {
+  if (!isNativeApp) return false;
+  try {
+    const token = localStorage.getItem(PUSH_TOKEN_KEY);
+    if (!token) return false;
+    const res = await fetch(`${apiBaseUrl}/api/restock/subscribe`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ productId, token }),
+    });
+    return res.ok;
+  } catch {
+    return false;
   }
 }

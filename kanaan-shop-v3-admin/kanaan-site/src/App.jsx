@@ -65,6 +65,7 @@ import {
   scheduleCartReminder,
   cancelCartReminder,
   registerAppStateListener,
+  subscribeToRestock,
 } from "./native.js";
 
 /* ============================================================
@@ -283,6 +284,25 @@ function parseRoute(path) {
    HELPERS
    ============================================================ */
 const money = (n) => `$${n.toFixed(0)}`;
+
+// رقم إصدار التطبيق الحالي — لازم يترفع رقم واحد كل مرة نبني APK/AAB
+// جديد فيه إصلاح مهم، وبالتوازي نحدّث الرقم بـ /admin (تبويب Notify
+// تحت). هيك أي مستخدم عندو نسخة أقدم بيشوف بانر "تحديث متوفر".
+const CURRENT_APP_VERSION = 1;
+const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=com.kanaanshop.app";
+
+// طلب شبكة بمهلة زمنية — لو الاتصال بطيء أو "علق"، بعد 15 ثانية
+// منلغي الطلب لحاله بدل ما يضل المستخدم يحدّق بدوّارة تحميل للأبد
+// بلا أي تفسير.
+async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 const effectivePrice = (p) => (p.discount > 0 ? Math.round(p.price * (1 - p.discount / 100)) : p.price);
 
 function useReveal() {
@@ -1502,11 +1522,74 @@ function SaleProductCard({ product, onOpen, liked, onToggleLike }) {
 /* ============================================================
    ROOT
    ============================================================ */
+/* ============================================================
+   ERROR BOUNDARY — شبكة أمان: لو صار خطأ برمجي غير متوقع بأي
+   مكان بالتطبيق، بدل ما "كل" التطبيق يطلع شاشة بيضا فاضية بلا
+   تفسير، بتظهر شاشة بسيطة "في مشكلة، جرب تفتح من جديد" — وبنسجّل
+   تفاصيل الخطأ لقاعدة البيانات حتى يكون عندنا رؤية حقيقية لو صار
+   شي بعد النشر، بدل ما نعتمد بس على شكاوى المستخدمين.
+   ============================================================ */
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error, info) {
+    try {
+      fetch(`${apiBase}/api/log-error`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: String(error?.message || error).slice(0, 500),
+          stack: String(error?.stack || "").slice(0, 2000),
+          componentStack: String(info?.componentStack || "").slice(0, 2000),
+          url: (() => { try { return window.location.href; } catch { return ""; } })(),
+          platform: isNativeApp ? "app" : "web",
+        }),
+      }).catch(() => {});
+    } catch { /* حتى تسجيل الخطأ نفسو ما لازم يكسر شي */ }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-app text-fg font-body flex items-center justify-center px-6">
+          <GlobalStyles />
+          <div className="text-center max-w-sm">
+            <div className="glass w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6">
+              <span style={{ fontSize: 26 }}>😕</span>
+            </div>
+            <h1 className="font-display font-bold text-xl mb-2">Something went wrong</h1>
+            <p className="font-body text-sm text-muted mb-6">
+              An unexpected error happened. Reloading usually fixes it.
+            </p>
+            <button
+              onClick={() => window.location.reload()}
+              className="glass-btn rounded-full font-body font-medium px-6 py-3 tap-scale"
+              style={{ background: "var(--coral)", color: "#fff" }}
+            >
+              Reload
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function KanaanShopRoot() {
   return (
-    <AppProvider>
-      <KanaanShop />
-    </AppProvider>
+    <ErrorBoundary>
+      <AppProvider>
+        <KanaanShop />
+      </AppProvider>
+    </ErrorBoundary>
   );
 }
 
@@ -1546,6 +1629,19 @@ function KanaanShop() {
   const [isOffline, setIsOffline] = useState(false);
   useEffect(() => {
     return registerNetworkListener((connected) => setIsOffline(!connected));
+  }, []);
+
+  // بانر "تحديث متوفر" — بنسأل السيرفر مرة وحدة عند فتح التطبيق
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+  const [updateDismissed, setUpdateDismissed] = useState(false);
+  useEffect(() => {
+    if (!isNativeApp) return;
+    fetchWithTimeout(`${apiBase}/api/app-version`, {}, 8000)
+      .then((r) => r.json())
+      .then((d) => {
+        if (typeof d.latest === "number" && d.latest > CURRENT_APP_VERSION) setUpdateAvailable(true);
+      })
+      .catch(() => { /* ما قدرنا نتحقق — نسكت، مش أساسي */ });
   }, []);
 
   // إشعار داخلي بسيط لما يوصل إشعار والتطبيق مفتوح قدام المستخدم
@@ -1647,16 +1743,24 @@ function KanaanShop() {
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [storyRings, setStoryRings] = useState([]);
   const [appExclusiveCount, setAppExclusiveCount] = useState(0);
+  const [productsError, setProductsError] = useState(false);
 
   const refreshProducts = async () => {
     try {
-      const res = await fetch(`${apiBase}/api/products`, {
+      const res = await fetchWithTimeout(`${apiBase}/api/products`, {
         headers: isNativeApp ? { "X-Kanaan-Client": "app" } : {},
       });
       const data = await res.json();
-      if (Array.isArray(data.products)) setProducts(data.products);
+      if (Array.isArray(data.products)) {
+        setProducts(data.products);
+        setProductsError(false);
+      }
       if (typeof data.appExclusiveCount === "number") setAppExclusiveCount(data.appExclusiveCount);
-    } catch { /* offline or API not ready */ }
+    } catch {
+      // مهلة الاتصال خلصت أو الشبكة مقطوعة — منعلّم حالة خطأ واضحة
+      // بدل ما نسكت ونخلي المستخدم يظن إنو المتجر فاضي فعلاً
+      setProductsError(true);
+    }
   };
 
   useEffect(() => {
@@ -1849,10 +1953,20 @@ function KanaanShop() {
           </div>
         </div>
       )}
+      {isNativeApp && updateAvailable && !updateDismissed && !isOffline && (
+        <div className="px-4 sm:px-6" style={{ paddingTop: route.type === "home" ? "calc(0.75rem + env(safe-area-inset-top, 0px))" : 8 }}>
+          <div className="glass rounded-2xl px-4 py-2.5 flex items-center gap-3">
+            <span style={{ fontSize: 16, flexShrink: 0 }}>✨</span>
+            <p className="font-body text-xs flex-1">A new version is available.</p>
+            <a href={PLAY_STORE_URL} target="_blank" rel="noopener noreferrer" className="font-body text-xs text-coral font-medium flex-shrink-0">Update</a>
+            <button onClick={() => setUpdateDismissed(true)} className="p-0.5 flex-shrink-0" aria-label="Dismiss"><X className="w-3.5 h-3.5 text-muted" /></button>
+          </div>
+        </div>
+      )}
       <main>
         <PageTransition path={path} direction={navDirection}>
         {route.type === "home" && isNativeApp && (
-          <NativeHomeView products={products} loading={catalogLoading} goCatalog={goCatalog} goSale={goSale} goExclusives={goExclusives} openProduct={openProduct} likes={likes} toggleLike={toggleLike} storyRings={storyRings} openStory={openStory} goFavorites={goFavorites} onCart={() => setCartOpen(true)} cartCount={cartCount} />
+          <NativeHomeView products={products} loading={catalogLoading} error={productsError} onRetry={refreshProducts} goCatalog={goCatalog} goSale={goSale} goExclusives={goExclusives} openProduct={openProduct} likes={likes} toggleLike={toggleLike} storyRings={storyRings} openStory={openStory} goFavorites={goFavorites} onCart={() => setCartOpen(true)} cartCount={cartCount} />
         )}
         {route.type === "home" && !isNativeApp && (
           <HomeView products={products} loading={catalogLoading} goCatalog={goCatalog} goSale={goSale} openProduct={openProduct} likes={likes} toggleLike={toggleLike} storyRings={storyRings} openStory={openStory} appExclusiveCount={appExclusiveCount} />
@@ -1861,7 +1975,7 @@ function KanaanShop() {
           <SaleView products={products} loading={catalogLoading} goCatalog={goCatalog} openProduct={openProduct} likes={likes} toggleLike={toggleLike} />
         )}
         {route.type === "catalog" && (
-          <CatalogView activeCategory={route.category} activeSub={route.sub} loading={catalogLoading} goCatalog={goCatalog} products={filteredProducts} openProduct={openProduct} likes={likes} toggleLike={toggleLike} />
+          <CatalogView activeCategory={route.category} activeSub={route.sub} loading={catalogLoading} error={productsError} onRetry={refreshProducts} goCatalog={goCatalog} products={filteredProducts} openProduct={openProduct} likes={likes} toggleLike={toggleLike} />
         )}
         {route.type === "favorites" && (
           <FavoritesView products={products} loading={catalogLoading} likes={likes} openProduct={openProduct} toggleLike={toggleLike} goCatalog={goCatalog} />
@@ -2888,7 +3002,7 @@ function SpotlightCard({ product, onOpen }) {
   );
 }
 
-function NativeHomeView({ products, loading, goCatalog, goSale, goExclusives, openProduct, likes, toggleLike, storyRings, openStory, goFavorites, onCart, cartCount }) {
+function NativeHomeView({ products, loading, error, onRetry, goCatalog, goSale, goExclusives, openProduct, likes, toggleLike, storyRings, openStory, goFavorites, onCart, cartCount }) {
   useEffect(() => {
     document.title = `${STORE_NAME} — Menswear from Saida, Lebanon`;
   }, []);
@@ -3094,6 +3208,11 @@ function NativeHomeView({ products, loading, goCatalog, goSale, goExclusives, op
               <div key={i} className="rounded-2xl glass flex-shrink-0" style={{ width: 150, aspectRatio: "4/5", opacity: 0.5 }} />
             ))}
           </div>
+        ) : error && products.length === 0 ? (
+          <div className="px-4 sm:px-6">
+            <p className="font-body text-sm text-muted mb-2">Couldn't load products — check your connection.</p>
+            <button onClick={onRetry} className="font-body text-sm text-coral hover:underline">Try again</button>
+          </div>
         ) : featured.length === 0 ? (
           <p className="font-body text-sm text-muted px-4 sm:px-6">Products are on their way — check back soon.</p>
         ) : (
@@ -3281,7 +3400,7 @@ function FavoritesView({ products, loading, likes, openProduct, toggleLike, goCa
    ============================================================ */
 const PAGE_SIZE = 12;
 
-function CatalogView({ activeCategory, activeSub, loading, goCatalog, products, openProduct, likes, toggleLike }) {
+function CatalogView({ activeCategory, activeSub, loading, error, onRetry, goCatalog, products, openProduct, likes, toggleLike }) {
   const label = activeCategory === "all" ? "Shop" : CATEGORIES.find((c) => c.id === activeCategory)?.label || "Shop";
   const [shown, setShown] = useState(PAGE_SIZE);
   const subs = subsFor(activeCategory);
@@ -3363,6 +3482,11 @@ function CatalogView({ activeCategory, activeSub, loading, goCatalog, products, 
             <div key={i} className="rounded-2xl glass" style={{ aspectRatio: "4/5", opacity: 0.5 }} />
           ))}
         </div>
+      ) : error && products.length === 0 ? (
+        <div className="py-16 text-center">
+          <p className="font-body text-muted text-sm mb-2">Couldn't load products — check your connection.</p>
+          <button onClick={onRetry} className="font-body text-sm text-coral hover:underline">Try again</button>
+        </div>
       ) : products.length === 0 ? (
         <p className="font-body text-muted py-16 text-center">
           {activeSub ? `No ${subLabel(activeCategory, activeSub).toLowerCase()} pieces here yet.` : "No products in this category yet."}
@@ -3400,12 +3524,78 @@ function CatalogView({ activeCategory, activeSub, loading, goCatalog, products, 
 /* ============================================================
    PRODUCT DETAIL
    ============================================================ */
+/* ============================================================
+   SIZE GUIDE — جدول مقاسات عام (ملابس أو أحذية حسب فئة المنتج).
+   ⚠️ ملاحظة للمطوّر/صاحب المتجر: هاي أرقام قياسية تقريبية شائعة
+   بصناعة الألبسة، مش مأخوذة من قياسات منتجاتك الفعلية — لو حسيت
+   المقاسات الحقيقية بتختلف، خبرني وبعدّل الأرقام لتطابق منتجاتك.
+   ============================================================ */
+const CLOTHING_SIZE_CHART = [
+  { size: "S", chest: "88–92", waist: "74–78" },
+  { size: "M", chest: "96–100", waist: "82–86" },
+  { size: "L", chest: "104–108", waist: "90–94" },
+  { size: "XL", chest: "112–116", waist: "98–102" },
+  { size: "XXL", chest: "120–124", waist: "106–110" },
+];
+const SHOE_SIZE_CHART = [
+  { eu: "40", cm: "25.0" },
+  { eu: "41", cm: "25.7" },
+  { eu: "42", cm: "26.3" },
+  { eu: "43", cm: "27.0" },
+  { eu: "44", cm: "27.7" },
+  { eu: "45", cm: "28.3" },
+];
+
+function SizeGuideModal({ category, onClose }) {
+  const isShoe = category === "shoes";
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-center" onClick={onClose}>
+      <div className="absolute inset-0" style={{ background: "rgba(0,0,0,0.5)" }} />
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="glass relative w-full sm:max-w-sm rounded-t-3xl sm:rounded-3xl p-6"
+        style={{ paddingBottom: "calc(1.5rem + env(safe-area-inset-bottom, 0px))" }}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="font-display font-bold text-lg">Size guide</h2>
+          <button onClick={onClose} className="p-1 tap-scale" aria-label="Close"><X className="w-5 h-5" /></button>
+        </div>
+
+        <table className="w-full font-body text-sm">
+          <thead>
+            <tr className="text-left text-muted" style={{ borderBottom: "1px solid var(--border)" }}>
+              <th className="pb-2 font-medium">{isShoe ? "EU" : "Size"}</th>
+              <th className="pb-2 font-medium">{isShoe ? "Foot length (cm)" : "Chest (cm)"}</th>
+              {!isShoe && <th className="pb-2 font-medium">Waist (cm)</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {(isShoe ? SHOE_SIZE_CHART : CLOTHING_SIZE_CHART).map((row) => (
+              <tr key={row.size || row.eu} style={{ borderBottom: "1px solid var(--border)" }}>
+                <td className="py-2 font-num">{row.size || row.eu}</td>
+                <td className="py-2 font-num text-muted">{row.chest || row.cm}</td>
+                {!isShoe && <td className="py-2 font-num text-muted">{row.waist}</td>}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        <p className="font-body text-xs text-muted mt-4">
+          General guide — fit can vary slightly between styles. Unsure? Message us on WhatsApp before you order.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function ProductView({ product, products, addToCart, openProduct, liked, toggleLike }) {
   const [size, setSize] = useState(product.sizes[0]);
   const [color, setColor] = useState(product.colors[0]);
   const [qty, setQty] = useState(1);
   const [added, setAdded] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [notifyState, setNotifyState] = useState("idle"); // idle | loading | done | unavailable
+  const [showSizeGuide, setShowSizeGuide] = useState(false);
 
   useEffect(() => {
     // Start on a colour/size that's actually in stock where possible.
@@ -3414,6 +3604,7 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
     setSize(product.sizes.find((s) => stockFor(product, firstColor, s) > 0) || product.sizes[0]);
     setQty(1);
     setAdded(false);
+    setNotifyState("idle");
     addRecentlyViewed(product.id);
   }, [product.id]); // eslint-disable-line
 
@@ -3443,6 +3634,13 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
     addToCart(product, size, color, COLORS[color]?.label || color, qty);
     setAdded(true);
     setTimeout(() => setAdded(false), 1800);
+  };
+
+  const handleNotifyRestock = async () => {
+    if (!isNativeApp) return;
+    setNotifyState("loading");
+    const ok = await subscribeToRestock(apiBase, product.id);
+    setNotifyState(ok ? "done" : "unavailable");
   };
 
   const shareWhatsApp = () => {
@@ -3505,7 +3703,10 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
           </div>
 
           <div className="mb-8">
-            <p className="font-body text-sm font-medium mb-2">Size</p>
+            <div className="flex items-center justify-between mb-2">
+              <p className="font-body text-sm font-medium">Size</p>
+              <button onClick={() => setShowSizeGuide(true)} className="font-body text-xs text-coral hover:underline">Size guide</button>
+            </div>
             <div className="flex flex-wrap gap-2">
               {product.sizes.map((sz) => {
                 const left = stockFor(product, color, sz);
@@ -3541,9 +3742,26 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
 
           <div className="hidden sm:flex items-center gap-4">
             {outOfStock ? (
-              <button disabled className="w-full rounded-full font-body font-medium py-3 flex items-center justify-center gap-2 cursor-not-allowed" style={{ background: "var(--glass-bg)", border: "1px solid var(--glass-border)", color: "var(--fg-muted)" }}>
-                Sold out
-              </button>
+              isNativeApp ? (
+                <button
+                  onClick={handleNotifyRestock}
+                  disabled={notifyState === "loading" || notifyState === "done"}
+                  className="w-full rounded-full font-body font-medium py-3 flex items-center justify-center gap-2 tap-scale"
+                  style={{ background: notifyState === "done" ? "var(--teal)" : "var(--fg)", color: "var(--bg)", opacity: notifyState === "loading" ? 0.6 : 1 }}
+                >
+                  {notifyState === "done" ? (
+                    <><Check className="w-5 h-5" /> We'll let you know</>
+                  ) : notifyState === "unavailable" ? (
+                    <>Turn on notifications to get notified</>
+                  ) : (
+                    <><Bell className="w-5 h-5" /> {notifyState === "loading" ? "One sec..." : "Notify me when back"}</>
+                  )}
+                </button>
+              ) : (
+                <button disabled className="w-full rounded-full font-body font-medium py-3 flex items-center justify-center gap-2 cursor-not-allowed" style={{ background: "var(--glass-bg)", border: "1px solid var(--glass-border)", color: "var(--fg-muted)" }}>
+                  Sold out
+                </button>
+              )
             ) : !canAdd ? (
               <button disabled className="w-full rounded-full font-body font-medium py-3 flex items-center justify-center gap-2 cursor-not-allowed" style={{ background: "var(--glass-bg)", border: "1px solid var(--glass-border)", color: "var(--fg-muted)" }}>
                 This size is out of stock
@@ -3633,7 +3851,17 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
             <p className="font-body text-xs text-muted truncate">{product.name}</p>
             <p className="font-num text-base">{outOfStock ? "Sold out" : money(effectivePrice(product))}</p>
           </div>
-          {!canAdd ? (
+          {outOfStock && isNativeApp ? (
+            <button
+              onClick={handleNotifyRestock}
+              disabled={notifyState === "loading" || notifyState === "done"}
+              className="rounded-full font-body font-medium px-5 py-2.5 flex items-center gap-2 flex-shrink-0 tap-scale"
+              style={{ background: notifyState === "done" ? "var(--teal)" : "var(--fg)", color: "var(--bg)", opacity: notifyState === "loading" ? 0.6 : 1 }}
+            >
+              {notifyState === "done" ? <Check className="w-4 h-4" /> : <Bell className="w-4 h-4" />}
+              {notifyState === "done" ? "Notified" : notifyState === "loading" ? "..." : "Notify me"}
+            </button>
+          ) : !canAdd ? (
             <button disabled className="rounded-full font-body font-medium px-5 py-2.5 flex items-center gap-2 flex-shrink-0 cursor-not-allowed" style={{ border: "1px solid var(--glass-border)", color: "var(--fg-muted)" }}>
               {outOfStock ? "Sold out" : "Out of stock"}
             </button>
@@ -3645,6 +3873,7 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
           )}
         </div>
       </div>
+      {showSizeGuide && <SizeGuideModal category={product.category} onClose={() => setShowSizeGuide(false)} />}
     </div>
   );
 }

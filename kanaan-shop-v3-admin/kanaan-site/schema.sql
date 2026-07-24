@@ -37,3 +37,34 @@ CREATE TABLE IF NOT EXISTS push_tokens (
 -- التطبيق بس (قسم "App Exclusives").
 ALTER TABLE products ADD COLUMN is_spotlight INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE products ADD COLUMN app_exclusive INTEGER NOT NULL DEFAULT 0;
+
+-- سجل أخطاء بسيط — لما يصير خطأ برمجي غير متوقع بالموقع أو التطبيق
+-- (يمسكه Error Boundary)، بنسجّل تفاصيله هون. هيك عندك رؤية حقيقية
+-- لو صار bug بعد النشر، بدل ما تعتمد بس على شكاوى الزباين.
+CREATE TABLE IF NOT EXISTS error_logs (
+  id               TEXT PRIMARY KEY,
+  message          TEXT NOT NULL DEFAULT '',
+  stack            TEXT NOT NULL DEFAULT '',
+  component_stack  TEXT NOT NULL DEFAULT '',
+  url              TEXT NOT NULL DEFAULT '',
+  platform         TEXT NOT NULL DEFAULT '',
+  created_at       INTEGER NOT NULL DEFAULT 0
+);
+
+-- "نبّهني لما يرجع متوفر" — كل صف بيربط جهاز (توكن إشعارات) بمنتج
+-- معيّن نفدت كميته. لما الأدمن يعلّم المنتج "متوفر" من جديد،
+-- بنبعت إشعار لكل المشتركين وبنحذف الاشتراكات (استخدام مرة وحدة).
+CREATE TABLE IF NOT EXISTS restock_subscriptions (
+  id          TEXT PRIMARY KEY,
+  product_id  TEXT NOT NULL,
+  token       TEXT NOT NULL,
+  created_at  INTEGER NOT NULL DEFAULT 0,
+  UNIQUE(product_id, token)
+);
+
+-- إعدادات عامة بسيطة (key/value) — أول استخدام إلها: رقم آخر
+-- إصدار من تطبيق أندرويد، لعرض بانر "تحديث متوفر" لمن عندو نسخة أقدم.
+CREATE TABLE IF NOT EXISTS app_config (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL DEFAULT ''
+);

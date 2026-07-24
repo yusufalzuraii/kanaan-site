@@ -3451,9 +3451,22 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
     }
   };
 
-  const nativeShare = () => {
+  // Renamed from "nativeShare" — that name was shadowing the real
+  // nativeShare() imported from native.js, so the proper Capacitor share
+  // sheet was never actually being called inside the app; this was
+  // silently falling back to the plain web Share API the whole time.
+  const handleWebShare = () => {
     if (navigator.share) {
       navigator.share({ title: product.name, text: product.desc, url: productUrl }).catch(() => {});
+    }
+  };
+
+  const handleShare = async () => {
+    if (isNativeApp) {
+      const ok = await nativeShare({ title: product.name, text: product.desc, url: productUrl });
+      if (!ok) handleWebShare(); // Capacitor unavailable/cancelled — fall back to the web sheet
+    } else {
+      handleWebShare();
     }
   };
 
@@ -3590,8 +3603,8 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
               <Link2 className="w-4 h-4" />
               {copied && <span className="font-body text-xs text-teal pr-1">Copied!</span>}
             </button>
-            {typeof navigator !== "undefined" && navigator.share && (
-              <button onClick={nativeShare} className="glass rounded-full p-2.5 tap-scale hover:opacity-80 transition-opacity" aria-label="Share">
+            {(isNativeApp || (typeof navigator !== "undefined" && navigator.share)) && (
+              <button onClick={handleShare} className="glass rounded-full p-2.5 tap-scale hover:opacity-80 transition-opacity" aria-label="Share">
                 <Share2 className="w-4 h-4" />
               </button>
             )}

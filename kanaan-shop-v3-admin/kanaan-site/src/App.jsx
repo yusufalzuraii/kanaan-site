@@ -279,6 +279,26 @@ function parseRoute(path) {
    HELPERS
    ============================================================ */
 const money = (n) => `$${n.toFixed(0)}`;
+
+/* رقم إصدار التطبيق الحالي. لازم يترفع رقم واحد كل مرة تبني فيها
+   نسخة جديدة للنشر — وبالتوازي تضغط "أعلن عن نسخة جديدة" بلوحة
+   /admin (تبويب Notify). أي مستخدم عندو رقم أقل من المعلن بيشوف
+   بانر لطيف بيقترح عليه يحدّث. */
+const CURRENT_APP_VERSION = 1;
+const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=com.kanaanshop.app";
+
+/* طلب شبكة بمهلة زمنية. بدونها، لو الاتصال ضعيف أو "علق" (شائع
+   على شبكات الموبايل هون)، الطلب بيضل معلّق بلا نهاية والمستخدم
+   بيضل يحدّق بدوّارة تحميل ما بتخلص أبداً — بلا أي تفسير ولا مخرج. */
+async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 const effectivePrice = (p) => (p.discount > 0 ? Math.round(p.price * (1 - p.discount / 100)) : p.price);
 
 function useReveal() {
@@ -523,6 +543,44 @@ function iconForCategory(category) {
    dark mode flips it with a CSS filter instead of needing a
    second asset.
    ============================================================ */
+/* ============================================================
+   ANIMATED SPLASH — حصري للتطبيق (أندرويد/آيفون).
+
+   ليش هيك وليش مش animation نيتف بأندرويد: شاشة الإقلاع النيتف
+   (launch window) لازم تكون صورة ثابتة — هاد قيد من النظام نفسو،
+   لأنها بتترسم قبل ما التطبيق يشتغل أصلاً. فبدل ما نحارب هالقيد،
+   منخليها ثابتة وقصيرة جداً بـ *نفس لون الخلفية بالضبط*، وبعدها
+   هالشاشة (وهي HTML عادي) بتتسلّم بسلاسة ومن غير أي وميض بينهن —
+   المستخدم بيشوف انتقال واحد متواصل، مش شاشتين.
+
+   الحركة: توهج كورال بيتمدد من الوسط، الشعار بيطلع بحركة مرنة
+   (overshoot خفيف)، لمعة بتمر عليه، وبعدين الشاشة كلها بتتلاشى
+   وبتكبر شوي — إحساس إنو التطبيق "فتح" من ورا الشعار.
+   ============================================================ */
+const SPLASH_TOTAL_MS = 1650;
+
+function AnimatedSplash({ onDone }) {
+  const { reducedMotion } = useApp();
+
+  useEffect(() => {
+    // مين بيطفي الحركة من إعدادات جهازو، ما منجبرو يستنى — منختصرها
+    const t = setTimeout(onDone, reducedMotion ? 350 : SPLASH_TOTAL_MS);
+    return () => clearTimeout(t);
+  }, [reducedMotion, onDone]);
+
+  return (
+    <div className="splash-root" aria-hidden="true">
+      <div className="splash-glow" />
+      <div className="splash-ring" />
+      <div className="splash-logo-wrap">
+        <img src="/logo-compact.png" alt="" className="splash-logo" />
+        <span className="splash-sheen" />
+      </div>
+      <div className="splash-tagline">MEN'S FASHION WEAR</div>
+    </div>
+  );
+}
+
 function LogoMark({ variant = "compact", className = "" }) {
   const [ok, setOk] = useState(true);
   const src = variant === "full" ? "/logo-full.png" : "/logo-compact.png";
@@ -1484,10 +1542,19 @@ function KanaanShop() {
     syncStatusBar(theme);
   }, [theme]);
 
-  // أول ما التطبيق يخلص أول رندر، منخفي شاشة الـ splash — هيك ما في
-  // ومضة شاشة بيضا بين الـ splash والمحتوى الحقيقي
+  // شاشة البداية المتحركة — بالتطبيق بس. الترتيب هون مقصود:
+  // الشاشة النيتف الثابتة بتضل ظاهرة لحد ما شاشتنا المتحركة تكون
+  // مرسومة فعلياً (رندر كامل)، وبعدين منخفيها. هيك ما في ولا إطار
+  // وحد فاضي أو أبيض بين الاتنين — انتقال واحد ناعم.
+  const [showSplash, setShowSplash] = useState(isNativeApp);
+
   useEffect(() => {
-    hideSplashScreen();
+    if (!isNativeApp) { hideSplashScreen(); return; }
+    // requestAnimationFrame مرتين = "بعد ما المتصفح رسم الإطار الأول"
+    const raf = requestAnimationFrame(() => {
+      requestAnimationFrame(() => hideSplashScreen());
+    });
+    return () => cancelAnimationFrame(raf);
   }, []);
 
   // شاشة الترحيب الأولى — تظهر مرة وحدة بس، أول تشغيل للتطبيق
@@ -1499,6 +1566,8 @@ function KanaanShop() {
   useEffect(() => {
     return registerNetworkListener((connected) => setIsOffline(!connected));
   }, []);
+
+
 
   // إشعار داخلي بسيط لما يوصل إشعار والتطبيق مفتوح قدام المستخدم
   const [inAppNotification, setInAppNotification] = useState(null);
@@ -1599,17 +1668,39 @@ function KanaanShop() {
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [storyRings, setStoryRings] = useState([]);
   const [appExclusiveCount, setAppExclusiveCount] = useState(0);
+  const [productsError, setProductsError] = useState(false);
+  // بانر "نسخة جديدة متوفرة". بما إنو التطبيق بيشتغل من نسخة محزّمة
+  // جواه، أي إصلاح جديد ما بيوصل لحدا إلا لما يحدّث من المتجر — فبنسأل
+  // السيرفر مرة وحدة عند الفتح ونقارن مع رقم النسخة المبنية.
   const [updateInfo, setUpdateInfo] = useState({ available: false });
+  useEffect(() => {
+    if (!isNativeApp) return;
+    fetchWithTimeout(`${apiBase}/api/app-version`, {}, 8000)
+      .then((r) => r.json())
+      .then((d) => {
+        if (typeof d.latest === "number" && d.latest > CURRENT_APP_VERSION) {
+          setUpdateInfo({ available: true });
+        }
+      })
+      .catch(() => { /* ما قدرنا نتحقق — منسكت، مش ميزة أساسية */ });
+  }, []);
 
   const refreshProducts = async () => {
     try {
-      const res = await fetch(`${apiBase}/api/products`, {
+      const res = await fetchWithTimeout(`${apiBase}/api/products`, {
         headers: isNativeApp ? { "X-Kanaan-Client": "app" } : {},
       });
       const data = await res.json();
-      if (Array.isArray(data.products)) setProducts(data.products);
+      if (Array.isArray(data.products)) {
+        setProducts(data.products);
+        setProductsError(false);
+      }
       if (typeof data.appExclusiveCount === "number") setAppExclusiveCount(data.appExclusiveCount);
-    } catch { /* offline or API not ready */ }
+    } catch {
+      // انقطاع أو مهلة خلصت — منعلّم حالة خطأ واضحة بدل ما نسكت
+      // ونخلي المستخدم يظن إنو المتجر فاضي فعلاً
+      setProductsError(true);
+    }
   };
 
   useEffect(() => {
@@ -1815,7 +1906,7 @@ function KanaanShop() {
       <main>
         <PageTransition path={path} direction={navDirection}>
         {route.type === "home" && isNativeApp && (
-          <NativeHomeView products={products} loading={catalogLoading} goCatalog={goCatalog} goSale={goSale} goExclusives={goExclusives} openProduct={openProduct} likes={likes} toggleLike={toggleLike} storyRings={storyRings} openStory={openStory} goFavorites={goFavorites} onCart={() => setCartOpen(true)} cartCount={cartCount} />
+          <NativeHomeView products={products} loading={catalogLoading} error={productsError} onRetry={refreshProducts} goCatalog={goCatalog} goSale={goSale} goExclusives={goExclusives} openProduct={openProduct} likes={likes} toggleLike={toggleLike} storyRings={storyRings} openStory={openStory} goFavorites={goFavorites} onCart={() => setCartOpen(true)} cartCount={cartCount} />
         )}
         {route.type === "home" && !isNativeApp && (
           <HomeView products={products} loading={catalogLoading} goCatalog={goCatalog} goSale={goSale} openProduct={openProduct} likes={likes} toggleLike={toggleLike} storyRings={storyRings} openStory={openStory} appExclusiveCount={appExclusiveCount} />
@@ -1824,7 +1915,7 @@ function KanaanShop() {
           <SaleView products={products} loading={catalogLoading} goCatalog={goCatalog} openProduct={openProduct} likes={likes} toggleLike={toggleLike} />
         )}
         {route.type === "catalog" && (
-          <CatalogView activeCategory={route.category} activeSub={route.sub} loading={catalogLoading} goCatalog={goCatalog} products={filteredProducts} openProduct={openProduct} likes={likes} toggleLike={toggleLike} />
+          <CatalogView activeCategory={route.category} activeSub={route.sub} loading={catalogLoading} error={productsError} onRetry={refreshProducts} goCatalog={goCatalog} products={filteredProducts} openProduct={openProduct} likes={likes} toggleLike={toggleLike} />
         )}
         {route.type === "favorites" && (
           <FavoritesView products={products} loading={catalogLoading} likes={likes} openProduct={openProduct} toggleLike={toggleLike} goCatalog={goCatalog} />
@@ -1903,7 +1994,10 @@ function KanaanShop() {
           likesCount={likes.length}
         />
       )}
-      {showWelcome && <WelcomeSheet onDismiss={dismissWelcome} />}
+      {/* شاشة الترحيب ما بتطلع إلا بعد ما السبلاش يخلص — حتى ما
+          يتراكبوا فوق بعض بأول تشغيل */}
+      {showWelcome && !showSplash && <WelcomeSheet onDismiss={dismissWelcome} />}
+      {showSplash && <AnimatedSplash onDone={() => setShowSplash(false)} />}
       <InAppNotificationBanner
         notification={inAppNotification}
         onDismiss={() => setInAppNotification(null)}
@@ -2153,6 +2247,88 @@ function GlobalStyles() {
       /* شريط التنقل السفلي — حصري للتطبيق. env(safe-area-inset-bottom)
          بيحسب مساحة أزرار التنقل الأصلية بأندرويد (gesture bar) حتى
          الشريط ما يضل ملزوق تحتها مباشرة. */
+      /* ---------- ANIMATED SPLASH (التطبيق بس) ---------- */
+      .splash-root {
+        position: fixed; inset: 0; z-index: 999;
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
+        background: var(--bg);
+        overflow: hidden;
+        animation: splashOut 0.45s cubic-bezier(0.4,0,0.2,1) ${SPLASH_TOTAL_MS - 450}ms both;
+      }
+      /* توهج كورال بيتنفّس من ورا الشعار */
+      .splash-glow {
+        position: absolute;
+        width: 340px; height: 340px; border-radius: 50%;
+        background: radial-gradient(circle, var(--coral) 0%, transparent 70%);
+        filter: blur(50px); opacity: 0;
+        animation: splashGlow 1.5s ease-out both;
+      }
+      /* حلقة رفيعة بتتمدد وبتختفي — لمسة "إقلاع" */
+      .splash-ring {
+        position: absolute;
+        width: 120px; height: 120px; border-radius: 50%;
+        border: 2px solid var(--coral);
+        opacity: 0;
+        animation: splashRing 1.25s cubic-bezier(0.16,1,0.3,1) 0.28s both;
+      }
+      .splash-logo-wrap { position: relative; display: inline-block; overflow: hidden; }
+      .splash-logo {
+        display: block; width: 210px; height: auto;
+        filter: var(--logo-filter);
+        animation: splashLogo 0.95s cubic-bezier(0.34,1.56,0.64,1) 0.12s both;
+      }
+      /* لمعة بتمر عالشعار مرة وحدة */
+      .splash-sheen {
+        position: absolute; top: 0; bottom: 0; width: 45%;
+        background: linear-gradient(100deg, transparent, rgba(255,255,255,0.75), transparent);
+        transform: skewX(-18deg);
+        animation: splashSheen 0.85s ease-in-out 0.75s both;
+      }
+      .splash-tagline {
+        margin-top: 14px;
+        font-family: 'Space Grotesk', sans-serif;
+        font-size: 10px; font-weight: 600;
+        letter-spacing: 0.42em; text-indent: 0.42em;
+        color: var(--fg-muted);
+        animation: splashTagline 0.7s ease-out 0.68s both;
+      }
+      @keyframes splashLogo {
+        0%   { opacity: 0; transform: scale(0.72) translateY(14px); }
+        100% { opacity: 1; transform: scale(1) translateY(0); }
+      }
+      @keyframes splashGlow {
+        0%   { opacity: 0; transform: scale(0.4); }
+        45%  { opacity: 0.30; transform: scale(1.05); }
+        100% { opacity: 0.16; transform: scale(1); }
+      }
+      @keyframes splashRing {
+        0%   { opacity: 0; transform: scale(0.5); }
+        35%  { opacity: 0.5; }
+        100% { opacity: 0; transform: scale(3.6); }
+      }
+      @keyframes splashSheen {
+        0%   { left: -60%; opacity: 0; }
+        35%  { opacity: 1; }
+        100% { left: 130%; opacity: 0; }
+      }
+      @keyframes splashTagline {
+        0%   { opacity: 0; transform: translateY(8px); letter-spacing: 0.2em; }
+        100% { opacity: 1; transform: translateY(0); letter-spacing: 0.42em; }
+      }
+      /* الخروج: تلاشي مع تكبير خفيف — إحساس إنو التطبيق فتح من ورا الشعار */
+      @keyframes splashOut {
+        0%   { opacity: 1; transform: scale(1); }
+        100% { opacity: 0; transform: scale(1.06); visibility: hidden; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .splash-root, .splash-glow, .splash-ring, .splash-logo, .splash-sheen, .splash-tagline {
+          animation-duration: 0.01ms !important;
+          animation-delay: 0ms !important;
+        }
+        .splash-root { animation: none !important; }
+      }
+
       .native-tab-bar {
         height: 60px;
       }
@@ -2864,7 +3040,7 @@ function SpotlightCard({ product, onOpen }) {
   );
 }
 
-function NativeHomeView({ products, loading, goCatalog, goSale, goExclusives, openProduct, likes, toggleLike, storyRings, openStory, goFavorites, onCart, cartCount }) {
+function NativeHomeView({ products, loading, error, onRetry, goCatalog, goSale, goExclusives, openProduct, likes, toggleLike, storyRings, openStory, goFavorites, onCart, cartCount }) {
   useEffect(() => {
     document.title = `${STORE_NAME} — Menswear from Saida, Lebanon`;
   }, []);
@@ -3070,6 +3246,11 @@ function NativeHomeView({ products, loading, goCatalog, goSale, goExclusives, op
               <div key={i} className="rounded-2xl glass flex-shrink-0" style={{ width: 150, aspectRatio: "4/5", opacity: 0.5 }} />
             ))}
           </div>
+        ) : error && products.length === 0 ? (
+          <div className="px-4 sm:px-6">
+            <p className="font-body text-sm text-muted mb-2">Couldn't load products — check your connection.</p>
+            <button onClick={onRetry} className="font-body text-sm text-coral">Try again</button>
+          </div>
         ) : featured.length === 0 ? (
           <p className="font-body text-sm text-muted px-4 sm:px-6">Products are on their way — check back soon.</p>
         ) : (
@@ -3257,7 +3438,7 @@ function FavoritesView({ products, loading, likes, openProduct, toggleLike, goCa
    ============================================================ */
 const PAGE_SIZE = 12;
 
-function CatalogView({ activeCategory, activeSub, loading, goCatalog, products, openProduct, likes, toggleLike }) {
+function CatalogView({ activeCategory, activeSub, loading, error, onRetry, goCatalog, products, openProduct, likes, toggleLike }) {
   const label = activeCategory === "all" ? "Shop" : CATEGORIES.find((c) => c.id === activeCategory)?.label || "Shop";
   const [shown, setShown] = useState(PAGE_SIZE);
   const subs = subsFor(activeCategory);
@@ -3338,6 +3519,11 @@ function CatalogView({ activeCategory, activeSub, loading, goCatalog, products, 
           {Array.from({ length: 8 }).map((_, i) => (
             <div key={i} className="rounded-2xl glass" style={{ aspectRatio: "4/5", opacity: 0.5 }} />
           ))}
+        </div>
+      ) : error && products.length === 0 ? (
+        <div className="py-16 text-center">
+          <p className="font-body text-muted text-sm mb-3">Couldn't load products — check your connection.</p>
+          <button onClick={onRetry} className="glass rounded-full font-body text-sm px-5 py-2 tap-scale">Try again</button>
         </div>
       ) : products.length === 0 ? (
         <p className="font-body text-muted py-16 text-center">

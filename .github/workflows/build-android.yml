@@ -9,6 +9,15 @@ on:
       - 'kanaan-shop-v3-admin/kanaan-site/**'
       - '.github/workflows/build-android.yml'
   workflow_dispatch:
+    inputs:
+      version_code:
+        description: 'رقم الإصدار (versionCode) — لازم يكون أكبر من آخر رقم رفعتو على Google Play. أول إطلاق = 1، وبعدها 2، 3...'
+        required: true
+        default: '1'
+      version_name:
+        description: 'اسم الإصدار يلي بيشوفو الزبون (versionName) — مثلاً 1.0 أو 1.1'
+        required: true
+        default: '1.0'
 
 jobs:
   build:
@@ -65,6 +74,19 @@ jobs:
 
       - name: مزامنة Capacitor مع مجلد أندرويد
         run: npx cap sync android
+
+      # مهم جداً: مجلد android/ بيتولّد من جديد كل بناء، فرقم الإصدار
+      # بيرجع دايماً 1. Google Play بترفض أي رفعة برقم إصدار مستخدم من
+      # قبل — يعني بلا هالخطوة، أول تحديث بعد الإطلاق ما رح تقدر ترفعه.
+      # هون منحقن الرقم يلي بتدخلو وقت تشغيل الـ workflow يدوياً.
+      - name: ضبط رقم إصدار التطبيق (versionCode / versionName)
+        run: |
+          VC="${{ inputs.version_code || '1' }}"
+          VN="${{ inputs.version_name || '1.0' }}"
+          sed -i "s/versionCode 1/versionCode $VC/" android/app/build.gradle
+          sed -i "s/versionName \"1.0\"/versionName \"$VN\"/" android/app/build.gradle
+          echo "تم الضبط: versionCode=$VC versionName=$VN"
+          grep -n "versionCode\|versionName" android/app/build.gradle
 
       - name: صلاحية تشغيل gradlew
         run: chmod +x android/gradlew

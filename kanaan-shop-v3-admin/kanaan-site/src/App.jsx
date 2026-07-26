@@ -2243,6 +2243,38 @@ function GlobalStyles() {
          showing up as stutter on a phone. */
       .header-layer { transform: translateZ(0); will-change: transform; }
 
+      /* Story ring.
+         A flat 2px border said nothing beyond "there's a box here". A
+         slowly turning gradient reads as live content waiting to be
+         opened — the same signal a story ring carries anywhere else,
+         drawn in this shop's own colours rather than borrowed ones.
+
+         It's a conic gradient rotated by a CSS variable, so the whole
+         thing animates on the GPU with no repainting. */
+      @property --ring-angle {
+        syntax: '<angle>';
+        initial-value: 0deg;
+        inherits: false;
+      }
+      @keyframes ringSpin { to { --ring-angle: 360deg; } }
+      .story-ring {
+        background: conic-gradient(
+          from var(--ring-angle),
+          var(--ring) 0deg,
+          var(--ring) 90deg,
+          color-mix(in srgb, var(--ring) 25%, transparent) 200deg,
+          var(--ring) 360deg
+        );
+        animation: ringSpin 6s linear infinite;
+      }
+      /* Browsers without @property can't animate the angle — they get a
+         still gradient, which still looks right. */
+      @supports not (background: conic-gradient(from 0deg, red, blue)) {
+        .story-ring { background: var(--ring); }
+      }
+      .story-tile { transition: transform 0.35s cubic-bezier(0.16,1,0.3,1); }
+      .story-tile:active { transform: scale(0.96); }
+
       /* Skeleton shimmer
          ------------------------------------------------------------
          A product photo that hasn't arrived yet used to leave a flat dark
@@ -2306,7 +2338,7 @@ function GlobalStyles() {
       .sale-card:hover { transform: translateY(-3px); border-color: rgba(255,69,34,0.9); }
 
       @media (prefers-reduced-motion: reduce) {
-        .mesh-blob, .hero-fade-1, .hero-fade-2, .hero-fade-3, .hero-fade-4, .dock-in, .fab-pulse::before, .search-fade, .search-rise, .sale-glow, .promise-divider, .tag-dot-ping, .skeleton::after, .marquee-track, .photo-settle { animation: none !important; }
+        .mesh-blob, .hero-fade-1, .hero-fade-2, .hero-fade-3, .hero-fade-4, .dock-in, .fab-pulse::before, .search-fade, .search-rise, .sale-glow, .promise-divider, .tag-dot-ping, .skeleton::after, .marquee-track, .photo-settle, .story-ring { animation: none !important; }
         .kinetic-line > span { animation: none !important; transform: none !important; }
         .admin-spinner { animation-duration: 2s; }
         .promise-chip { animation: none !important; opacity: 1 !important; }
@@ -2448,11 +2480,24 @@ const RING_ACCENT = {
   editorial: { border: "var(--fg-muted)", label: "neutral" },
 };
 
+/* The rail used to be two small tiles floating in a lot of empty space
+   with no heading — it read as content that had failed to load rather
+   than a section, and sat awkwardly next to the big confident cards
+   below it. Giving it a title and room of its own makes the space to the
+   right read as deliberate, and the "Tap to view" line tells a first-time
+   visitor these are something to open. */
 function StoryRail({ rings, onOpen }) {
   return (
-    <section className="px-4 sm:px-6 pt-1 pb-3">
+    <section className="px-4 sm:px-6 pt-6 pb-4">
       <div className="max-w-6xl mx-auto">
-        <div className="flex gap-3.5 overflow-x-auto pb-1" style={{ WebkitOverflowScrolling: "touch" }}>
+        <div className="flex items-end justify-between mb-3.5">
+          <div>
+            <h2 className="font-display font-bold text-lg leading-none">The Edit</h2>
+            <p className="font-body text-xs text-muted mt-1.5">Tap to view · {rings.length} {rings.length === 1 ? "story" : "stories"}</p>
+          </div>
+          <Sparkles className="w-4 h-4 text-coral" style={{ opacity: 0.7 }} aria-hidden="true" />
+        </div>
+        <div className="flex gap-3 overflow-x-auto pb-1 -mx-1 px-1" style={{ WebkitOverflowScrolling: "touch" }}>
           {rings.map((ring, i) => (
             <Reveal key={ring.id} delay={i * 60} className="flex-shrink-0">
               <StoryTile ring={ring} onOpen={() => onOpen(ring.id)} />
@@ -2471,10 +2516,18 @@ function StoryTile({ ring, onOpen }) {
   const [loaded, setLoaded] = useState(false);
 
   return (
-    <button onClick={onOpen} className="text-left tap-scale flex-shrink-0" style={{ width: 96 }}>
+    <button
+      onClick={onOpen}
+      className="text-left tap-scale flex-shrink-0 story-tile"
+      style={{ width: 132 }}
+      aria-label={`${ring.title} — open story`}
+    >
+      {/* The ring is a slowly rotating gradient rather than a flat border.
+          It's the cue that says "there's something in here" — and it keeps
+          the accent colour that tells you which kind of story it is. */}
       <div
-        className="relative rounded-2xl overflow-hidden"
-        style={{ aspectRatio: "4/5", border: `2px solid ${accent.border}`, padding: 3 }}
+        className="relative rounded-2xl overflow-hidden story-ring"
+        style={{ aspectRatio: "4/5", padding: 3, "--ring": accent.border }}
       >
         <div className="relative w-full h-full rounded-xl overflow-hidden" style={{ background: "var(--field-bg)" }}>
           {/* These sit near the top of the page, so a dark placeholder was
@@ -2501,10 +2554,18 @@ function StoryTile({ ring, onOpen }) {
           ) : (
             <div className="absolute inset-0 flex items-center justify-center"><Sparkles className="w-6 h-6" style={{ color: "rgba(255,255,255,0.4)" }} /></div>
           )}
-          <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, transparent 50%, rgba(0,0,0,0.55))" }} />
+          {/* Scrim + label live inside the tile now. Text sitting underneath
+              made each tile feel like a loose thumbnail with a caption; this
+              reads as one object. */}
+          <div className="absolute inset-x-0 bottom-0" style={{ height: "62%", background: "linear-gradient(180deg, transparent, rgba(0,0,0,0.72))" }} />
+          <p
+            className="absolute inset-x-0 bottom-0 px-2.5 pb-2.5 font-body font-medium truncate"
+            style={{ color: "#fff", fontSize: "0.78rem", textShadow: "0 1px 3px rgba(0,0,0,0.4)" }}
+          >
+            {ring.title}
+          </p>
         </div>
       </div>
-      <p className="font-body text-xs text-center mt-1.5 truncate">{ring.title}</p>
     </button>
   );
 }

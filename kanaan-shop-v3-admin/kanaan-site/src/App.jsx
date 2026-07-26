@@ -717,7 +717,7 @@ function SwatchPanel({ product, big, liked, onToggleLike, forceSoldOut }) {
           alt={product.name}
           loading="lazy"
           decoding="async"
-          className={`absolute inset-0 w-full h-full ph-img${imgLoaded ? " is-loaded" : ""}`}
+          className={`absolute inset-0 w-full h-full ph-img${imgLoaded ? " is-loaded photo-settle" : ""}`}
           style={{ objectFit: "cover" }}
           onLoad={() => setImgLoaded(true)}
           onError={() => {
@@ -2072,12 +2072,24 @@ function GlobalStyles() {
       .mesh-blob { animation-name: meshFloat; animation-timing-function: ease-in-out; animation-iteration-count: infinite; }
 
       /* Floating help button */
+      /* The pulse used to animate box-shadow, which the browser can only
+         do by repainting — every frame, forever, even while scrolling.
+         A ring that scales is handled entirely by the GPU instead, and
+         looks identical. */
       @keyframes fabPulse {
-        0%   { box-shadow: 0 0 0 0 rgba(255,69,34,0.45); }
-        70%  { box-shadow: 0 0 0 14px rgba(255,69,34,0); }
-        100% { box-shadow: 0 0 0 0 rgba(255,69,34,0); }
+        0%   { transform: scale(1);   opacity: 0.45; }
+        70%  { transform: scale(1.6); opacity: 0; }
+        100% { transform: scale(1.6); opacity: 0; }
       }
-      .fab-pulse { animation: fabPulse 2.6s cubic-bezier(0.4,0,0.6,1) infinite; }
+      /* The animation goes on a ring behind the button, not the button
+         itself — otherwise the whole thing would grow and shrink. */
+      .fab-pulse { position: relative; }
+      .fab-pulse::before {
+        content: ''; position: absolute; inset: 0; border-radius: 9999px;
+        background: var(--coral); z-index: -1;
+        animation: fabPulse 2.6s cubic-bezier(0.4,0,0.6,1) infinite;
+        will-change: transform, opacity;
+      }
       .fab-label {
         max-width: 0; opacity: 0; overflow: hidden; white-space: nowrap;
         transition: max-width 0.45s cubic-bezier(0.16,1,0.3,1), opacity 0.3s ease, margin 0.45s ease;
@@ -2164,6 +2176,73 @@ function GlobalStyles() {
         animation: adminSpin 0.7s linear infinite;
       }
 
+      /* ============================================================
+         HOMEPAGE MOTION
+         ------------------------------------------------------------
+         Everything here animates transform and opacity only. Those are
+         the two properties the GPU can handle on its own, without asking
+         the browser to recalculate layout or repaint — which is why none
+         of this costs anything while scrolling.
+         ============================================================ */
+
+      /* 1 — Kinetic headline.
+         Each line sits inside a clipping window and rises into it, the way
+         a fashion title sequence resolves. Reads as one deliberate motion
+         rather than text simply appearing. */
+      @keyframes lineRise {
+        from { transform: translate3d(0, 108%, 0) skewY(4deg); }
+        to   { transform: translate3d(0, 0, 0) skewY(0deg); }
+      }
+      .kinetic-line { display: block; overflow: hidden; padding-bottom: 0.06em; }
+      .kinetic-line > span {
+        display: block;
+        animation: lineRise 1s cubic-bezier(0.16, 1, 0.3, 1) both;
+        will-change: transform;
+      }
+      .kinetic-1 > span { animation-delay: 0.05s; }
+      .kinetic-2 > span { animation-delay: 0.19s; }
+
+      /* 2 — Marquee.
+         A slow band of the things that actually win the sale — free
+         delivery, cash on delivery, where you are. Duplicated once and
+         shifted by exactly -50%, which is what makes the loop seamless. */
+      @keyframes marquee { to { transform: translate3d(-50%, 0, 0); } }
+      .marquee-track {
+        display: flex; width: max-content;
+        animation: marquee 32s linear infinite;
+        will-change: transform;
+      }
+      .marquee-mask {
+        -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+        mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+      }
+
+      /* 3 — Scroll progress.
+         A hairline that fills as the page does. Small, but it's the cue
+         that tells you the page is a single considered thing with a
+         beginning and an end. */
+      .scroll-progress {
+        position: fixed; top: 0; left: 0; right: 0; height: 2px; z-index: 60;
+        transform-origin: 0 50%;
+        background: linear-gradient(90deg, var(--coral), var(--teal));
+        will-change: transform; pointer-events: none;
+      }
+
+      /* 4 — Photos settle.
+         A product photo eases down from a hair oversized as it arrives,
+         so a grid filling in feels like it's landing rather than blinking. */
+      .photo-settle { animation: photoSettle 0.7s cubic-bezier(0.16,1,0.3,1) both; }
+      @keyframes photoSettle {
+        from { transform: scale(1.06); }
+        to   { transform: scale(1); }
+      }
+
+      /* 5 — Sticky header on its own GPU layer.
+         A sticky element with a backdrop blur is repainted on every single
+         scroll frame. Promoting it to its own layer is what stops that
+         showing up as stutter on a phone. */
+      .header-layer { transform: translateZ(0); will-change: transform; }
+
       /* Skeleton shimmer
          ------------------------------------------------------------
          A product photo that hasn't arrived yet used to leave a flat dark
@@ -2227,7 +2306,8 @@ function GlobalStyles() {
       .sale-card:hover { transform: translateY(-3px); border-color: rgba(255,69,34,0.9); }
 
       @media (prefers-reduced-motion: reduce) {
-        .mesh-blob, .hero-fade-1, .hero-fade-2, .hero-fade-3, .hero-fade-4, .dock-in, .fab-pulse, .search-fade, .search-rise, .sale-glow, .promise-divider, .tag-dot-ping, .skeleton::after { animation: none !important; }
+        .mesh-blob, .hero-fade-1, .hero-fade-2, .hero-fade-3, .hero-fade-4, .dock-in, .fab-pulse::before, .search-fade, .search-rise, .sale-glow, .promise-divider, .tag-dot-ping, .skeleton::after, .marquee-track, .photo-settle { animation: none !important; }
+        .kinetic-line > span { animation: none !important; transform: none !important; }
         .admin-spinner { animation-duration: 2s; }
         .promise-chip { animation: none !important; opacity: 1 !important; }
         .promise-divider { opacity: 1 !important; }
@@ -2275,7 +2355,7 @@ function Header({ cartCount, onHome, onCart, onSearch, onSale, menuOpen, setMenu
   }, []);
 
   return (
-    <div className="sticky top-0 z-40 px-3 sm:px-6 pt-3">
+    <div className="sticky top-0 z-40 px-3 sm:px-6 pt-3 header-layer">
       <header className="glass max-w-6xl mx-auto rounded-2xl transition-all duration-300" style={{ paddingTop: scrolled ? 8 : 12, paddingBottom: scrolled ? 8 : 12, transform: "translateZ(0)", willChange: "transform" }}>
         <div className="flex items-center justify-between px-4 sm:px-5">
           <button onClick={onHome} className="flex items-center tap-scale" aria-label={STORE_NAME}>
@@ -2776,6 +2856,71 @@ function StoryQuickAdd({ product, onClose, addToCart, openProduct }) {
   );
 }
 
+/* A slow band of the things that actually close a sale here — delivery,
+   cash on delivery, where the shop is. Sits between the hero and the
+   products as a seam, so the two read as one page rather than two
+   stacked blocks.
+
+   The list is rendered twice and the track slides by exactly half its
+   width; at that moment the second copy sits precisely where the first
+   started, so the loop never shows a seam. */
+function ValueMarquee() {
+  const items = [
+    "Delivery across Lebanon",
+    "Cash on delivery",
+    "Easy 3-day returns",
+    "Saida, Lebanon",
+    "Premium. Fresh. Always.",
+  ];
+  const strip = [...items, ...items];
+  return (
+    <div className="marquee-mask overflow-hidden py-3" aria-hidden="true" style={{ borderTop: "1px solid var(--border)", borderBottom: "1px solid var(--border)" }}>
+      <div className="marquee-track">
+        {strip.map((label, i) => (
+          <span key={i} className="flex items-center flex-shrink-0">
+            <span className="font-body text-sm text-muted px-6 whitespace-nowrap">{label}</span>
+            <span style={{ width: 5, height: 5, borderRadius: 9999, background: "var(--coral)", opacity: 0.55 }} />
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* Hairline at the very top that fills as the page does. Scales one element
+   horizontally rather than animating a width, so keeping it in sync while
+   scrolling costs nothing. */
+function ScrollProgress() {
+  const [p, setP] = useState(0);
+  const { reducedMotion } = useApp();
+
+  useEffect(() => {
+    let raf = 0, ticking = false;
+    const update = () => {
+      const doc = document.documentElement;
+      const max = (doc.scrollHeight || 0) - window.innerHeight;
+      setP(max > 0 ? Math.min(1, Math.max(0, (window.scrollY || 0) / max)) : 0);
+      ticking = false;
+    };
+    const onScroll = () => {
+      if (ticking) return;
+      ticking = true;
+      raf = requestAnimationFrame(update);
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll, { passive: true });
+    update();
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
+      cancelAnimationFrame(raf);
+    };
+  }, []);
+
+  if (reducedMotion) return null;
+  return <div className="scroll-progress" style={{ transform: `scaleX(${p})` }} aria-hidden="true" />;
+}
+
 /* Scroll-linked hero motion.
 
    The homepage read as separate blocks stacked on top of each other
@@ -2832,6 +2977,7 @@ function HomeView({ products, loading, goCatalog, goSale, openProduct, likes, to
 
   return (
     <div>
+      <ScrollProgress />
       <section onMouseMove={onHeroMove} className="relative px-4 sm:px-6 pt-10 sm:pt-16 pb-14 sm:pb-20 overflow-hidden">
         {/* The gradient drifts slower than the page — the depth cue that
             makes the hero feel like a layer rather than a flat block. */}
@@ -2854,9 +3000,11 @@ function HomeView({ products, loading, goCatalog, goSale, openProduct, likes, to
               <MapPin className="w-3 h-3" /> Saida, Lebanon
             </GlassChip>
           </div>
-          <h1 className="font-display font-bold text-5xl sm:text-7xl leading-[1.05] max-w-3xl hero-fade-2">
-            Kanaan Shop
-            <span className="block text-coral">Everyday wear, refined</span>
+          {/* Each line rises out of its own clipping window — the hero
+              moment the page was missing. */}
+          <h1 className="font-display font-bold text-5xl sm:text-7xl leading-[1.05] max-w-3xl">
+            <span className="kinetic-line kinetic-1"><span>Kanaan Shop</span></span>
+            <span className="kinetic-line kinetic-2 text-coral"><span>Everyday wear, refined</span></span>
           </h1>
           <p className="font-body text-muted text-base sm:text-lg max-w-xl mt-5 hero-fade-3">
             Timeless everyday pieces, thoughtfully selected with quality fabrics and flattering cuts.
@@ -2885,6 +3033,8 @@ function HomeView({ products, loading, goCatalog, goSale, openProduct, likes, to
           </div>
         </div>
       </section>
+
+      <ValueMarquee />
 
       {storyRings.length > 0 && <StoryRail rings={storyRings} onOpen={openStory} />}
 

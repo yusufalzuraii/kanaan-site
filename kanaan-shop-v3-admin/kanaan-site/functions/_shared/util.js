@@ -78,6 +78,12 @@ export async function makeToken(password) {
   return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+// Exported for the login route, which needs the same constant-time
+// comparison for the password itself, not just the session token.
+export function safeEqualPublic(a, b) {
+  return safeEqual(a, b);
+}
+
 function safeEqual(a, b) {
   if (typeof a !== "string" || typeof b !== "string" || a.length !== b.length) return false;
   let r = 0;
@@ -438,4 +444,151 @@ export async function deleteUploadedImage(env, url) {
   if (thumb) {
     try { await env.BUCKET.delete(thumb); } catch { /* may not exist — fine */ }
   }
+}
+
+/* ============================================================
+   RATE LIMITING
+   ------------------------------------------------------------
+   Every public endpoint that writes to the database was previously
+   unlimited. That's two real problems:
+
+     1. /api/orders — a script could fire hundreds of fake orders and
+        reserve the entire catalogue for 24 hours, so real shoppers see
+        a shop where everything is "sold out". No hacking required.
+     2. /api/admin/login — unlimited password guesses.
+
+   This uses the D1 database that's already there rather than adding a
+   KV namespace, so there's nothing new to configure in Cloudflare.
+
+   The count is incremented in a SINGLE atomic statement (UPSERT with
+   RETURNING). Doing it as read-then-write would let two simultaneous
+   requests both read the same count and both pass — the same class of
+   race the stock reservation has.
+
+   Fails OPEN on purpose: if the database is unreachable, shoppers can
+   still order. A rate limiter that takes the shop down when it breaks
+   is worse than the abuse it prevents.
+   ============================================================ */
+
+// Cloudflare always sets CF-Connecting-IP; the fallbacks are only for
+// local development where it isn't present.
+export function clientIp(request) {
+  return (
+    request.headers.get("CF-Connecting-IP") ||
+    request.headers.get("X-Forwarded-For")?.split(",")[0].trim() ||
+    "unknown"
+  );
+}
+
+/**
+ * @returns {{ allowed: boolean, retryAfter: number }}
+ *   retryAfter is seconds until the window resets (0 when allowed).
+ */
+export async function rateLimit(request, env, bucket, maxRequests, windowMs) {
+  if (!env.DB) return { allowed: true, retryAfter: 0 };
+
+  const key = `${bucket}:${clientIp(request)}`;
+  const now = Date.now();
+
+  try {
+    const row = await env.DB.prepare(
+      `INSERT INTO rate_limits (key, count, window_start) VALUES (?, 1, ?)
+       ON CONFLICT(key) DO UPDATE SET
+         count = CASE WHEN ? - window_start >= ? THEN 1 ELSE count + 1 END,
+         window_start = CASE WHEN ? - window_start >= ? THEN ? ELSE window_start END
+       RETURNING count, window_start`
+    ).bind(key, now, now, windowMs, now, windowMs, now).first();
+
+    if (!row) return { allowed: true, retryAfter: 0 };
+
+    const count = Number(row.count) || 0;
+    if (count > maxRequests) {
+      const resetsAt = (Number(row.window_start) || now) + windowMs;
+      return { allowed: false, retryAfter: Math.max(1, Math.ceil((resetsAt - now) / 1000)) };
+    }
+
+    // Housekeeping, on roughly 1 in 50 requests so it's not on the hot
+    // path: drop windows that expired over a day ago, and trim crash
+    // reports older than 30 days so error_logs can't grow forever.
+    if (Math.random() < 0.02) {
+      const dayAgo = now - 24 * 3600 * 1000;
+      const monthAgo = now - 30 * 24 * 3600 * 1000;
+      try { await env.DB.prepare("DELETE FROM rate_limits WHERE window_start < ?").bind(dayAgo).run(); } catch { /* ignore */ }
+      try { await env.DB.prepare("DELETE FROM error_logs WHERE created_at < ?").bind(monthAgo).run(); } catch { /* ignore */ }
+    }
+
+    return { allowed: true, retryAfter: 0 };
+  } catch {
+    return { allowed: true, retryAfter: 0 }; // fail open — never block the shop
+  }
+}
+
+// Standard 429 with Retry-After, so well-behaved clients back off properly.
+export function tooManyRequests(retryAfter, message) {
+  return json(
+    { error: message || "Too many requests. Please wait a moment and try again." },
+    429,
+    { "Retry-After": String(retryAfter) }
+  );
+}
+
+/* Load the stock matrix for MANY products in one query.
+   The admin product list used to call loadVariantsForAdmin() once per
+   product — 50 products meant 51 sequential round trips before the page
+   could render. This does it in a single query instead. */
+export async function loadVariantsForProducts(env, productIds) {
+  const out = {};
+  if (!productIds || productIds.length === 0) return out;
+  for (const id of productIds) out[id] = { stock: {}, reserved: {} };
+
+  // D1 caps how many parameters one statement can bind, so chunk it.
+  for (let i = 0; i < productIds.length; i += 40) {
+    const chunk = productIds.slice(i, i + 40);
+    const placeholders = chunk.map(() => "?").join(",");
+    const { results } = await env.DB.prepare(
+      `SELECT product_id, color, size, quantity, reserved FROM variants WHERE product_id IN (${placeholders})`
+    ).bind(...chunk).all();
+    for (const v of results || []) {
+      const key = `${v.color}|${v.size}`;
+      out[v.product_id].stock[key] = Number(v.quantity) || 0;
+      out[v.product_id].reserved[key] = Number(v.reserved) || 0;
+    }
+  }
+  return out;
+}
+
+/* ============================================================
+   INDEXNOW — telling search engines the moment something changes
+   ------------------------------------------------------------
+   Normally a search engine finds a new product whenever it next decides
+   to crawl the site, which can be days. IndexNow flips that around: the
+   site tells them immediately, and they come and fetch it.
+
+   Supported by Bing, Yandex, Seznam and Naver — one ping reaches all of
+   them. Google does NOT participate: their equivalent API is officially
+   limited to job postings and live streams, and using it for products
+   would breach their terms, so we don't. For Google, the freshly
+   generated sitemap and the server-rendered content are what help.
+
+   Fire-and-forget: a failed ping must never affect saving a product.
+   ============================================================ */
+export const INDEXNOW_KEY = "97cd4f74afcc5d32d034b224146e5db1";
+
+export function pingIndexNow(urls) {
+  const list = (Array.isArray(urls) ? urls : [urls]).filter(Boolean);
+  if (list.length === 0) return;
+  try {
+    // Deliberately not awaited — the admin shouldn't wait on an external
+    // service to finish saving.
+    fetch("https://api.indexnow.org/indexnow", {
+      method: "POST",
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+      body: JSON.stringify({
+        host: "kanaanshop.com",
+        key: INDEXNOW_KEY,
+        keyLocation: `https://kanaanshop.com/${INDEXNOW_KEY}.txt`,
+        urlList: list,
+      }),
+    }).catch(() => { /* best effort */ });
+  } catch { /* never let this break a save */ }
 }

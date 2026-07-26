@@ -1,4 +1,5 @@
-import { json, isAuthed, rowToProduct, payloadToRow, slugify, saveVariants, loadVariantsForAdmin } from "../../_shared/util.js";
+const SITE = "https://kanaanshop.com";
+import { json, isAuthed, rowToProduct, payloadToRow, slugify, saveVariants, loadVariantsForProducts , pingIndexNow } from "../../_shared/util.js";
 
 // GET /api/admin/products -> all products (including hidden), with stock
 export async function onRequestGet(context) {
@@ -8,12 +9,17 @@ export async function onRequestGet(context) {
     "SELECT * FROM products ORDER BY sort_order ASC, created_at DESC"
   ).all();
   const products = (results || []).map(rowToProduct);
+
+  // One query for every product's stock, rather than one query each.
+  let byProduct = {};
+  try {
+    byProduct = await loadVariantsForProducts(env, products.map((p) => p.id));
+  } catch { /* stock is optional — the list still renders without it */ }
+
   for (const p of products) {
-    try {
-      const v = await loadVariantsForAdmin(env, p.id);
-      p.variants = v.stock;
-      p.reserved = v.reserved;
-    } catch { p.variants = {}; p.reserved = {}; }
+    const v = byProduct[p.id];
+    p.variants = v ? v.stock : {};
+    p.reserved = v ? v.reserved : {};
   }
   return json({ products });
 }
@@ -49,5 +55,16 @@ export async function onRequestPost(context) {
   try { await saveVariants(env, id, body.variants); } catch { /* stock optional */ }
 
   const created = await env.DB.prepare("SELECT * FROM products WHERE id = ?").bind(id).first();
+
+  // Tell the search engines straight away rather than waiting for them
+  // to notice on their next crawl. Includes the pages this product now
+  // appears on, since their listings changed too.
+  pingIndexNow([
+    `${SITE}/product/${id}`,
+    `${SITE}/shop/${row.category}`,
+    `${SITE}/shop`,
+    `${SITE}/sitemap.xml`,
+  ]);
+
   return json({ ok: true, product: rowToProduct(created) });
 }

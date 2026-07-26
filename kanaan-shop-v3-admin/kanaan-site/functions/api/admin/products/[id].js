@@ -1,4 +1,4 @@
-import { json, isAuthed, rowToProduct, payloadToRow, saveVariants, parseImages } from "../../../_shared/util.js";
+import { json, isAuthed, rowToProduct, payloadToRow, saveVariants, parseImages , deleteUploadedImage } from "../../../_shared/util.js";
 import { sendPushToTokens } from "../../../_shared/fcm.js";
 
 // PUT /api/admin/products/:id  -> update
@@ -59,9 +59,7 @@ export async function onRequestDelete(context) {
     const row = await env.DB.prepare("SELECT images FROM products WHERE id = ?").bind(id).first();
     if (row && row.images && env.BUCKET) {
       for (const img of parseImages(row.images)) {
-        if (img.url.startsWith("/img/")) {
-          try { await env.BUCKET.delete(img.url.slice(5)); } catch { /* ignore */ }
-        }
+        await deleteUploadedImage(env, img.url);
       }
     }
   } catch { /* ignore */ }

@@ -2,6 +2,7 @@
    Same purpose as the category-level function, one level deeper. */
 
 import { CATEGORY_IDS, CATEGORY_LABELS, subcategoriesFor, parseImages } from "../../_shared/util.js";
+import { renderListingContent, injectContent } from "../../_shared/ssr.js";
 
 const esc = (s) =>
   String(s == null ? "" : s)
@@ -90,6 +91,25 @@ export async function onRequestGet(context) {
   `;
 
   let html = await res.text();
+
+  // Real listing content for crawlers (and a faster first paint for
+  // shoppers) — see functions/_shared/ssr.js for why.
+  try {
+    html = injectContent(html, renderListingContent({
+      title: label,
+      intro: descText,
+      products: rows.map((r) => {
+        const img = parseImages(r.images)[0]?.url || "";
+        return {
+          id: r.id, name: r.name, price: Math.round(Number(r.price) || 0),
+          discount: r.badge === "sale" ? Number(r.discount) || 0 : 0,
+          image: img ? (/^https?:\/\//i.test(img) ? img : `${origin}${img.startsWith("/") ? "" : "/"}${img}`) : "",
+        };
+      }),
+      origin,
+    }));
+  } catch { /* meta tags still apply */ }
+
   html = html
     .replace(/<title>[\s\S]*?<\/title>/i, "")
     .replace(/<meta\s+name="description"[^>]*>/gi, "")

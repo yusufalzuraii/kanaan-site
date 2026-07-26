@@ -1,4 +1,4 @@
-import { json, isAuthed, rowToStorySlide, groupIntoRings } from "../../_shared/util.js";
+import { json, isAuthed, rowToStorySlide, groupIntoRings , deleteUploadedImage } from "../../_shared/util.js";
 
 /* /api/admin/stories
    GET  -> every ring (editorial + compare), for the admin Stories tab.
@@ -125,7 +125,7 @@ export async function onRequestPost(context) {
 
     if (env.BUCKET) {
       for (const url of [row.image, row.image_b]) {
-        if (url && url.startsWith("/img/")) { try { await env.BUCKET.delete(url.slice(5)); } catch { /* ignore */ } }
+        await deleteUploadedImage(env, url);
       }
     }
     await env.DB.prepare("DELETE FROM stories WHERE id = ?").bind(id).run();
@@ -154,7 +154,7 @@ export async function onRequestPost(context) {
     if (env.BUCKET) {
       for (const row of results || []) {
         for (const url of [row.image, row.image_b]) {
-          if (url && url.startsWith("/img/")) { try { await env.BUCKET.delete(url.slice(5)); } catch { /* ignore */ } }
+          await deleteUploadedImage(env, url);
         }
       }
     }

@@ -1,4 +1,4 @@
-import { json, isAuthed } from "../../_shared/util.js";
+import { json, isAuthed, deleteUploadedImage } from "../../_shared/util.js";
 
 /* POST /api/admin/delete-image  { url }
    Removes one uploaded image from R2. Used when the shop owner removes a
@@ -16,9 +16,7 @@ export async function onRequestPost(context) {
   // Only ever touch our own uploaded images.
   if (!url.startsWith("/img/")) return json({ ok: true, skipped: true });
 
-  try {
-    await env.BUCKET.delete(url.slice(5));
-  } catch { /* already gone — fine */ }
+  await deleteUploadedImage(env, url); // removes the thumbnail too
 
   return json({ ok: true });
 }

@@ -1,4 +1,5 @@
-import { json, isAuthed, rowToProduct, payloadToRow, saveVariants, parseImages , deleteUploadedImage } from "../../../_shared/util.js";
+const SITE = "https://kanaanshop.com";
+import { json, isAuthed, rowToProduct, payloadToRow, saveVariants, parseImages , deleteUploadedImage , pingIndexNow } from "../../../_shared/util.js";
 import { sendPushToTokens } from "../../../_shared/fcm.js";
 
 // PUT /api/admin/products/:id  -> update
@@ -24,6 +25,7 @@ export async function onRequestPut(context) {
   ).run();
 
   const updated = await env.DB.prepare("SELECT * FROM products WHERE id = ?").bind(id).first();
+  pingIndexNow([`${SITE}/product/${id}`, `${SITE}/shop/${row.category}`, `${SITE}/sitemap.xml`]);
   try { await saveVariants(env, id, body.variants); } catch { /* stock optional */ }
 
   // "نبّهني لما يرجع متوفر" — لو المنتج كان نافد وهلق صار متوفر،
@@ -66,5 +68,10 @@ export async function onRequestDelete(context) {
 
   try { await env.DB.prepare("DELETE FROM variants WHERE product_id = ?").bind(id).run(); } catch { /* ignore */ }
   await env.DB.prepare("DELETE FROM products WHERE id = ?").bind(id).run();
+
+  // Ping on delete too, so the removed page drops out of results
+  // quickly instead of lingering as a dead link.
+  pingIndexNow([`${SITE}/product/${id}`, `${SITE}/shop`, `${SITE}/sitemap.xml`]);
+
   return json({ ok: true });
 }

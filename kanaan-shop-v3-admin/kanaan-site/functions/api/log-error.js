@@ -1,4 +1,4 @@
-import { json } from "../_shared/util.js";
+import { json, rateLimit, tooManyRequests } from "../_shared/util.js";
 
 /* POST /api/log-error
    ------------------------------------------------------------
@@ -9,6 +9,13 @@ import { json } from "../_shared/util.js";
 export async function onRequestPost(context) {
   const { request, env } = context;
   if (!env.DB) return json({ error: "Database not configured." }, 500);
+
+  /* Public and unauthenticated by design — any shopper can hit a bug.
+     But that also means anyone could spam it to fill the database, so:
+     30 an hour, which covers a genuinely broken page reporting several
+     errors in a row. */
+  const limit = await rateLimit(request, env, "log-error", 30, 60 * 60 * 1000);
+  if (!limit.allowed) return json({ ok: true }); // silently drop — never surface this to a shopper
 
   let body = {};
   try { body = await request.json(); } catch { return json({ error: "bad json" }, 400); }

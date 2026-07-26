@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 
 import { COLORS, COLOR_KEYS, groupedColors, swatchBackground, colorLabel } from "./palette.js";
+import { optimizeImage, formatBytes } from "./imageOptimizer.js";
 
 /* Fixed sets (kept in sync with the storefront). */
 const CATEGORIES = [
@@ -901,8 +902,10 @@ function StoryRingEditor({ products, ringType, existingRing, onCancel, onSaved }
   const uploadOne = async (file, which) => {
     setUploading(true);
     try {
+      const opt = await optimizeImage(file); // same shrink-before-upload as products
       const fd = new FormData();
-      fd.append("file", file);
+      fd.append("file", opt.full);
+      if (opt.thumb) fd.append("thumb", opt.thumb);
       const r = await fetch("/api/admin/upload", { method: "POST", body: fd });
       const d = await r.json();
       if (r.ok && d.url) setDraft((p) => ({ ...p, [which]: d.url }));
@@ -1465,12 +1468,31 @@ function OrdersTab({ orders, loading, reload }) {
   );
 }
 
+// Same "-thumb" convention the storefront uses. The product list can show
+// dozens of these at once, so pulling the small copy keeps the admin panel
+// quick even over a phone connection in the shop.
+function thumbUrlFor(url) {
+  const u = String(url || "");
+  if (!u.startsWith("/img/")) return "";
+  const dot = u.lastIndexOf(".");
+  if (dot <= 0) return "";
+  return `${u.slice(0, dot)}-thumb${u.slice(dot)}`;
+}
+
 function Thumb({ src }) {
   const [ok, setOk] = useState(true);
+  const small = thumbUrlFor(src) || src;
   if (src && ok) {
     return (
       <div className="w-14 h-14 rounded-xl overflow-hidden flex-shrink-0" style={{ border: "1px solid var(--glass-border)" }}>
-        <img src={src} alt="" className="w-full h-full" style={{ objectFit: "cover" }} onError={() => setOk(false)} />
+        <img
+          src={small}
+          alt=""
+          className="w-full h-full"
+          style={{ objectFit: "cover" }}
+          loading="lazy"
+          onError={(e) => { if (small !== src) e.currentTarget.src = src; else setOk(false); }}
+        />
       </div>
     );
   }
@@ -1512,6 +1534,7 @@ function ProductForm({ initial, isNew, onCancel, onSaved }) {
   };
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadNote, setUploadNote] = useState("");
   const [error, setError] = useState("");
   const [sizeInput, setSizeInput] = useState("");
   const fileRef = useRef(null);
@@ -1541,16 +1564,43 @@ function ProductForm({ initial, isNew, onCancel, onSaved }) {
     if (files.length === 0) return;
     setUploading(true);
     setError("");
-    for (const file of files) {
+    setUploadNote("");
+
+    let savedBefore = 0;
+    let savedAfter = 0;
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const label = files.length > 1 ? ` (${i + 1}/${files.length})` : "";
       try {
+        // Shrink on this device first — a phone photo is 4–8 MB, and both
+        // the upload and every future shopper would otherwise carry that.
+        setUploadNote(`Preparing photo${label}…`);
+        const opt = await optimizeImage(file);
+        savedBefore += opt.originalSize;
+        savedAfter += opt.optimizedSize;
+
+        setUploadNote(`Uploading${label}…`);
         const fd = new FormData();
-        fd.append("file", file);
+        fd.append("file", opt.full);
+        if (opt.thumb) fd.append("thumb", opt.thumb);
+
         const r = await fetch("/api/admin/upload", { method: "POST", body: fd });
         const d = await r.json();
         if (r.ok && d.url) setF((p) => ({ ...p, images: [...p.images, { url: d.url, color: null }] }));
         else setError(d.error || "Upload failed.");
       } catch { setError("Upload failed."); }
     }
+
+    // Worth telling the owner — it's the difference between a shop that
+    // loads instantly on mobile data and one that doesn't.
+    if (savedBefore > savedAfter) {
+      const pct = Math.round((1 - savedAfter / savedBefore) * 100);
+      setUploadNote(`Optimized: ${formatBytes(savedBefore)} → ${formatBytes(savedAfter)} (${pct}% smaller)`);
+    } else {
+      setUploadNote("");
+    }
+
     setUploading(false);
     if (fileRef.current) fileRef.current.value = "";
   };
@@ -1752,7 +1802,13 @@ function ProductForm({ initial, isNew, onCancel, onSaved }) {
             </button>
           </div>
           <input ref={fileRef} type="file" accept="image/*" multiple onChange={onFiles} style={{ display: "none" }} />
-          <p className="font-body text-xs text-muted">JPG, PNG or WEBP. They’re cropped to fit automatically.</p>
+          {uploadNote ? (
+            <p className="font-body text-xs" style={{ color: uploading ? "var(--fg-muted)" : "var(--teal)" }}>{uploadNote}</p>
+          ) : (
+            <p className="font-body text-xs text-muted">
+              JPG, PNG or WEBP. They’re cropped to fit automatically, and shrunk for fast loading before upload.
+            </p>
+          )}
         </Group>
 
         {/* Colors */}

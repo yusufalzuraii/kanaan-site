@@ -600,6 +600,21 @@ function getImagesForColor(product, colorKey) {
   return untagged.length > 0 ? untagged : all;
 }
 
+/* Uploaded photos are stored twice — the full image and a smaller copy
+   with "-thumb" before the extension. Grid cards show up to 12 images at
+   once, so pulling the small one there is the difference between a page
+   that loads instantly on mobile data and one that crawls.
+
+   Products uploaded before thumbnails existed simply don't have one; the
+   <img> onError below falls back to the full image, so nothing breaks. */
+function thumbUrlFor(url) {
+  const u = String(url || "");
+  if (!u.startsWith("/img/")) return ""; // external or missing — no thumb to guess at
+  const dot = u.lastIndexOf(".");
+  if (dot <= 0) return "";
+  return `${u.slice(0, dot)}-thumb${u.slice(dot)}`;
+}
+
 function getImages(product) {
   return getImageList(product).map((x) => x.url);
 }
@@ -637,7 +652,12 @@ function SwatchPanel({ product, big, liked, onToggleLike, forceSoldOut }) {
   const c1 = COLORS[product.colors[0]]?.hex || "#141414";
   const c2 = COLORS[product.colors[1]]?.hex || c1;
   const [imgOk, setImgOk] = useState(true);
-  const imgSrc = imgOk ? getImages(product)[0] || null : null;
+  const fullSrc = getImages(product)[0] || null;
+  // `big` = product page hero, where the full-resolution image belongs.
+  const preferred = big ? fullSrc : (thumbUrlFor(fullSrc) || fullSrc);
+  const imgSrc = imgOk ? preferred : null;
+  const [thumbFailed, setThumbFailed] = useState(false);
+  const shownSrc = thumbFailed ? fullSrc : imgSrc;
   return (
     <div
       className="relative w-full flex items-center justify-center overflow-hidden"
@@ -647,14 +667,20 @@ function SwatchPanel({ product, big, liked, onToggleLike, forceSoldOut }) {
         background: `radial-gradient(120% 120% at 15% 15%, ${c1} 0%, transparent 55%), radial-gradient(120% 120% at 85% 85%, ${c2} 0%, transparent 55%), #1A1A1E`,
       }}
     >
-      {imgSrc ? (
+      {shownSrc ? (
         <img
-          src={imgSrc}
+          src={shownSrc}
           alt={product.name}
           loading="lazy"
+          decoding="async"
           className="absolute inset-0 w-full h-full"
           style={{ objectFit: "cover" }}
-          onError={() => setImgOk(false)}
+          onError={() => {
+            // A missing thumbnail just means this photo predates them —
+            // retry once with the full image before giving up entirely.
+            if (!thumbFailed && shownSrc !== fullSrc) setThumbFailed(true);
+            else setImgOk(false);
+          }}
         />
       ) : (
         <>
@@ -1006,11 +1032,12 @@ function SearchOverlay({ open, onClose, products, openProduct, goCatalog, goSale
 
 function SearchThumb({ product }) {
   const [ok, setOk] = useState(true);
-  const src = getImages(product)[0];
+  const full = getImages(product)[0];
+  const src = thumbUrlFor(full) || full; // 40×50 preview — never needs the full file
   if (src && ok) {
     return (
       <span className="rounded-lg overflow-hidden flex-shrink-0 block" style={{ width: 40, height: 50, border: "1px solid var(--glass-border)" }}>
-        <img src={src} alt="" className="w-full h-full" style={{ objectFit: "cover" }} onError={() => setOk(false)} />
+        <img src={src} alt="" className="w-full h-full" style={{ objectFit: "cover" }} loading="lazy" onError={(e) => { if (src !== full) e.currentTarget.src = full; else setOk(false); }} />
       </span>
     );
   }

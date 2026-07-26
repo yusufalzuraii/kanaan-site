@@ -22,7 +22,8 @@ const esc = (s) =>
 // the one sequence that would otherwise break out of the tag early.
 const jsonLd = (obj) => JSON.stringify(obj).replace(/</g, "\\u003c");
 
-import { parseImages, CATEGORY_LABELS } from "../_shared/util.js";
+import { parseImages, CATEGORY_LABELS, rowToProduct } from "../_shared/util.js";
+import { renderProductContent, injectContent } from "../_shared/ssr.js";
 
 export async function onRequestGet(context) {
   const { request, env, params, next } = context;
@@ -44,7 +45,7 @@ export async function onRequestGet(context) {
   let row;
   try {
     row = await env.DB.prepare(
-      "SELECT id, name, category, description, images, price, badge, discount, sold_out, colors FROM products WHERE id = ? AND active = 1"
+      "SELECT id, name, category, subcategory, description, images, price, badge, discount, sold_out, colors, sizes FROM products WHERE id = ? AND active = 1"
     ).bind(slug).first();
   } catch {
     return res;
@@ -129,6 +130,23 @@ export async function onRequestGet(context) {
   `;
 
   let html = await res.text();
+
+  /* Write the real product content into the page. Without this, the HTML
+     a crawler receives is an empty <div id="root"> — the product name,
+     price and description simply don't exist for any engine that doesn't
+     run JavaScript. React replaces it the moment it mounts. */
+  try {
+    html = injectContent(
+      html,
+      renderProductContent({
+        product: rowToProduct(row),
+        origin,
+        categoryLabel,
+        images: allImagesAbsolute.length ? allImagesAbsolute : [image],
+        inStock: !row.sold_out,
+      })
+    );
+  } catch { /* the meta tags below still apply even if this part fails */ }
 
   // Drop the generic tags, then insert the product-specific ones.
   html = html

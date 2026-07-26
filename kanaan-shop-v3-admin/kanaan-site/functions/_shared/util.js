@@ -406,3 +406,36 @@ export function groupIntoRings(slides) {
   for (const r of rings) r.slides.sort((a, b) => a.sortOrder - b.sortOrder);
   return rings.filter((r) => r.slides.length > 0);
 }
+
+/* ============================================================
+   IMAGE THUMBNAILS
+   ------------------------------------------------------------
+   Every uploaded photo is stored twice: the full image, and a smaller
+   copy under the same name with "-thumb" before the extension.
+     /img/products/1234-ab.webp
+     /img/products/1234-ab-thumb.webp
+   Deriving one from the other means the database only ever stores a
+   single URL per photo — no schema change, and older products that
+   predate thumbnails keep working (their thumb simply 404s and the
+   storefront falls back to the full image).
+   ============================================================ */
+export function thumbPathFor(path) {
+  const p = String(path || "");
+  const dot = p.lastIndexOf(".");
+  if (dot <= 0) return "";
+  return `${p.slice(0, dot)}-thumb${p.slice(dot)}`;
+}
+
+// Remove an uploaded image and its thumbnail. Only ever touches our own
+// /img/ paths, and never throws — cleanup failing shouldn't fail the
+// operation that triggered it.
+export async function deleteUploadedImage(env, url) {
+  const u = String(url || "");
+  if (!env.BUCKET || !u.startsWith("/img/")) return;
+  const key = u.slice(5);
+  try { await env.BUCKET.delete(key); } catch { /* already gone */ }
+  const thumb = thumbPathFor(key);
+  if (thumb) {
+    try { await env.BUCKET.delete(thumb); } catch { /* may not exist — fine */ }
+  }
+}

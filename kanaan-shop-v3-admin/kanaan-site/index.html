@@ -26,12 +26,26 @@
       html { color-scheme: light; background-color: #F2F2F4; }
       @media (prefers-color-scheme: dark) { html { color-scheme: light dark; } }
     </style>
-    <!-- Fonts: preconnect + stylesheet here instead of a CSS @import inside
-         the app bundle — the browser starts fetching them immediately with
-         the page, not after JS parses. display=swap keeps text visible. -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+    <!-- Fonts are self-hosted, not pulled from Google's CDN.
+         Why: the Android/iOS app ships its own copy of this page and runs
+         from local storage, so a CDN request is a network dependency the
+         app doesn't otherwise have. With remote fonts, opening the app on a
+         weak connection (or offline) fell back to the system font and the
+         whole brand identity broke on first paint. Latin subsets only —
+         all six weights together are ~120 KB, cached forever after the
+         first load, and available instantly offline.
+         The two weights used above the fold are preloaded so text renders
+         branded from the very first frame instead of swapping in late. -->
+    <link rel="preload" href="/fonts/space-grotesk-latin-700-normal.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/inter-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin />
+    <style>
+      @font-face { font-family: 'Space Grotesk'; font-style: normal; font-weight: 500; font-display: swap; src: url('/fonts/space-grotesk-latin-500-normal.woff2') format('woff2'); }
+      @font-face { font-family: 'Space Grotesk'; font-style: normal; font-weight: 600; font-display: swap; src: url('/fonts/space-grotesk-latin-600-normal.woff2') format('woff2'); }
+      @font-face { font-family: 'Space Grotesk'; font-style: normal; font-weight: 700; font-display: swap; src: url('/fonts/space-grotesk-latin-700-normal.woff2') format('woff2'); }
+      @font-face { font-family: 'Inter'; font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/inter-latin-400-normal.woff2') format('woff2'); }
+      @font-face { font-family: 'Inter'; font-style: normal; font-weight: 500; font-display: swap; src: url('/fonts/inter-latin-500-normal.woff2') format('woff2'); }
+      @font-face { font-family: 'Inter'; font-style: normal; font-weight: 600; font-display: swap; src: url('/fonts/inter-latin-600-normal.woff2') format('woff2'); }
+    </style>
     <title>Kanaan Shop — Menswear from Saida, Lebanon</title>
     <meta name="description" content="Kanaan Shop: menswear in heavy fabrics and thoughtful cuts, from Saida to all of Lebanon. T-Shirts, Shirts, Jeans, Pants, Shorts, Sets, Underwear, Shoes, Slippers, Accessories. Cash on delivery." />
     <link rel="canonical" href="https://kanaanshop.com/" />

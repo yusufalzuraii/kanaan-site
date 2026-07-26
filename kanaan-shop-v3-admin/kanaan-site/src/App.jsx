@@ -40,7 +40,12 @@ import {
   Flame,
   Home as HomeIcon,
 } from "lucide-react";
-import Admin from "./Admin.jsx";
+/* The admin panel is a third of the front-end code — product editor,
+   stock grid, order management, story editor, image optimizer — and no
+   shopper will ever open it. Importing it lazily puts it in its own file
+   that only downloads when someone actually visits /admin, so every
+   visitor stops paying to carry it around. */
+const Admin = React.lazy(() => import("./Admin.jsx"));
 import { COLORS as PALETTE, swatchBackground } from "./palette.js";
 import {
   isNativeApp,
@@ -1741,7 +1746,20 @@ function KanaanShop() {
     return (
       <div data-theme={theme} className="min-h-screen bg-app text-fg font-body">
         <GlobalStyles />
-        <Admin onExit={goHome} />
+        {/* Shown for the moment the admin bundle is downloading — only
+            ever seen once, then it's cached by the browser. */}
+        <React.Suspense
+          fallback={
+            <div className="min-h-screen flex items-center justify-center">
+              <div className="flex flex-col items-center gap-3">
+                <div className="admin-spinner" />
+                <p className="font-body text-sm text-muted">Opening admin…</p>
+              </div>
+            </div>
+          }
+        >
+          <Admin onExit={goHome} />
+        </React.Suspense>
       </div>
     );
   }
@@ -2093,6 +2111,18 @@ function GlobalStyles() {
         backdrop-filter: blur(6px); border: 1px solid rgba(255,255,255,0.25);
       }
 
+      /* Loading ring for the admin panel while its bundle downloads.
+         Plain CSS rather than a lucide icon on purpose — the icon set
+         itself lives in the main bundle, and this needs to render before
+         anything from the lazy chunk has arrived. */
+      @keyframes adminSpin { to { transform: rotate(360deg); } }
+      .admin-spinner {
+        width: 26px; height: 26px; border-radius: 9999px;
+        border: 2.5px solid var(--border);
+        border-top-color: var(--coral);
+        animation: adminSpin 0.7s linear infinite;
+      }
+
       /* Sale card */
       @keyframes saleGlow {
         0%, 100% { transform: translate(-10%, -10%) scale(1); opacity: 0.55; }
@@ -2113,6 +2143,7 @@ function GlobalStyles() {
 
       @media (prefers-reduced-motion: reduce) {
         .mesh-blob, .hero-fade-1, .hero-fade-2, .hero-fade-3, .hero-fade-4, .dock-in, .fab-pulse, .search-fade, .search-rise, .sale-glow, .promise-divider, .tag-dot-ping { animation: none !important; }
+        .admin-spinner { animation-duration: 2s; }
         .promise-chip { animation: none !important; opacity: 1 !important; }
         .promise-divider { opacity: 1 !important; }
       }

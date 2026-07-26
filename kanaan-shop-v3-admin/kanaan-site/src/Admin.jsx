@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Plus, Trash2, Pencil, X, Check, Upload, LogOut, ArrowLeft, Star, Loader2, ImageOff,
   Package, ClipboardList, Phone, MapPin, Clock, CheckCircle2, XCircle, ChevronDown, AlertTriangle,
-  Sparkles, Image as ImageIcon, GripVertical, Pin, Layers, Bell, Send,
+  Sparkles, Image as ImageIcon, GripVertical, Pin, Layers, Bell, Send, LayoutGrid,
 } from "lucide-react";
 
 import { COLORS, COLOR_KEYS, groupedColors, swatchBackground, colorLabel } from "./palette.js";
@@ -150,7 +150,7 @@ function Login({ onSuccess, onExit }) {
 
 /* ============================================================ */
 function Dashboard({ onExit, onLogout }) {
-  const [tab, setTab] = useState("products");
+  const [tab, setTab] = useState("home");
   const [products, setProducts] = useState([]);
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -179,9 +179,18 @@ function Dashboard({ onExit, onLogout }) {
     setLoading(false);
   };
 
+  /* The dashboard summarises products AND orders together, so both are
+     loaded up front rather than one per tab. It's two requests on open
+     instead of one, and every tab after that is instant. */
+  useEffect(() => {
+    load();
+    loadOrders();
+  }, []); // eslint-disable-line
+
+  // Coming back to a tab should show current data, not a stale snapshot.
   useEffect(() => {
     if (tab === "orders") loadOrders();
-    else load(); // Stories tab needs the product list too, for tagging.
+    else if (tab === "products" || tab === "stories") load();
   }, [tab]); // eslint-disable-line
 
   const pendingCount = orders.filter((o) => o.status === "pending").length;
@@ -233,51 +242,52 @@ function Dashboard({ onExit, onLogout }) {
         </button>
       </div>
 
-      {/* Tabs */}
+      {/* Navigation
+          ------------------------------------------------------------
+          This was five equal tabs in one row, which on a phone meant five
+          cramped, half-readable labels. They aren't equally important:
+          orders and products are checked daily, the rest occasionally.
+          So the bar now carries the three daily ones, and everything else
+          lives as cards on the dashboard where there's room to explain
+          what each actually does. */}
       <div className="glass rounded-full p-1 flex gap-1 mb-6">
-        <button
-          onClick={() => setTab("products")}
-          className="flex-1 rounded-full py-2 font-body text-sm tap-scale flex items-center justify-center gap-2"
-          style={tab === "products" ? { background: "var(--fg)", color: "var(--bg)" } : { color: "var(--fg-muted)" }}
-        >
-          <Package className="w-4 h-4" /> Products
-        </button>
-        <button
-          onClick={() => setTab("orders")}
-          className="flex-1 rounded-full py-2 font-body text-sm tap-scale flex items-center justify-center gap-2"
-          style={tab === "orders" ? { background: "var(--fg)", color: "var(--bg)" } : { color: "var(--fg-muted)" }}
-        >
-          <ClipboardList className="w-4 h-4" /> Orders
-          {pendingCount > 0 && (
-            <span className="rounded-full font-num" style={{ background: "var(--coral)", color: "#fff", fontSize: "0.68rem", padding: "0 6px", lineHeight: "16px" }}>
-              {pendingCount}
-            </span>
-          )}
-        </button>
-        <button
-          onClick={() => setTab("stories")}
-          className="flex-1 rounded-full py-2 font-body text-sm tap-scale flex items-center justify-center gap-2"
-          style={tab === "stories" ? { background: "var(--fg)", color: "var(--bg)" } : { color: "var(--fg-muted)" }}
-        >
-          <Sparkles className="w-4 h-4" /> The Edit
-        </button>
-        <button
-          onClick={() => setTab("notify")}
-          className="flex-1 rounded-full py-2 font-body text-sm tap-scale flex items-center justify-center gap-2"
-          style={tab === "notify" ? { background: "var(--fg)", color: "var(--bg)" } : { color: "var(--fg-muted)" }}
-        >
-          <Bell className="w-4 h-4" /> Notify
-        </button>
-        <button
-          onClick={() => setTab("errors")}
-          className="flex-1 rounded-full py-2 font-body text-sm tap-scale flex items-center justify-center gap-2"
-          style={tab === "errors" ? { background: "var(--fg)", color: "var(--bg)" } : { color: "var(--fg-muted)" }}
-        >
-          <AlertTriangle className="w-4 h-4" /> Errors
-        </button>
+        {[
+          { id: "home", label: "Home", Icon: LayoutGrid },
+          { id: "products", label: "Products", Icon: Package },
+          { id: "orders", label: "Orders", Icon: ClipboardList, badge: pendingCount },
+        ].map(({ id, label, Icon, badge }) => (
+          <button
+            key={id}
+            onClick={() => setTab(id)}
+            className="flex-1 rounded-full py-2 font-body text-sm tap-scale flex items-center justify-center gap-1.5"
+            style={tab === id ? { background: "var(--fg)", color: "var(--bg)" } : { color: "var(--fg-muted)" }}
+          >
+            <Icon className="w-4 h-4" /> {label}
+            {badge > 0 && (
+              <span className="rounded-full font-num" style={{ background: "var(--coral)", color: "#fff", fontSize: "0.68rem", padding: "0 6px", lineHeight: "16px" }}>
+                {badge}
+              </span>
+            )}
+          </button>
+        ))}
       </div>
 
-      {tab === "notify" ? (
+      {/* Secondary sections keep a slim back-link so you're never stranded. */}
+      {["stories", "notify", "errors"].includes(tab) && (
+        <button onClick={() => setTab("home")} className="flex items-center gap-1.5 font-body text-sm text-muted hover:text-coral tap-scale mb-4">
+          <ArrowLeft className="w-4 h-4" /> Back to dashboard
+        </button>
+      )}
+
+      {tab === "home" ? (
+        <HomeTab
+          products={products}
+          orders={orders}
+          loading={loading}
+          go={setTab}
+          onAddProduct={() => setCreating(true)}
+        />
+      ) : tab === "notify" ? (
         <NotifyTab onLogout={onLogout} />
       ) : tab === "errors" ? (
         <ErrorsTab />
@@ -1307,6 +1317,219 @@ function DevSignature() {
         </a>
       </div>
     </div>
+  );
+}
+
+/* ============================================================
+   DASHBOARD (HOME)
+   ------------------------------------------------------------
+   The panel grew one feature at a time, and what never got built was
+   the screen that answers the only question that matters when you open
+   it: what needs me right now?
+
+   So this leads with problems, not statistics. Anything on the "needs
+   attention" list is a thing a customer is waiting on, or money not
+   being made — orders sitting unconfirmed, pieces that have quietly
+   sold out, crashes shoppers hit this week. If none of that applies,
+   the list says so plainly instead of showing an empty panel.
+
+   Numbers come second, and the rarely-used tools come last as cards
+   that say what they're for — rather than five cryptic tabs competing
+   for space at the top of a phone screen.
+   ============================================================ */
+function HomeTab({ products, orders, loading, go, onAddProduct }) {
+  const stats = useMemo(() => {
+    const pending = orders.filter((o) => o.status === "pending");
+    const confirmed = orders.filter((o) => o.status === "confirmed");
+
+    // "Out of stock" means the owner marked it sold out, OR it tracks
+    // stock and every colour/size is at zero. An untracked product is
+    // always available, so it never counts.
+    const outOfStock = products.filter((p) => {
+      if (!p.active) return false;
+      if (p.soldOut) return true;
+      const v = p.variants || {};
+      const keys = Object.keys(v);
+      return keys.length > 0 && keys.every((k) => (Number(v[k]) || 0) <= 0);
+    });
+
+    // Tracked pieces down to their last one or two — the ones worth
+    // restocking before they disappear.
+    const lowStock = products.filter((p) => {
+      if (!p.active || p.soldOut) return false;
+      const v = p.variants || {};
+      const keys = Object.keys(v);
+      if (keys.length === 0) return false;
+      const total = keys.reduce((sum, k) => sum + (Number(v[k]) || 0), 0);
+      return total > 0 && total <= 2;
+    });
+
+    const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+    return {
+      pending,
+      confirmedToday: confirmed.filter((o) => o.updatedAt >= dayAgo).length,
+      revenueToday: confirmed.filter((o) => o.updatedAt >= dayAgo).reduce((sum, o) => sum + (Number(o.total) || 0), 0),
+      outOfStock,
+      lowStock,
+      onSale: products.filter((p) => p.active && p.discount > 0).length,
+      hidden: products.filter((p) => !p.active).length,
+      total: products.filter((p) => p.active).length,
+    };
+  }, [products, orders]);
+
+  const alerts = [];
+  if (stats.pending.length > 0) {
+    alerts.push({
+      tone: "coral",
+      Icon: ClipboardList,
+      title: `${stats.pending.length} order${stats.pending.length === 1 ? "" : "s"} waiting for you`,
+      body: "Stock stays reserved until you confirm or reject — after 24 hours it's released automatically.",
+      action: "Review orders",
+      onClick: () => go("orders"),
+    });
+  }
+  if (stats.outOfStock.length > 0) {
+    alerts.push({
+      tone: "muted",
+      Icon: Package,
+      title: `${stats.outOfStock.length} product${stats.outOfStock.length === 1 ? " is" : "s are"} out of stock`,
+      body: stats.outOfStock.slice(0, 3).map((p) => p.name).join(", ") + (stats.outOfStock.length > 3 ? "…" : ""),
+      action: "Update stock",
+      onClick: () => go("products"),
+    });
+  }
+  if (stats.lowStock.length > 0) {
+    alerts.push({
+      tone: "muted",
+      Icon: AlertTriangle,
+      title: `${stats.lowStock.length} running low`,
+      body: stats.lowStock.slice(0, 3).map((p) => p.name).join(", ") + (stats.lowStock.length > 3 ? "…" : ""),
+      action: "View",
+      onClick: () => go("products"),
+    });
+  }
+
+  if (loading && products.length === 0 && orders.length === 0) {
+    return <div className="flex justify-center py-20"><Loader2 className="w-6 h-6 spin text-muted" /></div>;
+  }
+
+  return (
+    <div>
+      {/* What needs attention */}
+      {alerts.length > 0 ? (
+        <div className="space-y-2.5 mb-6">
+          {alerts.map((a, i) => (
+            <button
+              key={i}
+              onClick={a.onClick}
+              className="glass rounded-2xl p-4 w-full text-left tap-scale flex items-start gap-3"
+              style={a.tone === "coral" ? { borderColor: "rgba(255,69,34,0.4)" } : undefined}
+            >
+              <span
+                className="rounded-full p-2 flex-shrink-0"
+                style={{ background: a.tone === "coral" ? "rgba(255,69,34,0.14)" : "var(--field-bg)" }}
+              >
+                <a.Icon className="w-4 h-4" style={{ color: a.tone === "coral" ? "var(--coral)" : "var(--fg-muted)" }} />
+              </span>
+              <span className="flex-1 min-w-0">
+                <span className="block font-body font-medium text-sm">{a.title}</span>
+                <span className="block font-body text-xs text-muted mt-0.5 leading-5">{a.body}</span>
+              </span>
+              <span className="font-body text-xs flex-shrink-0 mt-1" style={{ color: "var(--coral)" }}>{a.action} →</span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="glass rounded-2xl p-5 mb-6 flex items-center gap-3">
+          <span className="rounded-full p-2 flex-shrink-0" style={{ background: "rgba(18,179,160,0.14)" }}>
+            <CheckCircle2 className="w-4 h-4" style={{ color: "var(--teal)" }} />
+          </span>
+          <div>
+            <p className="font-body font-medium text-sm">All caught up</p>
+            <p className="font-body text-xs text-muted mt-0.5">No orders waiting, nothing out of stock.</p>
+          </div>
+        </div>
+      )}
+
+      {/* Today at a glance */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mb-6">
+        <StatCard label="Confirmed today" value={stats.confirmedToday} />
+        <StatCard label="Earned today" value={money(stats.revenueToday)} accent />
+        <StatCard label="Live products" value={stats.total} />
+        <StatCard label="On sale" value={stats.onSale} />
+      </div>
+
+      {/* Quick actions */}
+      <p className="font-body text-xs text-muted mb-2">Quick actions</p>
+      <div className="grid grid-cols-2 gap-2.5 mb-6">
+        <button
+          onClick={onAddProduct}
+          className="glass-btn rounded-2xl py-3.5 tap-scale flex items-center justify-center gap-2 font-body text-sm font-medium"
+          style={{ background: "var(--coral)", color: "#fff" }}
+        >
+          <Plus className="w-4 h-4" /> Add product
+        </button>
+        <button
+          onClick={() => go("stories")}
+          className="glass rounded-2xl py-3.5 tap-scale flex items-center justify-center gap-2 font-body text-sm font-medium"
+        >
+          <Sparkles className="w-4 h-4" /> New story
+        </button>
+      </div>
+
+      {/* Everything else, with an explanation rather than a bare label */}
+      <p className="font-body text-xs text-muted mb-2">More</p>
+      <div className="space-y-2.5">
+        <ToolCard
+          Icon={Sparkles}
+          title="The Edit"
+          desc="Story rail on your homepage — lookbooks and fit comparisons."
+          onClick={() => go("stories")}
+        />
+        <ToolCard
+          Icon={Bell}
+          title="Send a notification"
+          desc="Push a message to everyone with the app installed."
+          onClick={() => go("notify")}
+        />
+        <ToolCard
+          Icon={AlertTriangle}
+          title="Error reports"
+          desc="Problems shoppers hit, reported automatically."
+          onClick={() => go("errors")}
+        />
+      </div>
+
+      {stats.hidden > 0 && (
+        <p className="font-body text-xs text-muted text-center mt-6">
+          {stats.hidden} product{stats.hidden === 1 ? " is" : "s are"} hidden from the shop.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function StatCard({ label, value, accent }) {
+  return (
+    <div className="glass rounded-2xl px-3 py-3.5 text-center">
+      <p className="font-num font-bold text-xl leading-tight" style={accent ? { color: "var(--teal)" } : undefined}>{value}</p>
+      <p className="font-body text-muted mt-1" style={{ fontSize: "0.68rem" }}>{label}</p>
+    </div>
+  );
+}
+
+function ToolCard({ Icon, title, desc, onClick }) {
+  return (
+    <button onClick={onClick} className="glass rounded-2xl p-3.5 w-full text-left tap-scale flex items-center gap-3">
+      <span className="rounded-full p-2 flex-shrink-0" style={{ background: "var(--field-bg)" }}>
+        <Icon className="w-4 h-4 text-muted" />
+      </span>
+      <span className="flex-1 min-w-0">
+        <span className="block font-body font-medium text-sm">{title}</span>
+        <span className="block font-body text-xs text-muted mt-0.5">{desc}</span>
+      </span>
+      <ChevronDown className="w-4 h-4 text-muted flex-shrink-0" style={{ transform: "rotate(-90deg)" }} />
+    </button>
   );
 }
 

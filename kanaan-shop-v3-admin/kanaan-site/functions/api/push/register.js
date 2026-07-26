@@ -1,4 +1,4 @@
-import { json } from "../../_shared/util.js";
+import { json, rateLimit, tooManyRequests } from "../../_shared/util.js";
 
 /* POST /api/push/register
    ------------------------------------------------------------
@@ -10,6 +10,12 @@ import { json } from "../../_shared/util.js";
 export async function onRequestPost(context) {
   const { request, env } = context;
   if (!env.DB) return json({ error: "Database not configured." }, 500);
+
+  /* Public endpoint that writes to the database, so it needs a ceiling.
+     The app re-registers on each launch, so this needs headroom — 15
+     an hour is plenty for that while stopping token-table flooding. */
+  const limit = await rateLimit(request, env, "push-register", 15, 60 * 60 * 1000);
+  if (!limit.allowed) return tooManyRequests(limit.retryAfter);
 
   let body = {};
   try { body = await request.json(); } catch { return json({ error: "bad json" }, 400); }

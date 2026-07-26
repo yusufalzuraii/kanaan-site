@@ -279,28 +279,24 @@ function parseRoute(path) {
    HELPERS
    ============================================================ */
 const money = (n) => `$${n.toFixed(0)}`;
-
-/* رقم إصدار التطبيق الحالي. لازم يترفع رقم واحد كل مرة تبني فيها
-   نسخة جديدة للنشر — وبالتوازي تضغط "أعلن عن نسخة جديدة" بلوحة
-   /admin (تبويب Notify). أي مستخدم عندو رقم أقل من المعلن بيشوف
-   بانر لطيف بيقترح عليه يحدّث. */
-const CURRENT_APP_VERSION = 1;
-const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=com.kanaanshop.app";
-
-/* طلب شبكة بمهلة زمنية. بدونها، لو الاتصال ضعيف أو "علق" (شائع
-   على شبكات الموبايل هون)، الطلب بيضل معلّق بلا نهاية والمستخدم
-   بيضل يحدّق بدوّارة تحميل ما بتخلص أبداً — بلا أي تفسير ولا مخرج. */
-async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...options, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
-}
 const effectivePrice = (p) => (p.discount > 0 ? Math.round(p.price * (1 - p.discount / 100)) : p.price);
 
+/* Reveal-on-scroll, rewritten to survive a fast flick.
+
+   The old version only gave itself a 450px head start, and only downwards
+   ("0px 0px 450px 0px"). Two things went wrong because of that:
+
+     • Scrolling UP had no head start at all — which is exactly why flicking
+       back to the top looked worse than scrolling down.
+     • On a tall phone screen a fast flick covers far more than 450px in a
+       single frame, so you'd arrive at a section before it had been told to
+       appear — and since hidden means opacity:0, what you saw was an empty
+       box where a product card should be.
+
+   Now: a generous margin in BOTH directions, and a hard safety net. If a
+   section hasn't revealed within a moment of mounting, it reveals anyway.
+   An animation that doesn't play is a small loss; a shopper staring at a
+   blank rectangle is a real one. */
 function useReveal() {
   const ref = useRef(null);
   const [visible, setVisible] = useState(false);
@@ -313,6 +309,17 @@ function useReveal() {
     }
     const el = ref.current;
     if (!el) return;
+
+    // Already on (or near) screen at mount — show it immediately rather
+    // than animating something the visitor is already looking at.
+    try {
+      const rect = el.getBoundingClientRect();
+      if (rect.top < window.innerHeight * 1.5) {
+        setVisible(true);
+        return;
+      }
+    } catch { /* fall through to the observer */ }
+
     const obs = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {
@@ -320,12 +327,16 @@ function useReveal() {
           obs.disconnect();
         }
       },
-      // Start revealing ~450px before the element enters view, so by the time
-      // the user scrolls to it it's already there — no pop-in lag.
-      { threshold: 0, rootMargin: "0px 0px 450px 0px" }
+      // Roughly a screen-and-a-half of runway in both directions, so even a
+      // hard flick can't outrun it.
+      { threshold: 0, rootMargin: "150% 0px 150% 0px" }
     );
     obs.observe(el);
-    return () => obs.disconnect();
+
+    // Safety net: never leave anything invisible.
+    const failsafe = setTimeout(() => setVisible(true), 1200);
+
+    return () => { obs.disconnect(); clearTimeout(failsafe); };
   }, [reducedMotion]);
 
   return [ref, visible];
@@ -338,9 +349,13 @@ function Reveal({ children, delay = 0, className = "" }) {
       ref={ref}
       className={className}
       style={{
-        opacity: visible ? 1 : 0,
-        transform: visible ? "translateY(0)" : "translateY(14px)",
-        transition: `opacity 0.5s ease ${delay}ms, transform 0.5s cubic-bezier(0.16,1,0.3,1) ${delay}ms`,
+        // Never fully transparent. Even mid-animation there's something
+        // there, so a fast scroll shows content settling in rather than
+        // empty rectangles filling up.
+        opacity: visible ? 1 : 0.25,
+        transform: visible ? "none" : "translate3d(0, 12px, 0) scale(0.995)",
+        transition: `opacity 0.45s ease ${delay}ms, transform 0.55s cubic-bezier(0.16,1,0.3,1) ${delay}ms`,
+        willChange: visible ? "auto" : "opacity, transform",
       }}
     >
       {children}
@@ -543,44 +558,6 @@ function iconForCategory(category) {
    dark mode flips it with a CSS filter instead of needing a
    second asset.
    ============================================================ */
-/* ============================================================
-   ANIMATED SPLASH — حصري للتطبيق (أندرويد/آيفون).
-
-   ليش هيك وليش مش animation نيتف بأندرويد: شاشة الإقلاع النيتف
-   (launch window) لازم تكون صورة ثابتة — هاد قيد من النظام نفسو،
-   لأنها بتترسم قبل ما التطبيق يشتغل أصلاً. فبدل ما نحارب هالقيد،
-   منخليها ثابتة وقصيرة جداً بـ *نفس لون الخلفية بالضبط*، وبعدها
-   هالشاشة (وهي HTML عادي) بتتسلّم بسلاسة ومن غير أي وميض بينهن —
-   المستخدم بيشوف انتقال واحد متواصل، مش شاشتين.
-
-   الحركة: توهج كورال بيتمدد من الوسط، الشعار بيطلع بحركة مرنة
-   (overshoot خفيف)، لمعة بتمر عليه، وبعدين الشاشة كلها بتتلاشى
-   وبتكبر شوي — إحساس إنو التطبيق "فتح" من ورا الشعار.
-   ============================================================ */
-const SPLASH_TOTAL_MS = 1650;
-
-function AnimatedSplash({ onDone }) {
-  const { reducedMotion } = useApp();
-
-  useEffect(() => {
-    // مين بيطفي الحركة من إعدادات جهازو، ما منجبرو يستنى — منختصرها
-    const t = setTimeout(onDone, reducedMotion ? 350 : SPLASH_TOTAL_MS);
-    return () => clearTimeout(t);
-  }, [reducedMotion, onDone]);
-
-  return (
-    <div className="splash-root" aria-hidden="true">
-      <div className="splash-glow" />
-      <div className="splash-ring" />
-      <div className="splash-logo-wrap">
-        <img src="/logo-compact.png" alt="" className="splash-logo" />
-        <span className="splash-sheen" />
-      </div>
-      <div className="splash-tagline">MEN'S FASHION WEAR</div>
-    </div>
-  );
-}
-
 function LogoMark({ variant = "compact", className = "" }) {
   const [ok, setOk] = useState(true);
   const src = variant === "full" ? "/logo-full.png" : "/logo-compact.png";
@@ -720,6 +697,7 @@ function SwatchPanel({ product, big, liked, onToggleLike, forceSoldOut }) {
   const preferred = big ? fullSrc : (thumbUrlFor(fullSrc) || fullSrc);
   const imgSrc = imgOk ? preferred : null;
   const [thumbFailed, setThumbFailed] = useState(false);
+  const [imgLoaded, setImgLoaded] = useState(false);
   const shownSrc = thumbFailed ? fullSrc : imgSrc;
   return (
     <div
@@ -731,13 +709,17 @@ function SwatchPanel({ product, big, liked, onToggleLike, forceSoldOut }) {
       }}
     >
       {shownSrc ? (
+        <>
+          {/* Shimmer sits underneath until the photo actually decodes. */}
+          {!imgLoaded && <span className="skeleton" aria-hidden="true" />}
         <img
           src={shownSrc}
           alt={product.name}
           loading="lazy"
           decoding="async"
-          className="absolute inset-0 w-full h-full"
+          className={`absolute inset-0 w-full h-full ph-img${imgLoaded ? " is-loaded" : ""}`}
           style={{ objectFit: "cover" }}
+          onLoad={() => setImgLoaded(true)}
           onError={() => {
             // A missing thumbnail just means this photo predates them —
             // retry once with the full image before giving up entirely.
@@ -745,6 +727,7 @@ function SwatchPanel({ product, big, liked, onToggleLike, forceSoldOut }) {
             else setImgOk(false);
           }}
         />
+        </>
       ) : (
         <>
           <div className="grain-overlay" style={{ opacity: 0.05 }} />
@@ -1542,19 +1525,10 @@ function KanaanShop() {
     syncStatusBar(theme);
   }, [theme]);
 
-  // شاشة البداية المتحركة — بالتطبيق بس. الترتيب هون مقصود:
-  // الشاشة النيتف الثابتة بتضل ظاهرة لحد ما شاشتنا المتحركة تكون
-  // مرسومة فعلياً (رندر كامل)، وبعدين منخفيها. هيك ما في ولا إطار
-  // وحد فاضي أو أبيض بين الاتنين — انتقال واحد ناعم.
-  const [showSplash, setShowSplash] = useState(isNativeApp);
-
+  // أول ما التطبيق يخلص أول رندر، منخفي شاشة الـ splash — هيك ما في
+  // ومضة شاشة بيضا بين الـ splash والمحتوى الحقيقي
   useEffect(() => {
-    if (!isNativeApp) { hideSplashScreen(); return; }
-    // requestAnimationFrame مرتين = "بعد ما المتصفح رسم الإطار الأول"
-    const raf = requestAnimationFrame(() => {
-      requestAnimationFrame(() => hideSplashScreen());
-    });
-    return () => cancelAnimationFrame(raf);
+    hideSplashScreen();
   }, []);
 
   // شاشة الترحيب الأولى — تظهر مرة وحدة بس، أول تشغيل للتطبيق
@@ -1566,8 +1540,6 @@ function KanaanShop() {
   useEffect(() => {
     return registerNetworkListener((connected) => setIsOffline(!connected));
   }, []);
-
-
 
   // إشعار داخلي بسيط لما يوصل إشعار والتطبيق مفتوح قدام المستخدم
   const [inAppNotification, setInAppNotification] = useState(null);
@@ -1668,39 +1640,17 @@ function KanaanShop() {
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [storyRings, setStoryRings] = useState([]);
   const [appExclusiveCount, setAppExclusiveCount] = useState(0);
-  const [productsError, setProductsError] = useState(false);
-  // بانر "نسخة جديدة متوفرة". بما إنو التطبيق بيشتغل من نسخة محزّمة
-  // جواه، أي إصلاح جديد ما بيوصل لحدا إلا لما يحدّث من المتجر — فبنسأل
-  // السيرفر مرة وحدة عند الفتح ونقارن مع رقم النسخة المبنية.
   const [updateInfo, setUpdateInfo] = useState({ available: false });
-  useEffect(() => {
-    if (!isNativeApp) return;
-    fetchWithTimeout(`${apiBase}/api/app-version`, {}, 8000)
-      .then((r) => r.json())
-      .then((d) => {
-        if (typeof d.latest === "number" && d.latest > CURRENT_APP_VERSION) {
-          setUpdateInfo({ available: true });
-        }
-      })
-      .catch(() => { /* ما قدرنا نتحقق — منسكت، مش ميزة أساسية */ });
-  }, []);
 
   const refreshProducts = async () => {
     try {
-      const res = await fetchWithTimeout(`${apiBase}/api/products`, {
+      const res = await fetch(`${apiBase}/api/products`, {
         headers: isNativeApp ? { "X-Kanaan-Client": "app" } : {},
       });
       const data = await res.json();
-      if (Array.isArray(data.products)) {
-        setProducts(data.products);
-        setProductsError(false);
-      }
+      if (Array.isArray(data.products)) setProducts(data.products);
       if (typeof data.appExclusiveCount === "number") setAppExclusiveCount(data.appExclusiveCount);
-    } catch {
-      // انقطاع أو مهلة خلصت — منعلّم حالة خطأ واضحة بدل ما نسكت
-      // ونخلي المستخدم يظن إنو المتجر فاضي فعلاً
-      setProductsError(true);
-    }
+    } catch { /* offline or API not ready */ }
   };
 
   useEffect(() => {
@@ -1906,7 +1856,7 @@ function KanaanShop() {
       <main>
         <PageTransition path={path} direction={navDirection}>
         {route.type === "home" && isNativeApp && (
-          <NativeHomeView products={products} loading={catalogLoading} error={productsError} onRetry={refreshProducts} goCatalog={goCatalog} goSale={goSale} goExclusives={goExclusives} openProduct={openProduct} likes={likes} toggleLike={toggleLike} storyRings={storyRings} openStory={openStory} goFavorites={goFavorites} onCart={() => setCartOpen(true)} cartCount={cartCount} />
+          <NativeHomeView products={products} loading={catalogLoading} goCatalog={goCatalog} goSale={goSale} goExclusives={goExclusives} openProduct={openProduct} likes={likes} toggleLike={toggleLike} storyRings={storyRings} openStory={openStory} goFavorites={goFavorites} onCart={() => setCartOpen(true)} cartCount={cartCount} />
         )}
         {route.type === "home" && !isNativeApp && (
           <HomeView products={products} loading={catalogLoading} goCatalog={goCatalog} goSale={goSale} openProduct={openProduct} likes={likes} toggleLike={toggleLike} storyRings={storyRings} openStory={openStory} appExclusiveCount={appExclusiveCount} />
@@ -1915,7 +1865,7 @@ function KanaanShop() {
           <SaleView products={products} loading={catalogLoading} goCatalog={goCatalog} openProduct={openProduct} likes={likes} toggleLike={toggleLike} />
         )}
         {route.type === "catalog" && (
-          <CatalogView activeCategory={route.category} activeSub={route.sub} loading={catalogLoading} error={productsError} onRetry={refreshProducts} goCatalog={goCatalog} products={filteredProducts} openProduct={openProduct} likes={likes} toggleLike={toggleLike} />
+          <CatalogView activeCategory={route.category} activeSub={route.sub} loading={catalogLoading} goCatalog={goCatalog} products={filteredProducts} openProduct={openProduct} likes={likes} toggleLike={toggleLike} />
         )}
         {route.type === "favorites" && (
           <FavoritesView products={products} loading={catalogLoading} likes={likes} openProduct={openProduct} toggleLike={toggleLike} goCatalog={goCatalog} />
@@ -1994,10 +1944,7 @@ function KanaanShop() {
           likesCount={likes.length}
         />
       )}
-      {/* شاشة الترحيب ما بتطلع إلا بعد ما السبلاش يخلص — حتى ما
-          يتراكبوا فوق بعض بأول تشغيل */}
-      {showWelcome && !showSplash && <WelcomeSheet onDismiss={dismissWelcome} />}
-      {showSplash && <AnimatedSplash onDone={() => setShowSplash(false)} />}
+      {showWelcome && <WelcomeSheet onDismiss={dismissWelcome} />}
       <InAppNotificationBanner
         notification={inAppNotification}
         onDismiss={() => setInAppNotification(null)}
@@ -2217,6 +2164,50 @@ function GlobalStyles() {
         animation: adminSpin 0.7s linear infinite;
       }
 
+      /* Skeleton shimmer
+         ------------------------------------------------------------
+         A product photo that hasn't arrived yet used to leave a flat dark
+         rectangle — on a fast scroll the grid looked broken rather than
+         loading. This reads as "arriving", which is the truth. */
+      @keyframes shimmer { 100% { transform: translateX(100%); } }
+      .skeleton {
+        position: absolute; inset: 0; overflow: hidden;
+        background: var(--field-bg);
+      }
+      .skeleton::after {
+        content: ''; position: absolute; inset: 0;
+        transform: translateX(-100%);
+        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.45), transparent);
+        animation: shimmer 1.4s infinite;
+      }
+      [data-theme="dark"] .skeleton::after {
+        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent);
+      }
+
+      /* Photos fade in instead of snapping, so a grid filling up during a
+         scroll feels like one motion rather than things popping. */
+      .ph-img { opacity: 0; transition: opacity 0.35s ease; }
+      .ph-img.is-loaded { opacity: 1; }
+
+      /* Scroll performance
+         ------------------------------------------------------------
+         The homepage stacks glass panels, blurred mesh gradients and a
+         grain overlay. All three are expensive to repaint, and the browser
+         was repainting sections far off-screen on every scroll frame —
+         which is where the stutter came from.
+
+         content-visibility lets it skip work for anything not near the
+         viewport entirely. contain-intrinsic-size keeps the scrollbar
+         honest by reserving the right height, so nothing jumps. */
+      .section-lazy {
+        content-visibility: auto;
+        contain-intrinsic-size: auto 620px;
+      }
+
+      /* Keeps the blurred blobs on the GPU instead of forcing a main-thread
+         repaint every frame. */
+      .mesh-blob, .sale-glow { transform: translateZ(0); backface-visibility: hidden; }
+
       /* Sale card */
       @keyframes saleGlow {
         0%, 100% { transform: translate(-10%, -10%) scale(1); opacity: 0.55; }
@@ -2236,7 +2227,7 @@ function GlobalStyles() {
       .sale-card:hover { transform: translateY(-3px); border-color: rgba(255,69,34,0.9); }
 
       @media (prefers-reduced-motion: reduce) {
-        .mesh-blob, .hero-fade-1, .hero-fade-2, .hero-fade-3, .hero-fade-4, .dock-in, .fab-pulse, .search-fade, .search-rise, .sale-glow, .promise-divider, .tag-dot-ping { animation: none !important; }
+        .mesh-blob, .hero-fade-1, .hero-fade-2, .hero-fade-3, .hero-fade-4, .dock-in, .fab-pulse, .search-fade, .search-rise, .sale-glow, .promise-divider, .tag-dot-ping, .skeleton::after { animation: none !important; }
         .admin-spinner { animation-duration: 2s; }
         .promise-chip { animation: none !important; opacity: 1 !important; }
         .promise-divider { opacity: 1 !important; }
@@ -2247,88 +2238,6 @@ function GlobalStyles() {
       /* شريط التنقل السفلي — حصري للتطبيق. env(safe-area-inset-bottom)
          بيحسب مساحة أزرار التنقل الأصلية بأندرويد (gesture bar) حتى
          الشريط ما يضل ملزوق تحتها مباشرة. */
-      /* ---------- ANIMATED SPLASH (التطبيق بس) ---------- */
-      .splash-root {
-        position: fixed; inset: 0; z-index: 999;
-        display: flex; flex-direction: column;
-        align-items: center; justify-content: center;
-        background: var(--bg);
-        overflow: hidden;
-        animation: splashOut 0.45s cubic-bezier(0.4,0,0.2,1) ${SPLASH_TOTAL_MS - 450}ms both;
-      }
-      /* توهج كورال بيتنفّس من ورا الشعار */
-      .splash-glow {
-        position: absolute;
-        width: 340px; height: 340px; border-radius: 50%;
-        background: radial-gradient(circle, var(--coral) 0%, transparent 70%);
-        filter: blur(50px); opacity: 0;
-        animation: splashGlow 1.5s ease-out both;
-      }
-      /* حلقة رفيعة بتتمدد وبتختفي — لمسة "إقلاع" */
-      .splash-ring {
-        position: absolute;
-        width: 120px; height: 120px; border-radius: 50%;
-        border: 2px solid var(--coral);
-        opacity: 0;
-        animation: splashRing 1.25s cubic-bezier(0.16,1,0.3,1) 0.28s both;
-      }
-      .splash-logo-wrap { position: relative; display: inline-block; overflow: hidden; }
-      .splash-logo {
-        display: block; width: 210px; height: auto;
-        filter: var(--logo-filter);
-        animation: splashLogo 0.95s cubic-bezier(0.34,1.56,0.64,1) 0.12s both;
-      }
-      /* لمعة بتمر عالشعار مرة وحدة */
-      .splash-sheen {
-        position: absolute; top: 0; bottom: 0; width: 45%;
-        background: linear-gradient(100deg, transparent, rgba(255,255,255,0.75), transparent);
-        transform: skewX(-18deg);
-        animation: splashSheen 0.85s ease-in-out 0.75s both;
-      }
-      .splash-tagline {
-        margin-top: 14px;
-        font-family: 'Space Grotesk', sans-serif;
-        font-size: 10px; font-weight: 600;
-        letter-spacing: 0.42em; text-indent: 0.42em;
-        color: var(--fg-muted);
-        animation: splashTagline 0.7s ease-out 0.68s both;
-      }
-      @keyframes splashLogo {
-        0%   { opacity: 0; transform: scale(0.72) translateY(14px); }
-        100% { opacity: 1; transform: scale(1) translateY(0); }
-      }
-      @keyframes splashGlow {
-        0%   { opacity: 0; transform: scale(0.4); }
-        45%  { opacity: 0.30; transform: scale(1.05); }
-        100% { opacity: 0.16; transform: scale(1); }
-      }
-      @keyframes splashRing {
-        0%   { opacity: 0; transform: scale(0.5); }
-        35%  { opacity: 0.5; }
-        100% { opacity: 0; transform: scale(3.6); }
-      }
-      @keyframes splashSheen {
-        0%   { left: -60%; opacity: 0; }
-        35%  { opacity: 1; }
-        100% { left: 130%; opacity: 0; }
-      }
-      @keyframes splashTagline {
-        0%   { opacity: 0; transform: translateY(8px); letter-spacing: 0.2em; }
-        100% { opacity: 1; transform: translateY(0); letter-spacing: 0.42em; }
-      }
-      /* الخروج: تلاشي مع تكبير خفيف — إحساس إنو التطبيق فتح من ورا الشعار */
-      @keyframes splashOut {
-        0%   { opacity: 1; transform: scale(1); }
-        100% { opacity: 0; transform: scale(1.06); visibility: hidden; }
-      }
-      @media (prefers-reduced-motion: reduce) {
-        .splash-root, .splash-glow, .splash-ring, .splash-logo, .splash-sheen, .splash-tagline {
-          animation-duration: 0.01ms !important;
-          animation-delay: 0ms !important;
-        }
-        .splash-root { animation: none !important; }
-      }
-
       .native-tab-bar {
         height: 60px;
       }
@@ -2479,6 +2388,7 @@ function StoryTile({ ring, onOpen }) {
   const accent = RING_ACCENT[ring.kind] || RING_ACCENT.editorial;
   const cover = ring.slides[0];
   const [ok, setOk] = useState(true);
+  const [loaded, setLoaded] = useState(false);
 
   return (
     <button onClick={onOpen} className="text-left tap-scale flex-shrink-0" style={{ width: 96 }}>
@@ -2486,14 +2396,28 @@ function StoryTile({ ring, onOpen }) {
         className="relative rounded-2xl overflow-hidden"
         style={{ aspectRatio: "4/5", border: `2px solid ${accent.border}`, padding: 3 }}
       >
-        <div className="relative w-full h-full rounded-xl overflow-hidden" style={{ background: "#1A1A1E" }}>
+        <div className="relative w-full h-full rounded-xl overflow-hidden" style={{ background: "var(--field-bg)" }}>
+          {/* These sit near the top of the page, so a dark placeholder was
+              the first thing a visitor saw. Shimmer while loading instead. */}
+          {!loaded && <span className="skeleton" aria-hidden="true" />}
           {cover.kind === "compare" ? (
             <div className="absolute inset-0 flex">
               <div className="w-1/2 h-full overflow-hidden">{ok && <img src={productImageSrc(cover.image)} alt="" className="w-full h-full" style={{ objectFit: "cover" }} onError={() => setOk(false)} />}</div>
               <div className="w-1/2 h-full overflow-hidden">{ok && <img src={productImageSrc(cover.imageB)} alt="" className="w-full h-full" style={{ objectFit: "cover" }} onError={() => setOk(false)} />}</div>
             </div>
           ) : ok ? (
-            <img src={productImageSrc(cover.image)} alt="" className="absolute inset-0 w-full h-full" style={{ objectFit: "cover" }} loading="lazy" onError={() => setOk(false)} />
+            <img
+              src={productImageSrc(cover.image)}
+              alt=""
+              className={`absolute inset-0 w-full h-full ph-img${loaded ? " is-loaded" : ""}`}
+              style={{ objectFit: "cover" }}
+              /* Above the fold — waiting for lazy-loading here is what made
+                 the rail look empty on first paint. */
+              fetchPriority="high"
+              decoding="async"
+              onLoad={() => setLoaded(true)}
+              onError={() => setOk(false)}
+            />
           ) : (
             <div className="absolute inset-0 flex items-center justify-center"><Sparkles className="w-6 h-6" style={{ color: "rgba(255,255,255,0.4)" }} /></div>
           )}
@@ -2852,6 +2776,43 @@ function StoryQuickAdd({ product, onClose, addToCart, openProduct }) {
   );
 }
 
+/* Scroll-linked hero motion.
+
+   The homepage read as separate blocks stacked on top of each other
+   rather than one designed page. Tying the hero to the scroll position
+   gives the whole thing a spine: the gradient drifts and the headline
+   settles back as you move down, so scrolling feels like moving through
+   something continuous.
+
+   Cheap by construction — it only ever writes `transform` and `opacity`,
+   both of which the GPU handles without a layout pass, and it reads the
+   scroll position once per animation frame rather than on every one of
+   the dozens of scroll events a fast flick fires. */
+function useHeroParallax() {
+  const [y, setY] = useState(0);
+  const { reducedMotion } = useApp();
+
+  useEffect(() => {
+    if (reducedMotion) return;
+    let raf = 0;
+    let ticking = false;
+    const onScroll = () => {
+      if (ticking) return;
+      ticking = true;
+      raf = requestAnimationFrame(() => {
+        // Only the first screenful matters; past that the hero is gone.
+        setY(Math.min(window.scrollY || 0, 700));
+        ticking = false;
+      });
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => { window.removeEventListener("scroll", onScroll); cancelAnimationFrame(raf); };
+  }, [reducedMotion]);
+
+  return y;
+}
+
 function HomeView({ products, loading, goCatalog, goSale, openProduct, likes, toggleLike, storyRings, openStory, appExclusiveCount }) {
   useEffect(() => {
     document.title = `${STORE_NAME} — Menswear from Saida, Lebanon`;
@@ -2862,6 +2823,7 @@ function HomeView({ products, loading, goCatalog, goSale, openProduct, likes, to
   const saleCount = onSale.length;
   const maxDiscount = saleCount ? Math.max(...onSale.map((p) => p.discount)) : 0;
   const [spot, setSpot] = useState({ x: 50, y: 50 });
+  const scrollY = useHeroParallax();
 
   const onHeroMove = (e) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -2871,9 +2833,22 @@ function HomeView({ products, loading, goCatalog, goSale, openProduct, likes, to
   return (
     <div>
       <section onMouseMove={onHeroMove} className="relative px-4 sm:px-6 pt-10 sm:pt-16 pb-14 sm:pb-20 overflow-hidden">
-        <MeshBackground variant="hero" />
+        {/* The gradient drifts slower than the page — the depth cue that
+            makes the hero feel like a layer rather than a flat block. */}
+        <div style={{ transform: `translate3d(0, ${scrollY * 0.28}px, 0)`, willChange: "transform" }}>
+          <MeshBackground variant="hero" />
+        </div>
         <div className="pointer-events-none absolute inset-0 transition-opacity duration-300" style={{ background: `radial-gradient(600px circle at ${spot.x}% ${spot.y}%, rgba(255,255,255,0.06), transparent 60%)` }} />
-        <div className="max-w-6xl mx-auto relative">
+        {/* Content eases back and fades as it leaves, so the handover to the
+            next section is a movement rather than a hard cut. */}
+        <div
+          className="max-w-6xl mx-auto relative"
+          style={{
+            transform: `translate3d(0, ${scrollY * -0.08}px, 0)`,
+            opacity: Math.max(0, 1 - scrollY / 620),
+            willChange: "transform, opacity",
+          }}
+        >
           <div className="mb-6 hero-fade-1">
             <GlassChip tone="coral">
               <MapPin className="w-3 h-3" /> Saida, Lebanon
@@ -2913,7 +2888,7 @@ function HomeView({ products, loading, goCatalog, goSale, openProduct, likes, to
 
       {storyRings.length > 0 && <StoryRail rings={storyRings} onOpen={openStory} />}
 
-      <section className="max-w-6xl mx-auto px-4 sm:px-6 py-10">
+      <section className="max-w-6xl mx-auto px-4 sm:px-6 py-10 section-lazy">
         <div className="grid grid-cols-2 lg:grid-cols-4 lg:grid-rows-2 gap-4">
           <Reveal className="col-span-2">
             <div className="glass glass-sheen rounded-3xl p-6 h-full flex flex-col justify-between relative overflow-hidden" style={{ minHeight: 150 }}>
@@ -2952,7 +2927,7 @@ function HomeView({ products, loading, goCatalog, goSale, openProduct, likes, to
         </div>
       </section>
 
-      <section className="max-w-6xl mx-auto px-4 sm:px-6 pb-14">
+      <section className="max-w-6xl mx-auto px-4 sm:px-6 pb-14 section-lazy">
         <div className="flex items-center justify-between mb-6">
           <h2 className="font-display font-bold text-2xl">New in</h2>
           <button onClick={() => goCatalog("all")} className="font-body text-sm text-coral hover:underline">See all</button>
@@ -2974,7 +2949,7 @@ function HomeView({ products, loading, goCatalog, goSale, openProduct, likes, to
       </section>
 
       {/* Mobile app teaser — bento-style, moved here from the footer */}
-      <section className="max-w-6xl mx-auto px-4 sm:px-6 pb-20">
+      <section className="max-w-6xl mx-auto px-4 sm:px-6 pb-20 section-lazy">
         <Reveal>
           <div className="glass glass-sheen rounded-3xl p-8 sm:p-10 relative overflow-hidden text-center sm:text-left">
             <MeshBackground variant="card" />
@@ -3040,7 +3015,7 @@ function SpotlightCard({ product, onOpen }) {
   );
 }
 
-function NativeHomeView({ products, loading, error, onRetry, goCatalog, goSale, goExclusives, openProduct, likes, toggleLike, storyRings, openStory, goFavorites, onCart, cartCount }) {
+function NativeHomeView({ products, loading, goCatalog, goSale, goExclusives, openProduct, likes, toggleLike, storyRings, openStory, goFavorites, onCart, cartCount }) {
   useEffect(() => {
     document.title = `${STORE_NAME} — Menswear from Saida, Lebanon`;
   }, []);
@@ -3246,11 +3221,6 @@ function NativeHomeView({ products, loading, error, onRetry, goCatalog, goSale, 
               <div key={i} className="rounded-2xl glass flex-shrink-0" style={{ width: 150, aspectRatio: "4/5", opacity: 0.5 }} />
             ))}
           </div>
-        ) : error && products.length === 0 ? (
-          <div className="px-4 sm:px-6">
-            <p className="font-body text-sm text-muted mb-2">Couldn't load products — check your connection.</p>
-            <button onClick={onRetry} className="font-body text-sm text-coral">Try again</button>
-          </div>
         ) : featured.length === 0 ? (
           <p className="font-body text-sm text-muted px-4 sm:px-6">Products are on their way — check back soon.</p>
         ) : (
@@ -3438,7 +3408,7 @@ function FavoritesView({ products, loading, likes, openProduct, toggleLike, goCa
    ============================================================ */
 const PAGE_SIZE = 12;
 
-function CatalogView({ activeCategory, activeSub, loading, error, onRetry, goCatalog, products, openProduct, likes, toggleLike }) {
+function CatalogView({ activeCategory, activeSub, loading, goCatalog, products, openProduct, likes, toggleLike }) {
   const label = activeCategory === "all" ? "Shop" : CATEGORIES.find((c) => c.id === activeCategory)?.label || "Shop";
   const [shown, setShown] = useState(PAGE_SIZE);
   const subs = subsFor(activeCategory);
@@ -3519,11 +3489,6 @@ function CatalogView({ activeCategory, activeSub, loading, error, onRetry, goCat
           {Array.from({ length: 8 }).map((_, i) => (
             <div key={i} className="rounded-2xl glass" style={{ aspectRatio: "4/5", opacity: 0.5 }} />
           ))}
-        </div>
-      ) : error && products.length === 0 ? (
-        <div className="py-16 text-center">
-          <p className="font-body text-muted text-sm mb-3">Couldn't load products — check your connection.</p>
-          <button onClick={onRetry} className="glass rounded-full font-body text-sm px-5 py-2 tap-scale">Try again</button>
         </div>
       ) : products.length === 0 ? (
         <p className="font-body text-muted py-16 text-center">

@@ -174,7 +174,22 @@ const ProductsContext = createContext([]);
 const useProducts = () => useContext(ProductsContext);
 
 function AppProvider({ children }) {
-  const [theme, setTheme] = useState("light");
+  /* The theme was reset to light on every refresh — a visitor who chose
+     dark had to choose it again on every page load. Read it back from the
+     device, and fall back to whatever the phone itself prefers, so the
+     first visit already matches their system. */
+  const [theme, setTheme] = useState(() => {
+    try {
+      const saved = localStorage.getItem("kanaan-theme");
+      if (saved === "dark" || saved === "light") return saved;
+      if (window.matchMedia?.("(prefers-color-scheme: dark)").matches) return "dark";
+    } catch { /* private mode or storage disabled */ }
+    return "light";
+  });
+
+  useEffect(() => {
+    try { localStorage.setItem("kanaan-theme", theme); } catch { /* ignore */ }
+  }, [theme]);
   const [reducedMotion, setReducedMotion] = useState(false);
 
   useEffect(() => {
@@ -400,8 +415,12 @@ function Magnetic({ children, strength = 16, className = "" }) {
    ============================================================ */
 function MeshBackground({ variant = "hero" }) {
   const { reducedMotion, theme } = useApp();
-  const animate = theme === "dark" && !reducedMotion;
-  const baseOpacity = theme === "dark" ? 0.35 : 0.16;
+  /* The drifting glow used to be switched off in light mode, which left
+     the hero completely static — the movement that gives the page its
+     life only ever existed at night. It runs in both now, just gentler
+     against a light background so it stays a suggestion, not a effect. */
+  const animate = !reducedMotion;
+  const baseOpacity = theme === "dark" ? 0.35 : 0.22;
 
   const blobs =
     variant === "hero"
@@ -688,11 +707,67 @@ function SoldOutBadge() {
   );
 }
 
-function SwatchPanel({ product, big, liked, onToggleLike, forceSoldOut }) {
+function SwatchPanel({ product, big, liked, onToggleLike, forceSoldOut, swipeable }) {
   const c1 = COLORS[product.colors[0]]?.hex || "#141414";
   const c2 = COLORS[product.colors[1]]?.hex || c1;
   const [imgOk, setImgOk] = useState(true);
-  const fullSrc = getImages(product)[0] || null;
+
+  /* Browse a product's photos without leaving the grid.
+     Only on cards (never the product page, which has its own gallery),
+     and only when there's genuinely more than one photo to see. */
+  const allImages = useMemo(() => getImages(product), [product]);
+  const canSwipe = !!swipeable && !big && allImages.length > 1;
+  const [idx, setIdx] = useState(0);
+  const [hinted, setHinted] = useState(false);
+  const hintRef = useRef(null);
+  const touch = useRef(null);
+
+  // The nudge plays once, on the first card to reach the screen — enough
+  // to teach the gesture, not enough to become wallpaper.
+  useEffect(() => {
+    if (!canSwipe || hinted) return;
+    const el = hintRef.current;
+    if (!el || typeof IntersectionObserver !== "function") return;
+    const obs = new IntersectionObserver(([e]) => {
+      if (e.isIntersecting) { setHinted(true); obs.disconnect(); }
+    }, { threshold: 0.6 });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [canSwipe, hinted]);
+
+  // Warm the neighbouring photo so a swipe lands on something instant.
+  useEffect(() => {
+    if (!canSwipe) return;
+    const next = allImages[idx + 1];
+    if (next) { const im = new Image(); im.src = thumbUrlFor(next) || next; }
+  }, [canSwipe, idx, allImages]);
+
+  const onTouchStart = (e) => {
+    if (!canSwipe) return;
+    touch.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, moved: false };
+  };
+  const onTouchMove = (e) => {
+    if (!canSwipe || !touch.current) return;
+    const dx = e.touches[0].clientX - touch.current.x;
+    const dy = e.touches[0].clientY - touch.current.y;
+    // Horizontal intent only — a vertical drag is the page scrolling.
+    if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy)) touch.current.moved = true;
+  };
+  const onTouchEnd = (e) => {
+    if (!canSwipe || !touch.current) return;
+    const dx = e.changedTouches[0].clientX - touch.current.x;
+    const dy = e.changedTouches[0].clientY - touch.current.y;
+    if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) {
+      // Swallow the tap so flicking through photos never opens the product.
+      e.preventDefault();
+      e.stopPropagation();
+      setIdx((i) => Math.min(allImages.length - 1, Math.max(0, i + (dx < 0 ? 1 : -1))));
+      setHinted(true);
+    }
+    touch.current = null;
+  };
+
+  const fullSrc = (canSwipe ? allImages[idx] : allImages[0]) || null;
   // `big` = product page hero, where the full-resolution image belongs.
   const preferred = big ? fullSrc : (thumbUrlFor(fullSrc) || fullSrc);
   const imgSrc = imgOk ? preferred : null;
@@ -701,12 +776,19 @@ function SwatchPanel({ product, big, liked, onToggleLike, forceSoldOut }) {
   const shownSrc = thumbFailed ? fullSrc : imgSrc;
   return (
     <div
+      ref={hintRef}
       className="relative w-full flex items-center justify-center overflow-hidden"
       style={{
         aspectRatio: "4/5",
         borderRadius: big ? "28px" : "20px",
         background: `radial-gradient(120% 120% at 15% 15%, ${c1} 0%, transparent 55%), radial-gradient(120% 120% at 85% 85%, ${c2} 0%, transparent 55%), #1A1A1E`,
+        // Lets the browser keep vertical scrolling on its fast path while
+        // we handle the horizontal gesture ourselves.
+        touchAction: canSwipe ? "pan-y" : undefined,
       }}
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
     >
       {shownSrc ? (
         <>
@@ -717,7 +799,8 @@ function SwatchPanel({ product, big, liked, onToggleLike, forceSoldOut }) {
           alt={product.name}
           loading="lazy"
           decoding="async"
-          className={`absolute inset-0 w-full h-full ph-img${imgLoaded ? " is-loaded photo-settle" : ""}`}
+          key={shownSrc}
+          className={`absolute inset-0 w-full h-full ph-img${imgLoaded ? " is-loaded photo-settle" : ""}${canSwipe && hinted && idx === 0 ? " swipe-hint" : ""}`}
           style={{ objectFit: "cover" }}
           onLoad={() => setImgLoaded(true)}
           onError={() => {
@@ -739,6 +822,15 @@ function SwatchPanel({ product, big, liked, onToggleLike, forceSoldOut }) {
           <GlassChip tone={product.badge === "sale" ? "coral" : "teal"}>
             {product.badge === "sale" ? `−${product.discount}%` : "New"}
           </GlassChip>
+        </div>
+      )}
+      {/* Dots only appear where swiping is possible, so they double as the
+          signal that there's more than one photo here. */}
+      {canSwipe && (
+        <div className="card-dots" aria-hidden="true">
+          {allImages.slice(0, 6).map((_, i) => (
+            <span key={i} className={`card-dot${i === idx ? " is-active" : ""}`} />
+          ))}
         </div>
       )}
       {(forceSoldOut || product.soldOut) && <SoldOutBadge />}
@@ -878,7 +970,7 @@ function ProductCard({ product, onOpen, liked, onToggleLike }) {
         className="transition-transform duration-500 group-hover:-translate-y-2"
         style={{ transitionTimingFunction: "cubic-bezier(0.16,1,0.3,1)", opacity: isOut ? 0.7 : 1 }}
       >
-        <SwatchPanel product={product} liked={liked} onToggleLike={onToggleLike} forceSoldOut={isOut} />
+        <SwatchPanel product={product} liked={liked} onToggleLike={onToggleLike} forceSoldOut={isOut} swipeable />
       </div>
       <div className="mt-3.5 space-y-1">
         <p className="font-body font-medium text-fg text-sm">{product.name}</p>
@@ -1411,7 +1503,7 @@ function SaleProductCard({ product, onOpen, liked, onToggleLike }) {
         className="transition-transform duration-500 group-hover:-translate-y-2"
         style={{ transitionTimingFunction: "cubic-bezier(0.16,1,0.3,1)", opacity: isOut ? 0.7 : 1 }}
       >
-        <SwatchPanel product={product} liked={liked} onToggleLike={onToggleLike} forceSoldOut={isOut} />
+        <SwatchPanel product={product} liked={liked} onToggleLike={onToggleLike} forceSoldOut={isOut} swipeable />
       </div>
       <div className="mt-3.5 space-y-1">
         <p className="font-body font-medium text-fg text-sm truncate">{product.name}</p>
@@ -2243,6 +2335,33 @@ function GlobalStyles() {
          showing up as stutter on a phone. */
       .header-layer { transform: translateZ(0); will-change: transform; }
 
+      /* Swipeable product cards.
+         ------------------------------------------------------------
+         A shopper had to open a product to discover it had more than one
+         photo. Now the card itself swipes, and a short nudge on the first
+         one that scrolls into view teaches that without a word of
+         instruction — the image drifts a few pixels and settles, the way
+         a card does when it's asking to be moved. */
+      @keyframes swipeHint {
+        0%, 62%, 100% { transform: translate3d(0, 0, 0); }
+        72%           { transform: translate3d(-13px, 0, 0); }
+        84%           { transform: translate3d(4px, 0, 0); }
+      }
+      .swipe-hint { animation: swipeHint 2.6s cubic-bezier(0.4, 0, 0.2, 1) 0.9s 2; }
+
+      .card-dots {
+        position: absolute; left: 0; right: 0; bottom: 8px;
+        display: flex; justify-content: center; gap: 4px;
+        pointer-events: none;
+      }
+      .card-dot {
+        width: 5px; height: 5px; border-radius: 9999px;
+        background: rgba(255,255,255,0.5);
+        box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+        transition: width 0.25s ease, background 0.25s ease;
+      }
+      .card-dot.is-active { width: 14px; background: #fff; }
+
       /* Story ring.
          A flat 2px border said nothing beyond "there's a box here". A
          slowly turning gradient reads as live content waiting to be
@@ -2338,7 +2457,7 @@ function GlobalStyles() {
       .sale-card:hover { transform: translateY(-3px); border-color: rgba(255,69,34,0.9); }
 
       @media (prefers-reduced-motion: reduce) {
-        .mesh-blob, .hero-fade-1, .hero-fade-2, .hero-fade-3, .hero-fade-4, .dock-in, .fab-pulse::before, .search-fade, .search-rise, .sale-glow, .promise-divider, .tag-dot-ping, .skeleton::after, .marquee-track, .photo-settle, .story-ring { animation: none !important; }
+        .mesh-blob, .hero-fade-1, .hero-fade-2, .hero-fade-3, .hero-fade-4, .dock-in, .fab-pulse::before, .search-fade, .search-rise, .sale-glow, .promise-divider, .tag-dot-ping, .skeleton::after, .marquee-track, .photo-settle, .story-ring, .swipe-hint { animation: none !important; }
         .kinetic-line > span { animation: none !important; transform: none !important; }
         .admin-spinner { animation-duration: 2s; }
         .promise-chip { animation: none !important; opacity: 1 !important; }
@@ -3024,7 +3143,56 @@ function HomeView({ products, loading, goCatalog, goSale, openProduct, likes, to
     document.title = `${STORE_NAME} — Menswear from Saida, Lebanon`;
   }, []);
 
-  const featured = products.slice(0, 8);
+  /* "New in" used to be simply the 12 most recent products, which meant
+     adding ten pairs of trousers in one sitting filled the entire homepage
+     with trousers. Taking the two newest from each category instead keeps
+     the shop looking like a shop — several kinds of thing, all of them
+     recent — no matter how the stock happens to arrive.
+
+     Categories are visited in the site's own order, newest first within
+     each, and anything left over backfills to 12 so the grid never ends
+     ragged. */
+  const featured = useMemo(() => {
+    const PER_CATEGORY = 2;
+    const TOTAL = 12;
+    const picked = [];
+    const used = new Set();
+
+    for (const c of CATEGORIES) {
+      const fromCategory = products.filter((p) => p.category === c.id).slice(0, PER_CATEGORY);
+      for (const p of fromCategory) {
+        picked.push(p);
+        used.add(p.id);
+      }
+    }
+
+    // Newest first across the whole selection, so the freshest arrivals
+    // still lead regardless of which category they came from.
+    picked.sort((a, b) => products.indexOf(a) - products.indexOf(b));
+
+    /* Backfill, if the shop doesn't yet stock enough categories to reach
+       twelve. Takes a third from every category, then a fourth, and so on
+       — rather than emptying one category into the gap, which would put
+       us back where we started. */
+    let round = PER_CATEGORY;
+    while (picked.length < TOTAL && round < 12) {
+      let addedThisRound = false;
+      for (const c of CATEGORIES) {
+        if (picked.length >= TOTAL) break;
+        const next = products.filter((p) => p.category === c.id)[round];
+        if (next && !used.has(next.id)) {
+          picked.push(next);
+          used.add(next.id);
+          addedThisRound = true;
+        }
+      }
+      if (!addedThisRound) break; // nothing left anywhere
+      round++;
+    }
+
+    picked.sort((a, b) => products.indexOf(a) - products.indexOf(b));
+    return picked.slice(0, TOTAL);
+  }, [products]);
   const onSale = useMemo(() => products.filter(isOnSale), [products]);
   const saleCount = onSale.length;
   const maxDiscount = saleCount ? Math.max(...onSale.map((p) => p.discount)) : 0;
@@ -3051,9 +3219,13 @@ function HomeView({ products, loading, goCatalog, goSale, openProduct, likes, to
         <div
           className="max-w-6xl mx-auto relative"
           style={{
+            /* The hero used to fade as you scrolled past it while every
+               other section stayed sharp — which read as the top of the
+               page being washed out rather than as a deliberate handoff.
+               The parallax shift stays (that's the depth cue); the fade
+               is gone, so the whole page now holds the same contrast. */
             transform: `translate3d(0, ${scrollY * -0.08}px, 0)`,
-            opacity: Math.max(0, 1 - scrollY / 620),
-            willChange: "transform, opacity",
+            willChange: "transform",
           }}
         >
           <div className="mb-6 hero-fade-1">
@@ -3102,16 +3274,27 @@ function HomeView({ products, loading, goCatalog, goSale, openProduct, likes, to
       <section className="max-w-6xl mx-auto px-4 sm:px-6 py-10 section-lazy">
         <div className="grid grid-cols-2 lg:grid-cols-4 lg:grid-rows-2 gap-4">
           <Reveal className="col-span-2">
-            <div className="glass glass-sheen rounded-3xl p-6 h-full flex flex-col justify-between relative overflow-hidden" style={{ minHeight: 150 }}>
+            {/* Only the small "Explore the drop" link used to be tappable —
+                the Sale card right below it is a button edge to edge, so
+                tapping this one anywhere but that link did nothing. Now the
+                whole card is the target, and it lifts on press the same way
+                its neighbour does. */}
+            <button
+              onClick={() => goCatalog("all")}
+              className="glass glass-sheen sale-card group rounded-3xl p-6 h-full w-full flex flex-col justify-between relative overflow-hidden text-left tap-scale"
+              style={{ minHeight: 150 }}
+              aria-label="New season just landed — explore the drop"
+            >
               <MeshBackground variant="card" />
-              <div className="relative">
+              <span className="relative block">
                 <Sparkles className="w-5 h-5 text-coral mb-3" />
-                <p className="font-display font-bold text-xl leading-snug">New season<br />just landed</p>
-              </div>
-              <button onClick={() => goCatalog("all")} className="relative font-body text-sm text-coral hover:underline self-start mt-4">
-                Explore the drop →
-              </button>
-            </div>
+                <span className="block font-display font-bold text-xl leading-snug">New season<br />just landed</span>
+              </span>
+              <span className="relative font-body text-sm text-coral mt-4 inline-flex items-center gap-1.5">
+                Explore the drop
+                <ArrowRight className="w-4 h-4 transition-transform duration-300 group-hover:translate-x-1" />
+              </span>
+            </button>
           </Reveal>
 
           {/* Sits directly under "New season", same width. Only appears when
@@ -4708,50 +4891,133 @@ function WhatsAppFab({ raised }) {
 /* ============================================================
    FOOTER
    ============================================================ */
+/* The footer listed eleven categories in one tall column, which left most
+   of its width empty and pushed contact details far down the page. It now
+   works as three real blocks: who the shop is, everything it sells in two
+   readable columns, and the ways to actually reach it — including where
+   it physically is, which for a shop with a storefront in Saida is worth
+   as much as the phone number. */
+const MAPS_URL = "https://maps.app.goo.gl/APgMmZV7bCxhFXSz7";
+const MAPS_EMBED =
+  "https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d6649.532326482181!2d35.37186094409013!3d33.559451343385746!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x151ef1c9383886bb%3A0xefd93ea18e16a716!2sKanaan%20shop!5e0!3m2!1sen!2slb!4v1785150833911!5m2!1sen!2slb";
+
 function Footer({ goCatalog, goSale }) {
+  const half = Math.ceil(CATEGORIES.length / 2);
+  const columns = [CATEGORIES.slice(0, half), CATEGORIES.slice(half)];
+
   return (
     <footer className="mt-10 px-4 sm:px-6 pb-6">
-      <div className="glass max-w-6xl mx-auto rounded-3xl px-4 sm:px-6 py-12">
-        <div className="grid sm:grid-cols-3 gap-10">
-          <div>
-            <div className="mb-4">
-              <LogoMark variant="full" className="h-14 sm:h-16 w-auto" />
-            </div>
-            <p className="font-body text-sm text-muted leading-6">
+      <div className="glass max-w-6xl mx-auto rounded-3xl px-5 sm:px-8 py-10 sm:py-12">
+        <div className="grid gap-10 lg:grid-cols-12">
+
+          {/* Identity */}
+          <div className="lg:col-span-4">
+            <LogoMark variant="full" className="h-14 sm:h-16 w-auto mb-4" />
+            <p className="font-body text-sm text-muted leading-6" style={{ maxWidth: 300 }}>
               Menswear in heavy fabrics with a youthful edge, from Saida to all of Lebanon.
             </p>
+            <button
+              onClick={goSale}
+              className="mt-5 inline-flex items-center gap-2 rounded-full px-4 py-2 font-body text-sm font-medium tap-scale"
+              style={{ background: "rgba(255,69,34,0.12)", border: "1px solid rgba(255,69,34,0.3)", color: "var(--coral)" }}
+            >
+              <Tag className="w-3.5 h-3.5" /> Shop the sale
+            </button>
           </div>
 
-          <div>
-            <p className="font-body text-sm font-medium mb-4">Categories</p>
-            <div className="flex flex-col gap-2">
-              <button onClick={goSale} className="font-body text-sm text-left transition-colors flex items-center gap-1.5 hover:opacity-80" style={{ color: "var(--coral)" }}>
-                <Tag className="w-3.5 h-3.5" /> Sale
-              </button>
-              {CATEGORIES.map((c) => (
-                <button key={c.id} onClick={() => goCatalog(c.id)} className="font-body text-sm text-muted hover:text-coral text-left transition-colors">
-                  {c.label}
-                </button>
+          {/* Everything the shop sells, two columns so it reads at a glance */}
+          <div className="lg:col-span-4">
+            <p className="font-body text-sm font-medium mb-4">Shop</p>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2.5">
+              {columns.map((col, ci) => (
+                <div key={ci} className="flex flex-col gap-2.5">
+                  {col.map((c) => (
+                    <button
+                      key={c.id}
+                      onClick={() => goCatalog(c.id)}
+                      className="font-body text-sm text-muted hover:text-coral text-left transition-colors"
+                    >
+                      {c.label}
+                    </button>
+                  ))}
+                </div>
               ))}
             </div>
           </div>
 
-          <div>
-            <p className="font-body text-sm font-medium mb-4">Contact</p>
-            <div className="flex items-center gap-2 font-body text-sm text-muted mb-2">
-              <MapPin className="w-4 h-4" /> Saida, Lebanon
+          {/* Reaching the shop */}
+          <div className="lg:col-span-4">
+            <p className="font-body text-sm font-medium mb-4">Get in touch</p>
+
+            <div className="flex flex-col gap-2.5 mb-5">
+              <a
+                href={`https://wa.me/${WHATSAPP_NUMBER}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="glass rounded-2xl px-4 py-3 flex items-center gap-3 tap-scale group"
+              >
+                <span className="rounded-full p-2 flex-shrink-0" style={{ background: "rgba(18,179,160,0.14)" }}>
+                  <MessageCircle className="w-4 h-4" style={{ color: "var(--teal)" }} />
+                </span>
+                <span className="min-w-0">
+                  <span className="block font-body text-sm font-medium">WhatsApp</span>
+                  <span className="block font-num text-xs text-muted" dir="ltr">+961 81 445 681</span>
+                </span>
+                <ArrowRight className="w-4 h-4 text-muted ml-auto flex-shrink-0 transition-transform duration-300 group-hover:translate-x-0.5" />
+              </a>
+
+              <a
+                href={INSTAGRAM_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="glass rounded-2xl px-4 py-3 flex items-center gap-3 tap-scale group"
+              >
+                <span className="rounded-full p-2 flex-shrink-0" style={{ background: "rgba(255,69,34,0.12)" }}>
+                  <AtSign className="w-4 h-4" style={{ color: "var(--coral)" }} />
+                </span>
+                <span className="min-w-0">
+                  <span className="block font-body text-sm font-medium">Instagram</span>
+                  <span className="block font-body text-xs text-muted truncate">{INSTAGRAM_HANDLE}</span>
+                </span>
+                <ArrowRight className="w-4 h-4 text-muted ml-auto flex-shrink-0 transition-transform duration-300 group-hover:translate-x-0.5" />
+              </a>
             </div>
-            <div className="flex items-center gap-2 font-body text-sm text-muted mb-4">
-              <MessageCircle className="w-4 h-4" /> Quick orders on WhatsApp
-            </div>
-            <a href={INSTAGRAM_URL} target="_blank" rel="noopener noreferrer" className="glass inline-flex items-center gap-2 rounded-full px-3 py-1.5 font-body text-sm text-muted hover:text-coral transition-colors">
-              <AtSign className="w-4 h-4" /> {INSTAGRAM_HANDLE}
+
+            {/* The real storefront, on a real map. Loading is deferred so it
+                never competes with the shop itself for bandwidth. */}
+            <a
+              href={MAPS_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block rounded-2xl overflow-hidden tap-scale"
+              style={{ border: "1px solid var(--glass-border)" }}
+            >
+              <div className="relative" style={{ height: 128 }}>
+                <iframe
+                  src={MAPS_EMBED}
+                  title="Kanaan Shop on Google Maps"
+                  loading="lazy"
+                  referrerPolicy="strict-origin-when-cross-origin"
+                  style={{ border: 0, width: "100%", height: "100%", filter: "grayscale(0.25)" }}
+                />
+                {/* Keeps the whole tile behaving as one link instead of the
+                    map swallowing the tap and panning. */}
+                <span className="absolute inset-0" aria-hidden="true" />
+              </div>
+              <div className="px-4 py-3 flex items-center gap-3" style={{ background: "var(--glass-bg)" }}>
+                <MapPin className="w-4 h-4 flex-shrink-0" style={{ color: "var(--coral)" }} />
+                <span className="min-w-0">
+                  <span className="block font-body text-sm font-medium">Kanaan Shop</span>
+                  <span className="block font-body text-xs text-muted">H93H+RPQ, Sidon · Get directions</span>
+                </span>
+              </div>
             </a>
           </div>
         </div>
-        <div className="border-t mt-10 pt-5 text-center" style={{ borderColor: "var(--border)" }}>
+
+        <div className="border-t mt-10 pt-5 flex flex-col sm:flex-row items-center justify-between gap-2" style={{ borderColor: "var(--border)" }}>
           <p className="font-body text-xs text-muted">Designed with care for {STORE_NAME}, 2026.</p>
-          <a href="/privacy" className="font-body text-xs text-muted hover:text-coral transition-colors underline mt-1 inline-block">Privacy Policy</a>
+          <a href="/privacy" className="font-body text-xs text-muted hover:text-coral transition-colors underline">Privacy Policy</a>
         </div>
       </div>
     </footer>

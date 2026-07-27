@@ -2452,6 +2452,11 @@ function GlobalStyles() {
         backdrop-filter: blur(6px); border: 1px solid rgba(255,255,255,0.25);
       }
 
+      /* One source of truth for the header's height. The hero reaches up
+         behind it by exactly this much, so the two can never drift apart. */
+      :root { --header-h: 76px; }
+      @media (min-width: 640px) { :root { --header-h: 84px; } }
+
       /* Loading ring for the admin panel while its bundle downloads.
          Plain CSS rather than a lucide icon on purpose — the icon set
          itself lives in the main bundle, and this needs to render before
@@ -2631,37 +2636,52 @@ function GlobalStyles() {
 
          It's a conic gradient rotated by a CSS variable, so the whole
          thing animates on the GPU with no repainting. */
-      @property --ring-angle {
-        syntax: '<angle>';
-        initial-value: 0deg;
-        inherits: false;
-      }
-      @keyframes ringSpin { to { --ring-angle: 360deg; } }
-      .story-ring {
+      /* Story ring — rebuilt for phones.
+
+         The first version animated a custom property that fed a conic
+         gradient. That looks like a cheap animation (nothing but an angle
+         changes) but it isn't: the browser has to regenerate and repaint
+         the entire gradient on every frame, for every tile on screen.
+         On a laptop that's invisible; on a phone it was the stutter.
+
+         Now the gradient is drawn once and never touched. What moves is
+         the layer holding it, rotated with the rotate property — which
+         the compositor handles on its own, exactly like a transform.
+
+         The layer is square and oversized so that spinning it never
+         swings a corner into view; the parent clips it back to the tile.  */
+      @keyframes ringSpin { to { rotate: 360deg; } }
+
+      .story-ring { position: relative; overflow: hidden; isolation: isolate; }
+      .story-ring::before {
+        content: '';
+        position: absolute;
+        left: 50%; top: 50%;
+        width: 165%; aspect-ratio: 1;
+        translate: -50% -50%;
+        z-index: -1;
         background:
-          /* Gaps between segments, one per slide. */
-          /* Gaps punched through to the page background, one per slide. */
+          /* One gap per slide, punched through to the page background. */
           repeating-conic-gradient(
-            from var(--ring-angle),
             transparent 0deg,
             transparent calc(360deg / var(--seg, 1) - 14deg),
             var(--bg) calc(360deg / var(--seg, 1) - 14deg),
             var(--bg) calc(360deg / var(--seg, 1))
           ),
           conic-gradient(
-            from var(--ring-angle),
             var(--ring) 0deg,
             var(--ring) 90deg,
             color-mix(in srgb, var(--ring) 30%, transparent) 210deg,
             var(--ring) 360deg
           );
-        animation: ringSpin 6s linear infinite;
+        animation: ringSpin 7s linear infinite;
+        will-change: rotate;
       }
-      /* Browsers without @property can't animate the angle — they get a
-         still gradient, which still looks right. */
-      @supports not (background: conic-gradient(from 0deg, red, blue)) {
-        .story-ring { background: var(--ring); }
+      /* Older browsers without color-mix still get a solid ring. */
+      @supports not (background: conic-gradient(red, blue)) {
+        .story-ring::before { background: var(--ring); }
       }
+
       .story-tile { transition: transform 0.35s cubic-bezier(0.16,1,0.3,1); }
       .story-tile:active { transform: scale(0.96); }
 
@@ -3518,11 +3538,20 @@ function HomeView({ products, loading, goCatalog, goSale, openProduct, likes, to
   return (
     <div>
       <ScrollProgress />
-      {/* Extra top padding clears the floating header. Without it, the
-          "Saida, Lebanon" chip slid straight underneath it after one
-          notch of scroll — the header is sticky and sits above the page,
-          so anything starting this high simply disappeared behind it. */}
-      <section onMouseMove={onHeroMove} className="relative px-4 sm:px-6 pt-20 sm:pt-24 pb-14 sm:pb-20 overflow-hidden">
+      {/* The hero starts ABOVE the header, not below it.
+
+          Before, the page began where the header ended, so the top of the
+          screen was a plain grey strip with the header sitting in it and
+          the colour only starting underneath — the header read as pasted
+          on rather than part of the page. Pulling the section up by the
+          header's height puts the glow behind it, and the padding below
+          puts it back so nothing is covered. The chip still clears the
+          header, which is what the padding was added for originally. */}
+      <section
+        onMouseMove={onHeroMove}
+        className="relative px-4 sm:px-6 pb-14 sm:pb-20 overflow-hidden"
+        style={{ marginTop: "calc(-1 * var(--header-h))", paddingTop: "calc(var(--header-h) + 3.5rem)" }}
+      >
         {/* The gradient drifts slower than the page — the depth cue that
             makes the hero feel like a layer rather than a flat block.
 

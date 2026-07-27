@@ -420,7 +420,7 @@ function MeshBackground({ variant = "hero" }) {
      life only ever existed at night. It runs in both now, just gentler
      against a light background so it stays a suggestion, not a effect. */
   const animate = !reducedMotion;
-  const baseOpacity = theme === "dark" ? 0.38 : 0.3;
+  const baseOpacity = theme === "dark" ? 0.42 : 0.38;
 
   /* Sizes are viewport-relative, not fixed pixels.
      They used to be hard-coded at ~400px, which fills a 390px phone screen
@@ -455,7 +455,9 @@ function MeshBackground({ variant = "hero" }) {
             height: b.size,
             background: b.color,
             borderRadius: "50%",
-            filter: "blur(60px)",
+            // Less blur keeps the colours readable as colours rather than
+            // washing them into the background.
+            filter: "blur(48px)",
             opacity: baseOpacity,
             animationDuration: b.dur,
             animationDelay: b.delay,
@@ -1029,11 +1031,13 @@ function ProductGallery({ product, liked, onToggleLike, activeColor }) {
    ============================================================ */
 function ProductCard({ product, onOpen, liked, onToggleLike }) {
   const isOut = product.soldOut || !productHasStock(product);
+  const tiltRef = useCardTilt();
   return (
     <button onClick={() => onOpen(product)} className="text-left group focus:outline-none w-full">
       <div
-        className="transition-transform duration-500 group-hover:-translate-y-2"
-        style={{ transitionTimingFunction: "cubic-bezier(0.16,1,0.3,1)", opacity: isOut ? 0.7 : 1 }}
+        ref={tiltRef}
+        className="card-tilt"
+        style={{ opacity: isOut ? 0.7 : 1 }}
       >
         <SwatchPanel product={product} liked={liked} onToggleLike={onToggleLike} forceSoldOut={isOut} swipeable />
       </div>
@@ -1301,6 +1305,91 @@ function ColorPicker({ product, color, onPick }) {
   );
 }
 
+/* Cards lean toward the cursor.
+
+   Writes the transform straight onto the element rather than going
+   through React state — a state update per mouse-move would re-render
+   the card dozens of times a second. This touches one style property on
+   one node, which the compositor handles on its own.
+
+   Pointer devices only: a phone has no cursor to lean toward, and the
+   listeners would be dead weight. */
+function useCardTilt() {
+  const ref = useRef(null);
+  const { reducedMotion } = useApp();
+
+  useEffect(() => {
+    if (reducedMotion) return;
+    const el = ref.current;
+    if (!el) return;
+    if (!window.matchMedia?.("(hover: hover) and (pointer: fine)").matches) return;
+
+    let raf = 0;
+    const onMove = (e) => {
+      const r = el.getBoundingClientRect();
+      // -1 .. 1 from the centre of the card
+      const px = (e.clientX - r.left) / r.width - 0.5;
+      const py = (e.clientY - r.top) / r.height - 0.5;
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        el.style.transform = `perspective(900px) rotateY(${px * 5}deg) rotateX(${-py * 5}deg) translateY(-6px)`;
+      });
+    };
+    const onLeave = () => {
+      cancelAnimationFrame(raf);
+      el.style.transform = "";
+    };
+
+    el.addEventListener("pointermove", onMove);
+    el.addEventListener("pointerleave", onLeave);
+    return () => {
+      el.removeEventListener("pointermove", onMove);
+      el.removeEventListener("pointerleave", onLeave);
+      cancelAnimationFrame(raf);
+    };
+  }, [reducedMotion]);
+
+  return ref;
+}
+
+/* Counts up to a number the first time it reaches the screen.
+
+   Deliberately driven by requestAnimationFrame rather than a timer: it
+   updates once per painted frame, so it can never queue up work faster
+   than the screen can show it, and it stops the moment it arrives. The
+   easing is a cubic ease-out — quick off the mark, gentle at the end,
+   which is what makes a number feel like it lands rather than stops. */
+function useCountUp(target, { duration = 1100 } = {}) {
+  const ref = useRef(null);
+  const [value, setValue] = useState(0);
+  const { reducedMotion } = useApp();
+
+  useEffect(() => {
+    if (reducedMotion) { setValue(target); return; }
+    const el = ref.current;
+    if (!el || typeof IntersectionObserver !== "function") { setValue(target); return; }
+
+    let raf = 0;
+    const obs = new IntersectionObserver(([e]) => {
+      if (!e.isIntersecting) return;
+      obs.disconnect();
+      const start = performance.now();
+      const tick = (now) => {
+        const t = Math.min(1, (now - start) / duration);
+        const eased = 1 - Math.pow(1 - t, 3);
+        setValue(Math.round(target * eased));
+        if (t < 1) raf = requestAnimationFrame(tick);
+      };
+      raf = requestAnimationFrame(tick);
+    }, { threshold: 0.4 });
+
+    obs.observe(el);
+    return () => { obs.disconnect(); cancelAnimationFrame(raf); };
+  }, [target, duration, reducedMotion]);
+
+  return [ref, value];
+}
+
 /* A product counts as "on sale" only if it's really cheaper than its
    list price — a 0% sale badge shouldn't pull anyone in. */
 function isOnSale(p) {
@@ -1401,6 +1490,7 @@ function ShopMenu({ goCatalog }) {
    from the calm cards around it without inventing a new style.
    ============================================================ */
 function SaleCard({ onOpen, count, maxDiscount }) {
+  const [countRef, shownDiscount] = useCountUp(maxDiscount);
   return (
     <button
       onClick={onOpen}
@@ -1425,10 +1515,14 @@ function SaleCard({ onOpen, count, maxDiscount }) {
         </span>
 
         <span
+          ref={countRef}
           className="font-num font-bold flex-shrink-0 rounded-2xl text-center flex flex-col items-center justify-center"
           style={{ background: "var(--coral)", color: "#fff", width: 86, height: 62, boxShadow: "0 8px 20px rgba(255,69,34,0.35)" }}
         >
-          <span className="block text-2xl leading-none">−{maxDiscount}%</span>
+          {/* Counts up as it arrives — a static number is a fact, a number
+              climbing to it is an event. tabular-nums stops the digits
+              jittering as their widths change mid-count. */}
+          <span className="block text-2xl leading-none" style={{ fontVariantNumeric: "tabular-nums" }}>−{shownDiscount}%</span>
           <span className="block font-body" style={{ fontSize: "0.55rem", letterSpacing: "0.12em", marginTop: 3, opacity: 0.9 }}>UP TO</span>
         </span>
       </span>
@@ -2287,13 +2381,24 @@ function GlobalStyles() {
         from { opacity: 0; transform: translateY(10px) scale(0.96); }
         to { opacity: 1; transform: translateY(0) scale(1); }
       }
+      /* This used to animate box-shadow — a paint property, running
+         forever on two elements sitting in the hero. Same trap the
+         WhatsApp button was in. It's a glow layer fading in and out
+         behind the chip now, which is pure opacity and free. */
       @keyframes chipBreath {
-        0%, 100% { box-shadow: var(--glass-shadow), inset 0 1px 0 rgba(255,255,255,0.12), 0 0 0 0 rgba(18,179,160,0); }
-        50% { box-shadow: var(--glass-shadow), inset 0 1px 0 rgba(255,255,255,0.12), 0 0 18px 2px rgba(18,179,160,0.18); }
+        0%, 100% { opacity: 0; }
+        50%      { opacity: 1; }
       }
-      .promise-chip { opacity: 0; }
-      .promise-chip-1 { animation: chipIn 0.6s cubic-bezier(0.16,1,0.3,1) 0.45s both, chipBreath 5s ease-in-out 1.2s infinite; }
-      .promise-chip-2 { animation: chipIn 0.6s cubic-bezier(0.16,1,0.3,1) 0.62s both, chipBreath 5s ease-in-out 3.7s infinite; }
+      .promise-chip { opacity: 0; position: relative; }
+      .promise-chip::after {
+        content: ''; position: absolute; inset: -2px; border-radius: 9999px;
+        box-shadow: 0 0 18px 2px rgba(18,179,160,0.22);
+        opacity: 0; pointer-events: none;
+      }
+      .promise-chip-1 { animation: chipIn 0.6s cubic-bezier(0.16,1,0.3,1) 0.45s both; }
+      .promise-chip-2 { animation: chipIn 0.6s cubic-bezier(0.16,1,0.3,1) 0.62s both; }
+      .promise-chip-1::after { animation: chipBreath 5s ease-in-out 1.2s infinite; }
+      .promise-chip-2::after { animation: chipBreath 5s ease-in-out 3.7s infinite; }
       .promise-divider {
         width: 18px; height: 1px; flex-shrink: 0;
         background: linear-gradient(90deg, transparent, var(--fg-muted), transparent);
@@ -2405,6 +2510,25 @@ function GlobalStyles() {
          showing up as stutter on a phone. */
       .header-layer { transform: translateZ(0); will-change: transform; }
 
+      /* Page transitions.
+         Moving between pages used to be an instant swap — the old page
+         gone, the new one simply there. A short rise-and-fade makes it
+         read as one continuous place you're moving around inside, rather
+         than a series of documents. Kept under 400ms: any longer and it
+         stops feeling responsive and starts feeling slow. */
+      @keyframes pageIn {
+        from { opacity: 0; transform: translate3d(0, 10px, 0); }
+        to   { opacity: 1; transform: none; }
+      }
+      .page-in { animation: pageIn 0.38s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+      /* Cards lean very slightly toward the cursor. Only where there IS a
+         cursor, and only a couple of degrees — enough that the grid feels
+         responsive to you, not so much that it becomes a toy. */
+      @media (hover: hover) and (pointer: fine) {
+        .card-tilt { transition: transform 0.35s cubic-bezier(0.16,1,0.3,1); transform-style: preserve-3d; }
+      }
+
       /* Hero pieces drift very gently — enough that the right side of the
          page is alive rather than a static collage, not enough to pull
          attention off the headline. */
@@ -2483,13 +2607,22 @@ function GlobalStyles() {
       }
       @keyframes ringSpin { to { --ring-angle: 360deg; } }
       .story-ring {
-        background: conic-gradient(
-          from var(--ring-angle),
-          var(--ring) 0deg,
-          var(--ring) 90deg,
-          color-mix(in srgb, var(--ring) 25%, transparent) 200deg,
-          var(--ring) 360deg
-        );
+        background:
+          /* Gaps between segments, one per slide. */
+          repeating-conic-gradient(
+            from var(--ring-angle),
+            transparent 0deg,
+            transparent calc(360deg / var(--seg, 1) - 5deg),
+            rgba(0,0,0,0.001) calc(360deg / var(--seg, 1) - 5deg),
+            rgba(0,0,0,0.001) calc(360deg / var(--seg, 1))
+          ),
+          conic-gradient(
+            from var(--ring-angle),
+            var(--ring) 0deg,
+            var(--ring) 90deg,
+            color-mix(in srgb, var(--ring) 30%, transparent) 210deg,
+            var(--ring) 360deg
+          );
         animation: ringSpin 6s linear infinite;
       }
       /* Browsers without @property can't animate the angle — they get a
@@ -2563,10 +2696,11 @@ function GlobalStyles() {
       .sale-card:hover { transform: translateY(-3px); border-color: rgba(255,69,34,0.9); }
 
       @media (prefers-reduced-motion: reduce) {
-        .mesh-blob, .hero-fade-1, .hero-fade-2, .hero-fade-3, .hero-fade-4, .dock-in, .fab-pulse::before, .search-fade, .search-rise, .sale-glow, .promise-divider, .tag-dot-ping, .skeleton::after, .marquee-track, .photo-settle, .story-ring, .swipe-hint, .hero-float { animation: none !important; }
+        .mesh-blob, .hero-fade-1, .hero-fade-2, .hero-fade-3, .hero-fade-4, .dock-in, .fab-pulse::before, .search-fade, .search-rise, .sale-glow, .promise-divider, .tag-dot-ping, .skeleton::after, .marquee-track, .photo-settle, .story-ring, .swipe-hint, .hero-float, .page-in { animation: none !important; }
         .kinetic-line > span { animation: none !important; transform: none !important; }
         .admin-spinner { animation-duration: 2s; }
-        .promise-chip { animation: none !important; opacity: 1 !important; }
+        .promise-chip, .promise-chip::after { animation: none !important; }
+        .promise-chip { opacity: 1 !important; }
         .promise-divider { opacity: 1 !important; }
       }
 
@@ -2753,9 +2887,19 @@ function StoryTile({ ring, onOpen }) {
       {/* The ring is a slowly rotating gradient rather than a flat border.
           It's the cue that says "there's something in here" — and it keeps
           the accent colour that tells you which kind of story it is. */}
+      {/* Segmented ring: one arc per slide, the way a story tells you how
+          much there is before you commit to opening it. Built from a
+          repeating-conic-gradient, so however many slides a ring has, the
+          browser draws the divisions itself — no per-slide elements, no
+          extra cost. */}
       <div
         className="relative rounded-2xl overflow-hidden story-ring"
-        style={{ aspectRatio: "4/5", padding: 3, "--ring": accent.border }}
+        style={{
+          aspectRatio: "4/5",
+          padding: 3,
+          "--ring": accent.border,
+          "--seg": ring.slides.length,
+        }}
       >
         <div className="relative w-full h-full rounded-xl overflow-hidden" style={{ background: "var(--field-bg)" }}>
           {/* These sit near the top of the page, so a dark placeholder was
@@ -3163,14 +3307,30 @@ function ValueMarquee() {
   ];
   const strip = [...items, ...items];
   return (
-    <div className="marquee-mask overflow-hidden py-3" aria-hidden="true" style={{ borderTop: "1px solid var(--border)", borderBottom: "1px solid var(--border)" }}>
-      <div className="marquee-track">
-        {strip.map((label, i) => (
-          <span key={i} className="flex items-center flex-shrink-0">
-            <span className="font-body text-sm text-muted px-6 whitespace-nowrap">{label}</span>
-            <span style={{ width: 5, height: 5, borderRadius: 9999, background: "var(--coral)", opacity: 0.55 }} />
-          </span>
-        ))}
+    /* Was full-bleed while everything else on the page is held to the same
+       max width, so it ran out past both edges and broke the page's
+       margins. It sits inside the container now, and the text carries
+       enough weight to actually be read rather than fading into the
+       background. */
+    <div className="px-4 sm:px-6">
+      <div
+        className="marquee-mask overflow-hidden py-3.5 max-w-6xl mx-auto rounded-2xl"
+        aria-hidden="true"
+        style={{ border: "1px solid var(--border)", background: "var(--glass-bg)" }}
+      >
+        <div className="marquee-track">
+          {strip.map((label, i) => (
+            <span key={i} className="flex items-center flex-shrink-0">
+              <span
+                className="font-body font-medium px-6 whitespace-nowrap"
+                style={{ fontSize: "0.86rem", color: "var(--fg)", opacity: 0.78, letterSpacing: "0.01em" }}
+              >
+                {label}
+              </span>
+              <span style={{ width: 5, height: 5, borderRadius: 9999, background: "var(--coral)" }} />
+            </span>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -3325,8 +3485,18 @@ function HomeView({ products, loading, goCatalog, goSale, openProduct, likes, to
       <ScrollProgress />
       <section onMouseMove={onHeroMove} className="relative px-4 sm:px-6 pt-10 sm:pt-16 pb-14 sm:pb-20 overflow-hidden">
         {/* The gradient drifts slower than the page — the depth cue that
-            makes the hero feel like a layer rather than a flat block. */}
-        <div style={{ transform: `translate3d(0, ${scrollY * 0.28}px, 0)`, willChange: "transform" }}>
+            makes the hero feel like a layer rather than a flat block.
+
+            This wrapper MUST be positioned. A transform turns an element
+            into the containing block for its absolutely-positioned
+            children, and as a plain flow div this one had zero height —
+            so the mesh inside it, sized with inset:0, collapsed to nothing
+            and got clipped away entirely. That's the moment the glow
+            vanished: not a colour problem, a layout one. */}
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{ transform: `translate3d(0, ${scrollY * 0.28}px, 0)`, willChange: "transform" }}
+        >
           <MeshBackground variant="hero" />
         </div>
         <div className="pointer-events-none absolute inset-0 transition-opacity duration-300" style={{ background: `radial-gradient(600px circle at ${spot.x}% ${spot.y}%, rgba(255,255,255,0.06), transparent 60%)` }} />
@@ -4923,8 +5093,25 @@ function AppFootnote() {
 function PageTransition({ path, direction, children }) {
   const { reducedMotion } = useApp();
   const [animating, setAnimating] = useState(true);
-  if (!isNativeApp || reducedMotion) return <>{children}</>;
-  const animClass = direction === "back" ? "page-slide-back" : "page-slide-forward";
+
+  /* Two fixes here.
+
+     One: the animation used to play only once per session. `animating`
+     flipped to false when the first transition ended and nothing ever set
+     it back, so every navigation after the first was an instant swap.
+     Resetting it on each path change is what makes it actually work.
+
+     Two: it was gated to the app only. The website navigated with a hard
+     cut — the old page gone, the new one abruptly there. */
+  useEffect(() => { setAnimating(true); }, [path]);
+
+  if (reducedMotion) return <>{children}</>;
+
+  // The app slides horizontally, the way a native screen stack does. The
+  // website rises and fades, which suits a page load rather than a push.
+  const animClass = isNativeApp
+    ? (direction === "back" ? "page-slide-back" : "page-slide-forward")
+    : "page-in";
   // مهم: بعد ما تخلص الحركة منشيل الـ class نهائياً (مش نخليها "both" وبس).
   // أي transform باقي مطبّق — حتى لو translateX(0) بلا تأثير بصري — بيكسر
   // أي عنصر position:fixed جوا الصفحة (زي شريط "Add to cart" العائم)،

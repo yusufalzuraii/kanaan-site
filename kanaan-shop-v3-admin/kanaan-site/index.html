@@ -66,6 +66,25 @@
          social profiles — this is what a Knowledge Panel / rich local
          result is built from. -->
     <script type="application/ld+json">{"@context":"https://schema.org","@type":"ClothingStore","name":"Kanaan Shop","url":"https://kanaanshop.com","logo":"https://kanaanshop.com/logo-compact.png","image":"https://kanaanshop.com/logo-full.png","description":"Menswear in heavy fabrics and thoughtful cuts, from Saida to all of Lebanon.","address":{"@type":"PostalAddress","addressLocality":"Saida","addressCountry":"LB"},"areaServed":{"@type":"Country","name":"Lebanon"},"sameAs":["https://www.instagram.com/kanaan.shop"]}</script>
+    <script>
+      /* Applies the saved theme before the first pixel is painted.
+         Without this, a visitor who chose dark would see a flash of the
+         light background on every load while the app booted — the theme
+         only exists in JavaScript, and JavaScript runs after paint. */
+      (function () {
+        try {
+          var t = localStorage.getItem("kanaan-theme");
+          if (t !== "dark" && t !== "light") {
+            t = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+          }
+          var d = document.documentElement;
+          d.style.colorScheme = t;
+          d.style.background = t === "dark" ? "#0B0B0E" : "#F2F2F4";
+          var m = document.querySelector('meta[name="theme-color"]');
+          if (m) m.setAttribute("content", t === "dark" ? "#0B0B0E" : "#F2F2F4");
+        } catch (e) { /* private mode — light default is fine */ }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

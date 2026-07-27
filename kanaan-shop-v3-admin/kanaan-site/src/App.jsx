@@ -420,18 +420,26 @@ function MeshBackground({ variant = "hero" }) {
      life only ever existed at night. It runs in both now, just gentler
      against a light background so it stays a suggestion, not a effect. */
   const animate = !reducedMotion;
-  const baseOpacity = theme === "dark" ? 0.35 : 0.22;
+  const baseOpacity = theme === "dark" ? 0.38 : 0.3;
 
+  /* Sizes are viewport-relative, not fixed pixels.
+     They used to be hard-coded at ~400px, which fills a 390px phone screen
+     but is a small dot lost in a 1920px desktop hero — which is exactly
+     why the glow was visible on a phone and invisible on a laptop.
+
+     The clamp keeps them sensible at both ends: never smaller than a
+     phone screen's worth, never so large on an ultrawide that the colours
+     merge into one flat wash. */
   const blobs =
     variant === "hero"
       ? [
-          { color: "#FF4522", top: "-10%", left: "5%", size: 420, delay: "0s", dur: "22s" },
-          { color: "#12B3A0", top: "10%", left: "60%", size: 380, delay: "-6s", dur: "26s" },
-          { color: "#6E5BFF", top: "55%", left: "20%", size: 340, delay: "-12s", dur: "30s" },
+          { color: "#FF4522", top: "-18%", left: "0%",  size: "clamp(340px, 46vw, 760px)", delay: "0s",   dur: "13s" },
+          { color: "#12B3A0", top: "4%",   left: "52%", size: "clamp(300px, 40vw, 680px)", delay: "-4s",  dur: "16s" },
+          { color: "#6E5BFF", top: "48%",  left: "14%", size: "clamp(280px, 36vw, 620px)", delay: "-8s",  dur: "19s" },
         ]
       : [
-          { color: "#FF4522", top: "10%", left: "70%", size: 260, delay: "0s", dur: "24s" },
-          { color: "#12B3A0", top: "60%", left: "10%", size: 220, delay: "-9s", dur: "28s" },
+          { color: "#FF4522", top: "6%",  left: "62%", size: "clamp(200px, 30vw, 420px)", delay: "0s",  dur: "15s" },
+          { color: "#12B3A0", top: "55%", left: "4%",  size: "clamp(180px, 26vw, 360px)", delay: "-6s", dur: "18s" },
         ];
   return (
     <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden="true" style={{ contain: "paint" }}>
@@ -742,6 +750,35 @@ function SwatchPanel({ product, big, liked, onToggleLike, forceSoldOut, swipeabl
     if (next) { const im = new Image(); im.src = thumbUrlFor(next) || next; }
   }, [canSwipe, idx, allImages]);
 
+  const go = (dir) => setIdx((i) => Math.min(allImages.length - 1, Math.max(0, i + dir)));
+
+  /* A mouse can't swipe. Without this, browsing a product's photos from
+     the grid worked on a phone and simply didn't exist on a laptop — the
+     dots appeared, hinting at more images, with no way to reach them.
+
+     Two ways in on desktop: drag the image, or use the arrows that fade
+     in on hover. Pointer events cover mouse, trackpad and pen in one go. */
+  const drag = useRef(null);
+  const onPointerDown = (e) => {
+    if (!canSwipe || e.pointerType === "touch") return; // touch has its own handlers
+    drag.current = { x: e.clientX, moved: false };
+  };
+  const onPointerMove = (e) => {
+    if (!drag.current) return;
+    if (Math.abs(e.clientX - drag.current.x) > 10) drag.current.moved = true;
+  };
+  const onPointerUp = (e) => {
+    if (!drag.current) return;
+    const dx = e.clientX - drag.current.x;
+    if (Math.abs(dx) > 45) {
+      e.preventDefault();
+      e.stopPropagation();
+      go(dx < 0 ? 1 : -1);
+      setHinted(true);
+    }
+    drag.current = null;
+  };
+
   const onTouchStart = (e) => {
     if (!canSwipe) return;
     touch.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, moved: false };
@@ -761,7 +798,7 @@ function SwatchPanel({ product, big, liked, onToggleLike, forceSoldOut, swipeabl
       // Swallow the tap so flicking through photos never opens the product.
       e.preventDefault();
       e.stopPropagation();
-      setIdx((i) => Math.min(allImages.length - 1, Math.max(0, i + (dx < 0 ? 1 : -1))));
+      go(dx < 0 ? 1 : -1);
       setHinted(true);
     }
     touch.current = null;
@@ -789,6 +826,10 @@ function SwatchPanel({ product, big, liked, onToggleLike, forceSoldOut, swipeabl
       onTouchStart={onTouchStart}
       onTouchMove={onTouchMove}
       onTouchEnd={onTouchEnd}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerLeave={() => { drag.current = null; }}
     >
       {shownSrc ? (
         <>
@@ -826,6 +867,30 @@ function SwatchPanel({ product, big, liked, onToggleLike, forceSoldOut, swipeabl
       )}
       {/* Dots only appear where swiping is possible, so they double as the
           signal that there's more than one photo here. */}
+      {canSwipe && (
+        <>
+          {idx > 0 && (
+            <button
+              type="button"
+              className="card-arrow card-arrow-left"
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); go(-1); }}
+              aria-label="Previous photo"
+            >
+              <ChevronDown className="w-4 h-4" style={{ transform: "rotate(90deg)" }} />
+            </button>
+          )}
+          {idx < allImages.length - 1 && (
+            <button
+              type="button"
+              className="card-arrow card-arrow-right"
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); go(1); }}
+              aria-label="Next photo"
+            >
+              <ChevronDown className="w-4 h-4" style={{ transform: "rotate(-90deg)" }} />
+            </button>
+          )}
+        </>
+      )}
       {canSwipe && (
         <div className="card-dots" aria-hidden="true">
           {allImages.slice(0, 6).map((_, i) => (
@@ -2155,10 +2220,15 @@ function GlobalStyles() {
       }
       .glass-btn:hover::after { left: 130%; }
 
+      /* The drift used to cover 30px over 22 seconds — technically moving,
+         but far too slow and too small for anyone to notice. Travel is in
+         percentages now, so it scales with the blob, and a cycle takes
+         about a quarter as long: still calm, but alive. */
       @keyframes meshFloat {
         0%   { transform: translate(0,0) scale(1) translateZ(0); }
-        33%  { transform: translate(30px,-25px) scale(1.08) translateZ(0); }
-        66%  { transform: translate(-20px,20px) scale(0.95) translateZ(0); }
+        25%  { transform: translate(9%,-7%) scale(1.14) translateZ(0); }
+        50%  { transform: translate(-6%,6%) scale(0.92) translateZ(0); }
+        75%  { transform: translate(5%,4%) scale(1.08) translateZ(0); }
         100% { transform: translate(0,0) scale(1) translateZ(0); }
       }
       .mesh-blob { animation-name: meshFloat; animation-timing-function: ease-in-out; animation-iteration-count: infinite; }
@@ -2335,6 +2405,19 @@ function GlobalStyles() {
          showing up as stutter on a phone. */
       .header-layer { transform: translateZ(0); will-change: transform; }
 
+      /* Hero pieces drift very gently — enough that the right side of the
+         page is alive rather than a static collage, not enough to pull
+         attention off the headline. */
+      @keyframes heroFloat {
+        0%, 100% { translate: 0 0; }
+        50%      { translate: 0 -14px; }
+      }
+      .hero-float {
+        animation: heroFloat 6s ease-in-out infinite;
+        transition: scale 0.4s cubic-bezier(0.16,1,0.3,1);
+      }
+      .hero-float:hover { scale: 1.03; }
+
       /* Swipeable product cards.
          ------------------------------------------------------------
          A shopper had to open a product to discover it had more than one
@@ -2348,6 +2431,29 @@ function GlobalStyles() {
         84%           { transform: translate3d(4px, 0, 0); }
       }
       .swipe-hint { animation: swipeHint 2.6s cubic-bezier(0.4, 0, 0.2, 1) 0.9s 2; }
+
+      /* Arrows are for pointers, not fingers — a phone has the swipe and
+         doesn't need them taking up space over the photo. The hover media
+         query is what distinguishes a device with a real cursor from a
+         touchscreen, so they only ever exist where they're useful. */
+      .card-arrow { display: none; }
+      @media (hover: hover) and (pointer: fine) {
+        .card-arrow {
+          display: flex; align-items: center; justify-content: center;
+          position: absolute; top: 50%; transform: translateY(-50%);
+          width: 30px; height: 30px; border-radius: 9999px;
+          background: rgba(255,255,255,0.92); color: #14141A;
+          box-shadow: 0 2px 10px rgba(0,0,0,0.18);
+          opacity: 0; transition: opacity 0.22s ease, transform 0.22s ease;
+          z-index: 3; cursor: pointer;
+        }
+        .card-arrow-left  { left: 8px; }
+        .card-arrow-right { right: 8px; }
+        /* Revealed by hovering the card, not the arrow itself — otherwise
+           you'd have to find an invisible target before it appeared. */
+        .group:hover .card-arrow { opacity: 1; }
+        .card-arrow:hover { transform: translateY(-50%) scale(1.08); }
+      }
 
       .card-dots {
         position: absolute; left: 0; right: 0; bottom: 8px;
@@ -2457,7 +2563,7 @@ function GlobalStyles() {
       .sale-card:hover { transform: translateY(-3px); border-color: rgba(255,69,34,0.9); }
 
       @media (prefers-reduced-motion: reduce) {
-        .mesh-blob, .hero-fade-1, .hero-fade-2, .hero-fade-3, .hero-fade-4, .dock-in, .fab-pulse::before, .search-fade, .search-rise, .sale-glow, .promise-divider, .tag-dot-ping, .skeleton::after, .marquee-track, .photo-settle, .story-ring, .swipe-hint { animation: none !important; }
+        .mesh-blob, .hero-fade-1, .hero-fade-2, .hero-fade-3, .hero-fade-4, .dock-in, .fab-pulse::before, .search-fade, .search-rise, .sale-glow, .promise-divider, .tag-dot-ping, .skeleton::after, .marquee-track, .photo-settle, .story-ring, .swipe-hint, .hero-float { animation: none !important; }
         .kinetic-line > span { animation: none !important; transform: none !important; }
         .admin-spinner { animation-duration: 2s; }
         .promise-chip { animation: none !important; opacity: 1 !important; }
@@ -2609,12 +2715,15 @@ function StoryRail({ rings, onOpen }) {
   return (
     <section className="px-4 sm:px-6 pt-6 pb-4">
       <div className="max-w-6xl mx-auto">
-        <div className="flex items-end justify-between mb-3.5">
+        {/* The sparkle used to be pushed to the far edge by justify-between,
+            which on a wide screen left it stranded a metre away from the
+            title it belongs to. It sits with the heading now. */}
+        <div className="flex items-center gap-2 mb-3.5">
+          <Sparkles className="w-4 h-4 text-coral flex-shrink-0" aria-hidden="true" />
           <div>
             <h2 className="font-display font-bold text-lg leading-none">The Edit</h2>
             <p className="font-body text-xs text-muted mt-1.5">Tap to view · {rings.length} {rings.length === 1 ? "story" : "stories"}</p>
           </div>
-          <Sparkles className="w-4 h-4 text-coral" style={{ opacity: 0.7 }} aria-hidden="true" />
         </div>
         <div className="flex gap-3 overflow-x-auto pb-1 -mx-1 px-1" style={{ WebkitOverflowScrolling: "touch" }}>
           {rings.map((ring, i) => (
@@ -3199,6 +3308,13 @@ function HomeView({ products, loading, goCatalog, goSale, openProduct, likes, to
   const [spot, setSpot] = useState({ x: 50, y: 50 });
   const scrollY = useHeroParallax();
 
+  // Two photographed pieces for the desktop hero. Skipped entirely if the
+  // shop doesn't have two products with real photos yet.
+  const heroPicks = useMemo(
+    () => products.filter((p) => p.active !== false && getImages(p).length > 0).slice(0, 2),
+    [products]
+  );
+
   const onHeroMove = (e) => {
     const rect = e.currentTarget.getBoundingClientRect();
     setSpot({ x: ((e.clientX - rect.left) / rect.width) * 100, y: ((e.clientY - rect.top) / rect.height) * 100 });
@@ -3264,6 +3380,47 @@ function HomeView({ products, loading, goCatalog, goSale, openProduct, likes, to
               Explore pairings
             </button>
           </div>
+
+          {/* On a laptop the hero text only ever filled the left half and
+              the right half sat empty — the headline was sized for a phone
+              and simply left a hole on a wide screen. These two products
+              fill it with the thing the page is actually selling, and they
+              only exist from lg upwards, so nothing changes on mobile. */}
+          {heroPicks.length === 2 && (
+            <div className="hidden lg:block absolute right-0 top-1/2" style={{ transform: "translateY(-50%)", width: 380 }}>
+              <div className="relative" style={{ height: 420 }}>
+                {heroPicks.map((p, i) => (
+                  <button
+                    key={p.id}
+                    onClick={() => openProduct(p)}
+                    className="absolute rounded-3xl overflow-hidden hero-float"
+                    style={{
+                      width: 210,
+                      aspectRatio: "4/5",
+                      // Overlapped and slightly rotated so they read as a
+                      // considered pair, not a second grid.
+                      left: i === 0 ? 0 : 140,
+                      top: i === 0 ? 0 : 96,
+                      transform: `rotate(${i === 0 ? -4 : 5}deg)`,
+                      zIndex: i,
+                      boxShadow: "0 18px 50px rgba(20,20,26,0.18)",
+                      animationDelay: `${i * 1.6}s`,
+                    }}
+                    aria-label={p.name}
+                  >
+                    <img
+                      src={thumbUrlFor(getImages(p)[0]) || getImages(p)[0]}
+                      alt={p.name}
+                      className="w-full h-full"
+                      style={{ objectFit: "cover" }}
+                      loading="lazy"
+                      decoding="async"
+                    />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </section>
 

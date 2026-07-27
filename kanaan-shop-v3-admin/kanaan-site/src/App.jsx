@@ -433,16 +433,29 @@ function MeshBackground({ variant = "hero" }) {
   const blobs =
     variant === "hero"
       ? [
-          { color: "#FF4522", top: "-18%", left: "0%",  size: "clamp(340px, 46vw, 760px)", delay: "0s",   dur: "13s" },
-          { color: "#12B3A0", top: "4%",   left: "52%", size: "clamp(300px, 40vw, 680px)", delay: "-4s",  dur: "16s" },
-          { color: "#6E5BFF", top: "48%",  left: "14%", size: "clamp(280px, 36vw, 620px)", delay: "-8s",  dur: "19s" },
+          { color: "#FF4522", top: "-14%", left: "4%",  size: "clamp(300px, 34vw, 520px)", delay: "0s",   dur: "11s" },
+          { color: "#12B3A0", top: "2%",   left: "48%", size: "clamp(280px, 30vw, 470px)", delay: "-3.5s", dur: "13s" },
+          { color: "#6E5BFF", top: "44%",  left: "16%", size: "clamp(260px, 27vw, 430px)", delay: "-7s",  dur: "16s" },
         ]
       : [
           { color: "#FF4522", top: "6%",  left: "62%", size: "clamp(200px, 30vw, 420px)", delay: "0s",  dur: "15s" },
           { color: "#12B3A0", top: "55%", left: "4%",  size: "clamp(180px, 26vw, 360px)", delay: "-6s", dur: "18s" },
         ];
   return (
-    <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden="true" style={{ contain: "paint" }}>
+    /* The glow used to run edge to edge of the browser window while every
+       other element on the page is held inside a centred container — so
+       it read as colour escaping the layout rather than sitting behind
+       it. Fading it out towards the sides keeps it inside the page's own
+       margins without a hard cut-off line. */
+    <div
+      className="absolute inset-0 overflow-hidden pointer-events-none"
+      aria-hidden="true"
+      style={{
+        contain: "paint",
+        WebkitMaskImage: "radial-gradient(120% 100% at 50% 40%, #000 45%, transparent 88%)",
+        maskImage: "radial-gradient(120% 100% at 50% 40%, #000 45%, transparent 88%)",
+      }}
+    >
       {blobs.map((b, i) => (
         <span
           key={i}
@@ -1359,7 +1372,7 @@ function useCardTilt() {
    than the screen can show it, and it stops the moment it arrives. The
    easing is a cubic ease-out — quick off the mark, gentle at the end,
    which is what makes a number feel like it lands rather than stops. */
-function useCountUp(target, { duration = 1100 } = {}) {
+function useCountUp(target, { duration = 1900 } = {}) {
   const ref = useRef(null);
   const [value, setValue] = useState(0);
   const { reducedMotion } = useApp();
@@ -1373,21 +1386,26 @@ function useCountUp(target, { duration = 1100 } = {}) {
     const obs = new IntersectionObserver(([e]) => {
       if (!e.isIntersecting) return;
       obs.disconnect();
-      const start = performance.now();
+      const start = performance.now() + 260; // let the eye settle first
       const tick = (now) => {
+        if (now < start) { raf = requestAnimationFrame(tick); return; }
         const t = Math.min(1, (now - start) / duration);
         const eased = 1 - Math.pow(1 - t, 3);
         setValue(Math.round(target * eased));
         if (t < 1) raf = requestAnimationFrame(tick);
       };
       raf = requestAnimationFrame(tick);
-    }, { threshold: 0.4 });
+      /* Fired at 40% visible, which on a card this size meant it had
+         already finished counting by the time you actually looked at it.
+         Waiting until it's almost fully on screen — and a beat after
+         that — means the count starts when someone is looking at it. */
+    }, { threshold: 0.85 });
 
     obs.observe(el);
     return () => { obs.disconnect(); cancelAnimationFrame(raf); };
   }, [target, duration, reducedMotion]);
 
-  return [ref, value];
+  return [ref, value, value >= target && target > 0];
 }
 
 /* A product counts as "on sale" only if it's really cheaper than its
@@ -1490,7 +1508,7 @@ function ShopMenu({ goCatalog }) {
    from the calm cards around it without inventing a new style.
    ============================================================ */
 function SaleCard({ onOpen, count, maxDiscount }) {
-  const [countRef, shownDiscount] = useCountUp(maxDiscount);
+  const [countRef, shownDiscount, countDone] = useCountUp(maxDiscount);
   return (
     <button
       onClick={onOpen}
@@ -1516,7 +1534,7 @@ function SaleCard({ onOpen, count, maxDiscount }) {
 
         <span
           ref={countRef}
-          className="font-num font-bold flex-shrink-0 rounded-2xl text-center flex flex-col items-center justify-center"
+          className={`font-num font-bold flex-shrink-0 rounded-2xl text-center flex flex-col items-center justify-center${countDone ? " count-landed" : ""}`}
           style={{ background: "var(--coral)", color: "#fff", width: 86, height: 62, boxShadow: "0 8px 20px rgba(255,69,34,0.35)" }}
         >
           {/* Counts up as it arrives — a static number is a fact, a number
@@ -2318,11 +2336,14 @@ function GlobalStyles() {
          but far too slow and too small for anyone to notice. Travel is in
          percentages now, so it scales with the blob, and a cycle takes
          about a quarter as long: still calm, but alive. */
+      /* Wider travel and more scale contrast, so the drift is legible as
+         movement rather than something you only notice by comparing two
+         screenshots. */
       @keyframes meshFloat {
         0%   { transform: translate(0,0) scale(1) translateZ(0); }
-        25%  { transform: translate(9%,-7%) scale(1.14) translateZ(0); }
-        50%  { transform: translate(-6%,6%) scale(0.92) translateZ(0); }
-        75%  { transform: translate(5%,4%) scale(1.08) translateZ(0); }
+        25%  { transform: translate(16%,-13%) scale(1.22) translateZ(0); }
+        50%  { transform: translate(-13%,11%) scale(0.86) translateZ(0); }
+        75%  { transform: translate(10%,8%) scale(1.13) translateZ(0); }
         100% { transform: translate(0,0) scale(1) translateZ(0); }
       }
       .mesh-blob { animation-name: meshFloat; animation-timing-function: ease-in-out; animation-iteration-count: infinite; }
@@ -2510,6 +2531,16 @@ function GlobalStyles() {
          showing up as stutter on a phone. */
       .header-layer { transform: translateZ(0); will-change: transform; }
 
+      /* A number quietly counting up is easy to miss entirely. A single
+         beat as it lands is what turns it from something happening into
+         something you noticed happening. */
+      @keyframes countLand {
+        0%   { transform: scale(1); }
+        45%  { transform: scale(1.14); }
+        100% { transform: scale(1); }
+      }
+      .count-landed { animation: countLand 0.5s cubic-bezier(0.34, 1.56, 0.64, 1); }
+
       /* Page transitions.
          Moving between pages used to be an instant swap — the old page
          gone, the new one simply there. A short rise-and-fade makes it
@@ -2609,12 +2640,13 @@ function GlobalStyles() {
       .story-ring {
         background:
           /* Gaps between segments, one per slide. */
+          /* Gaps punched through to the page background, one per slide. */
           repeating-conic-gradient(
             from var(--ring-angle),
             transparent 0deg,
-            transparent calc(360deg / var(--seg, 1) - 5deg),
-            rgba(0,0,0,0.001) calc(360deg / var(--seg, 1) - 5deg),
-            rgba(0,0,0,0.001) calc(360deg / var(--seg, 1))
+            transparent calc(360deg / var(--seg, 1) - 14deg),
+            var(--bg) calc(360deg / var(--seg, 1) - 14deg),
+            var(--bg) calc(360deg / var(--seg, 1))
           ),
           conic-gradient(
             from var(--ring-angle),
@@ -2696,7 +2728,7 @@ function GlobalStyles() {
       .sale-card:hover { transform: translateY(-3px); border-color: rgba(255,69,34,0.9); }
 
       @media (prefers-reduced-motion: reduce) {
-        .mesh-blob, .hero-fade-1, .hero-fade-2, .hero-fade-3, .hero-fade-4, .dock-in, .fab-pulse::before, .search-fade, .search-rise, .sale-glow, .promise-divider, .tag-dot-ping, .skeleton::after, .marquee-track, .photo-settle, .story-ring, .swipe-hint, .hero-float, .page-in { animation: none !important; }
+        .mesh-blob, .hero-fade-1, .hero-fade-2, .hero-fade-3, .hero-fade-4, .dock-in, .fab-pulse::before, .search-fade, .search-rise, .sale-glow, .promise-divider, .tag-dot-ping, .skeleton::after, .marquee-track, .photo-settle, .story-ring, .swipe-hint, .hero-float, .page-in, .count-landed { animation: none !important; }
         .kinetic-line > span { animation: none !important; transform: none !important; }
         .admin-spinner { animation-duration: 2s; }
         .promise-chip, .promise-chip::after { animation: none !important; }
@@ -2896,7 +2928,10 @@ function StoryTile({ ring, onOpen }) {
         className="relative rounded-2xl overflow-hidden story-ring"
         style={{
           aspectRatio: "4/5",
-          padding: 3,
+          /* Was 3px with 5° gaps — technically a segmented ring, visually
+             indistinguishable from a plain border. Thick enough to read
+             now, with gaps you can actually count. */
+          padding: 5,
           "--ring": accent.border,
           "--seg": ring.slides.length,
         }}
@@ -3483,7 +3518,11 @@ function HomeView({ products, loading, goCatalog, goSale, openProduct, likes, to
   return (
     <div>
       <ScrollProgress />
-      <section onMouseMove={onHeroMove} className="relative px-4 sm:px-6 pt-10 sm:pt-16 pb-14 sm:pb-20 overflow-hidden">
+      {/* Extra top padding clears the floating header. Without it, the
+          "Saida, Lebanon" chip slid straight underneath it after one
+          notch of scroll — the header is sticky and sits above the page,
+          so anything starting this high simply disappeared behind it. */}
+      <section onMouseMove={onHeroMove} className="relative px-4 sm:px-6 pt-20 sm:pt-24 pb-14 sm:pb-20 overflow-hidden">
         {/* The gradient drifts slower than the page — the depth cue that
             makes the hero feel like a layer rather than a flat block.
 

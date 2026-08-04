@@ -430,6 +430,9 @@ function Magnetic({ children, strength = 16, className = "" }) {
    static in light mode, per the brief
    ============================================================ */
 function MeshBackground({ variant = "hero" }) {
+  // Three blurred, moving blobs are the most expensive thing on the page.
+  // No reason for them to keep moving once the hero has scrolled away.
+  const meshRef = usePauseOffscreen();
   const { reducedMotion, theme } = useApp();
   /* The drifting glow used to be switched off in light mode, which left
      the hero completely static — the movement that gives the page its
@@ -464,6 +467,7 @@ function MeshBackground({ variant = "hero" }) {
        it. Fading it out towards the sides keeps it inside the page's own
        margins without a hard cut-off line. */
     <div
+      ref={meshRef}
       className="absolute inset-0 overflow-hidden pointer-events-none"
       aria-hidden="true"
       style={{
@@ -484,9 +488,11 @@ function MeshBackground({ variant = "hero" }) {
             height: b.size,
             background: b.color,
             borderRadius: "50%",
-            // Less blur keeps the colours readable as colours rather than
-            // washing them into the background.
-            filter: "blur(48px)",
+            /* Blur cost scales with the square of the radius, and these
+               three blobs are also moving — so the browser re-blurs them
+               every frame. A CSS variable lets the phone use a much
+               smaller radius without changing anything on desktop. */
+            filter: "blur(var(--mesh-blur, 48px))",
             opacity: baseOpacity,
             animationDuration: b.dur,
             animationDelay: b.delay,
@@ -1370,6 +1376,34 @@ function ColorPicker({ product, color, onPick }) {
       </div>
     </>
   );
+}
+
+/* Pauses an element's animation whenever it scrolls out of view.
+
+   content-visibility already stops the browser PAINTING off-screen
+   sections, but it doesn't stop their animations — a marquee or a
+   spinning ring keeps ticking the compositor forward at 60fps while
+   sitting a full screen away, which on a phone is work taken directly
+   from the scroll it's competing with.
+
+   Toggling animation-play-state is free, and the browser drops the
+   element's compositor work entirely while it's paused. */
+function usePauseOffscreen() {
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof IntersectionObserver !== "function") return;
+    const obs = new IntersectionObserver(
+      ([e]) => { el.style.animationPlayState = e.isIntersecting ? "running" : "paused"; },
+      // A little margin so it's already moving by the time it's visible.
+      { threshold: 0, rootMargin: "120px" }
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+
+  return ref;
 }
 
 /* Cards lean toward the cursor.
@@ -2453,7 +2487,7 @@ function GlobalStyles() {
         75%  { transform: translate(10%,8%) scale(1.13) translateZ(0); }
         100% { transform: translate(0,0) scale(1) translateZ(0); }
       }
-      .mesh-blob { animation-name: meshFloat; animation-timing-function: ease-in-out; animation-iteration-count: infinite; }
+      .mesh-blob { animation-name: meshFloat; animation-timing-function: ease-in-out; animation-iteration-count: infinite; animation-play-state: inherit; }
 
       /* Floating help button */
       /* The pulse used to animate box-shadow, which the browser can only
@@ -2559,6 +2593,68 @@ function GlobalStyles() {
         backdrop-filter: blur(6px); border: 1px solid rgba(255,255,255,0.25);
       }
 
+      /* ============================================================
+         MOBILE PERFORMANCE
+         ------------------------------------------------------------
+         Desktop is smooth; phones stutter. The cause isn't the number of
+         animations — they're all compositor-only. It's that a phone GPU
+         is asked to do the same work a laptop GPU does, on a fraction of
+         the hardware, at a higher pixel density.
+
+         Three things dominate, and all three are per-frame costs that
+         apply whether anything is animating or not:
+
+           • backdrop-filter — the page has 66 glass surfaces. Each one
+             makes the browser sample and blur everything behind it, on
+             every frame. This is the single most expensive property in
+             CSS on mobile hardware.
+           • blur(48px) on the drifting gradient blobs. Blur radius cost
+             is roughly quadratic, so halving the radius is closer to a
+             quarter of the work.
+           • mix-blend-mode on the grain overlay, which forces the
+             browser out of its fast compositing path for that whole
+             stacking context.
+
+         None of this is removed on desktop — it's what gives the site
+         its look. It's dialled back only where the hardware can't carry
+         it, and only in ways that keep the design recognisably itself.
+         ============================================================ */
+      @media (max-width: 900px) {
+        /* Roughly a third of the desktop radius — close to a tenth of the
+           work, and at phone size the blobs are small enough that it
+           still reads as a soft glow. */
+        :root { --mesh-blur: 26px; }
+
+        .glass {
+          /* Half the blur radius, roughly a quarter of the sampling work.
+             The translucency and the hairline border do most of the
+             visual job anyway. */
+          backdrop-filter: blur(8px) saturate(150%);
+          -webkit-backdrop-filter: blur(8px) saturate(150%);
+        }
+
+        /* Grain is a texture you feel rather than see. On a phone it
+           costs a whole compositing path for something invisible at
+           arm's length. */
+        .grain-overlay { display: none; }
+
+        /* Cards don't tilt on a phone (no cursor) and the hero pieces
+           aren't shown, so neither needs a promoted layer. Every
+           unnecessary will-change is GPU memory a phone doesn't have. */
+        .card-tilt { will-change: auto; }
+      }
+
+      /* Very small phones — the ones that actually struggle. Drop the
+         backdrop blur entirely and lean on opacity instead: still reads
+         as a translucent panel, costs nothing per frame. */
+      @media (max-width: 480px) {
+        .glass {
+          backdrop-filter: none;
+          -webkit-backdrop-filter: none;
+          background: color-mix(in srgb, var(--bg) 82%, var(--glass-bg));
+        }
+      }
+
       /* One source of truth for the header's height. The hero reaches up
          behind it by exactly this much, so the two can never drift apart. */
       :root { --header-h: 76px; }
@@ -2615,6 +2711,12 @@ function GlobalStyles() {
       .marquee-mask {
         -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
         mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+      }
+      @media (max-width: 900px) {
+        /* A mask forces its own compositing pass on every frame of a
+           continuously scrolling strip. The rounded container already
+           clips the ends, so the fade is a refinement the phone can skip. */
+        .marquee-mask { -webkit-mask-image: none; mask-image: none; }
       }
 
       /* 3 — Scroll progress.
@@ -2782,6 +2884,10 @@ function GlobalStyles() {
             var(--ring) 360deg
           );
         animation: ringSpin 7s linear infinite;
+        /* Inherits the paused state set on the parent by
+           usePauseOffscreen — a pseudo-element can't be observed
+           directly, but it can follow its parent. */
+        animation-play-state: inherit;
         will-change: rotate;
       }
       /* Older browsers without color-mix still get a solid ring. */
@@ -2898,9 +3004,12 @@ function GlobalStyles() {
         animation: splashLogo 0.95s cubic-bezier(0.34,1.56,0.64,1) 0.12s both;
       }
       .splash-sheen {
-        position: absolute; top: 0; bottom: 0; width: 45%;
+        /* Animating the left property makes the browser redo layout every frame.
+           Positioning it once and moving it with a transform instead is
+           the same effect with none of that — and this runs during app
+           startup, the moment the device is busiest. */
+        position: absolute; top: 0; bottom: 0; left: 0; width: 45%;
         background: linear-gradient(100deg, transparent, rgba(255,255,255,0.75), transparent);
-        transform: skewX(-18deg);
         animation: splashSheen 0.85s ease-in-out 0.75s both;
       }
       .splash-tagline {
@@ -2926,9 +3035,9 @@ function GlobalStyles() {
         100% { opacity: 0; transform: scale(3.6); }
       }
       @keyframes splashSheen {
-        0%   { left: -60%; opacity: 0; }
+        0%   { transform: translateX(-160%) skewX(-18deg); opacity: 0; }
         35%  { opacity: 1; }
-        100% { left: 130%; opacity: 0; }
+        100% { transform: translateX(290%) skewX(-18deg); opacity: 0; }
       }
       @keyframes splashTagline {
         0%   { opacity: 0; transform: translateY(8px); letter-spacing: 0.2em; }
@@ -3113,6 +3222,7 @@ function StoryTile({ ring, onOpen }) {
   const cover = ring.slides[0];
   const [ok, setOk] = useState(true);
   const [loaded, setLoaded] = useState(false);
+  const ringRef = usePauseOffscreen();
 
   return (
     <button
@@ -3130,6 +3240,7 @@ function StoryTile({ ring, onOpen }) {
           browser draws the divisions itself — no per-slide elements, no
           extra cost. */}
       <div
+        ref={ringRef}
         className="relative rounded-2xl overflow-hidden story-ring"
         style={{
           aspectRatio: "4/5",
@@ -3546,6 +3657,7 @@ function ValueMarquee() {
     "Premium. Fresh. Always.",
   ];
   const strip = [...items, ...items];
+  const marqueeRef = usePauseOffscreen();
   return (
     /* Was full-bleed while everything else on the page is held to the same
        max width, so it ran out past both edges and broke the page's
@@ -3558,7 +3670,7 @@ function ValueMarquee() {
         aria-hidden="true"
         style={{ border: "1px solid var(--border)", background: "var(--glass-bg)" }}
       >
-        <div className="marquee-track">
+        <div className="marquee-track" ref={marqueeRef}>
           {strip.map((label, i) => (
             <span key={i} className="flex items-center flex-shrink-0">
               <span
@@ -5513,7 +5625,7 @@ function Footer({ goCatalog, goSale }) {
   const columns = [CATEGORIES.slice(0, half), CATEGORIES.slice(half)];
 
   return (
-    <footer className="mt-10 px-4 sm:px-6 pb-6">
+    <footer className="mt-10 px-4 sm:px-6 pb-6 section-lazy">
       <div className="glass max-w-6xl mx-auto rounded-3xl px-5 sm:px-8 py-10 sm:py-12">
         <div className="grid gap-10 lg:grid-cols-12">
 

@@ -2079,7 +2079,7 @@ function KanaanShop() {
     let alive = true;
     (async () => {
       try {
-        const res = await fetch(`${apiBase}/api/stories`);
+        const res = await fetchWithTimeout(`${apiBase}/api/stories`, {}, 10000);
         const data = await res.json();
         if (alive && Array.isArray(data.rings)) setStoryRings(data.rings);
       } catch { /* The Edit is a bonus feature — never block the shop on it */ }
@@ -2277,6 +2277,17 @@ function KanaanShop() {
           </div>
         </div>
       )}
+      {/* Announces cart changes to screen readers. Visually hidden, but
+          without it a blind shopper gets no confirmation that "Add to
+          cart" did anything at all. */}
+      <div
+        aria-live="polite"
+        aria-atomic="true"
+        style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" }}
+      >
+        {cartCount > 0 ? `${cartCount} ${cartCount === 1 ? "item" : "items"} in your cart` : ""}
+      </div>
+
       {isNativeApp && !isOffline && updateInfo.available && (
         <div className="px-4 sm:px-6" style={{ paddingTop: route.type === "home" ? "calc(0.75rem + env(safe-area-inset-top, 0px))" : 8 }}>
           <div className="glass rounded-2xl px-4 py-2.5 flex items-center justify-between gap-2">
@@ -5223,7 +5234,12 @@ function CheckoutView({ cart, total, onSubmitted }) {
     // We open WhatsApp with the real order number the server gave us.
     let orderNumber = null;
     try {
-      const res = await fetch(`${apiBase}/api/orders`, {
+      /* Was a bare fetch. There's a sensible fallback below — if the API
+         can't be reached the order still goes out over WhatsApp — but
+         without a timeout the request could hang indefinitely and never
+         reach it. The customer would sit watching a spinner that never
+         resolves, at the exact moment they're trying to buy. */
+      const res = await fetchWithTimeout(`${apiBase}/api/orders`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -5234,7 +5250,7 @@ function CheckoutView({ cart, total, onSubmitted }) {
             size: i.size, qty: i.qty,
           })),
         }),
-      });
+      }, 20000);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setSending(false);

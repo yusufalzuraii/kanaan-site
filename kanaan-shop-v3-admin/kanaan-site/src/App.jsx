@@ -4,6 +4,8 @@ import React, {
   useEffect,
   useLayoutEffect,
   useMemo,
+  useCallback,
+  memo,
   useRef,
   useState,
 } from "react";
@@ -1102,9 +1104,23 @@ function ProductGallery({ product, liked, onToggleLike, activeColor }) {
 /* ============================================================
    PRODUCT CARD
    ============================================================ */
-function ProductCard({ product, onOpen, liked, onToggleLike }) {
+/* Memoised. The homepage renders twelve of these, each with its own
+   state, observers and image loading — re-rendering the lot because the
+   cart drawer opened is work the phone can't spare.
+
+   The onToggleLike prop now takes the product id rather than being a
+   pre-bound closure created inline at the call site, which is what
+   makes the props stable enough for memo to actually hold. */
+// A single shared no-op, so "no like button here" doesn't create a new
+// function — and defeat memo — on every render.
+const NOOP = () => {};
+
+const ProductCard = memo(function ProductCard({ product, onOpen, liked, onToggleLike }) {
   const isOut = product.soldOut || !productHasStock(product);
   const tiltRef = useCardTilt();
+  // Bound here, once per card, instead of a fresh arrow at every call site
+  // on every parent render.
+  const handleToggle = useCallback(() => onToggleLike(product.id), [onToggleLike, product.id]);
   return (
     <button onClick={() => onOpen(product)} className="text-left group focus:outline-none w-full">
       <div
@@ -1112,7 +1128,7 @@ function ProductCard({ product, onOpen, liked, onToggleLike }) {
         className="card-tilt"
         style={{ opacity: isOut ? 0.7 : 1 }}
       >
-        <SwatchPanel product={product} liked={liked} onToggleLike={onToggleLike} forceSoldOut={isOut} swipeable />
+        <SwatchPanel product={product} liked={liked} onToggleLike={handleToggle} forceSoldOut={isOut} swipeable />
       </div>
       <div className="mt-3.5 space-y-1">
         <p className="font-body font-medium text-fg text-sm">{product.name}</p>
@@ -1136,7 +1152,7 @@ function ProductCard({ product, onOpen, liked, onToggleLike }) {
       </div>
     </button>
   );
-}
+});
 
 /* ============================================================
    SEARCH OVERLAY
@@ -1395,7 +1411,12 @@ function usePauseOffscreen() {
     const el = ref.current;
     if (!el || typeof IntersectionObserver !== "function") return;
     const obs = new IntersectionObserver(
-      ([e]) => { el.style.animationPlayState = e.isIntersecting ? "running" : "paused"; },
+      ([e]) => {
+        // A class rather than an inline style, so descendants can opt in
+        // via CSS — the animation being paused is often on a child or a
+        // pseudo-element, which can't be observed directly.
+        el.classList.toggle("anim-paused", !e.isIntersecting);
+      },
       // A little margin so it's already moving by the time it's visible.
       { threshold: 0, rootMargin: "120px" }
     );
@@ -1460,10 +1481,15 @@ function useCardTilt() {
    than the screen can show it, and it stops the moment it arrives. The
    easing is a cubic ease-out — quick off the mark, gentle at the end,
    which is what makes a number feel like it lands rather than stops. */
-function useCountUp(target, { duration = 1900 } = {}) {
+function useCountUp(rawTarget, { duration = 1900 } = {}) {
   const ref = useRef(null);
   const [value, setValue] = useState(0);
   const { reducedMotion } = useApp();
+
+  /* Guard the input. If the shop has no discounted products the caller
+     can pass undefined, and every arithmetic step below then produces
+     NaN — which React renders literally into the badge. */
+  const target = Number.isFinite(Number(rawTarget)) ? Number(rawTarget) : 0;
 
   useEffect(() => {
     if (reducedMotion) { setValue(target); return; }
@@ -1493,7 +1519,7 @@ function useCountUp(target, { duration = 1900 } = {}) {
     return () => { obs.disconnect(); cancelAnimationFrame(raf); };
   }, [target, duration, reducedMotion]);
 
-  return [ref, value, value >= target && target > 0];
+  return [ref, Number.isFinite(value) ? value : 0, value >= target && target > 0];
 }
 
 /* A product counts as "on sale" only if it's really cheaper than its
@@ -1597,6 +1623,7 @@ function ShopMenu({ goCatalog }) {
    ============================================================ */
 function SaleCard({ onOpen, count, maxDiscount }) {
   const [countRef, shownDiscount, countDone] = useCountUp(maxDiscount);
+  const glowRef = usePauseOffscreen();
   return (
     <button
       onClick={onOpen}
@@ -1606,7 +1633,7 @@ function SaleCard({ onOpen, count, maxDiscount }) {
     >
       {/* coral wash + slow drifting glow, same family as MeshBackground */}
       <span className="absolute inset-0 pointer-events-none" aria-hidden="true" style={{ background: "linear-gradient(135deg, rgba(255,69,34,0.22), rgba(255,69,34,0.04) 60%)" }} />
-      <span className="sale-glow" aria-hidden="true" />
+      <span className="sale-glow" aria-hidden="true" ref={glowRef} />
       <span className="grain-overlay" aria-hidden="true" />
 
       <span className="relative flex items-start justify-between gap-4 w-full">
@@ -1718,7 +1745,7 @@ function SaleView({ products, loading, goCatalog, openProduct, likes, toggleLike
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
               {visible.map((p, i) => (
                 <Reveal key={p.id} delay={(i % 8) * 50}>
-                  <SaleProductCard product={p} onOpen={openProduct} liked={likes.includes(p.id)} onToggleLike={() => toggleLike(p.id)} />
+                  <SaleProductCard product={p} onOpen={openProduct} liked={likes.includes(p.id)} onToggleLike={toggleLike} />
                 </Reveal>
               ))}
             </div>
@@ -1759,16 +1786,19 @@ function SaleStat({ value, label, accent }) {
 
 /* Like ProductCard, but the saving is spelled out in money — a shopper
    shouldn't have to do the percentage maths in their head. */
-function SaleProductCard({ product, onOpen, liked, onToggleLike }) {
+/* Same treatment as ProductCard — the sale page renders a full grid of
+   these too. */
+const SaleProductCard = memo(function SaleProductCard({ product, onOpen, liked, onToggleLike }) {
   const isOut = product.soldOut || !productHasStock(product);
   const saving = product.price - effectivePrice(product);
+  const handleToggle = useCallback(() => onToggleLike(product.id), [onToggleLike, product.id]);
   return (
     <button onClick={() => onOpen(product)} className="text-left group focus:outline-none w-full">
       <div
         className="transition-transform duration-500 group-hover:-translate-y-2"
         style={{ transitionTimingFunction: "cubic-bezier(0.16,1,0.3,1)", opacity: isOut ? 0.7 : 1 }}
       >
-        <SwatchPanel product={product} liked={liked} onToggleLike={onToggleLike} forceSoldOut={isOut} swipeable />
+        <SwatchPanel product={product} liked={liked} onToggleLike={handleToggle} forceSoldOut={isOut} swipeable />
       </div>
       <div className="mt-3.5 space-y-1">
         <p className="font-body font-medium text-fg text-sm truncate">{product.name}</p>
@@ -1786,7 +1816,7 @@ function SaleProductCard({ product, onOpen, liked, onToggleLike }) {
       </div>
     </button>
   );
-}
+});
 
 /* ============================================================
    ERROR BOUNDARY
@@ -2076,14 +2106,20 @@ function KanaanShop() {
   const goSale = () => { navigate("/sale"); setMenuOpen(false); };
   const goFavorites = () => { navigate("/favorites"); setMenuOpen(false); };
   const goExclusives = () => { navigate("/exclusives"); setMenuOpen(false); };
-  const openProduct = (product) => navigate(`/product/${product.slug}`);
+  /* Stable identities for anything passed down to the product grid.
+
+     Without useCallback these are recreated on every render of
+     KanaanShop — which has nineteen pieces of state, so it renders often.
+     A new function is a new prop, a new prop defeats memo, and every card
+     re-renders because the cart drawer opened. */
+  const openProduct = useCallback((product) => navigate(`/product/${product.slug}`), [navigate]);
   const goCheckout = () => { setCartOpen(false); setOrderPlaced(false); navigate("/checkout"); };
 
-  const toggleLike = (id) => {
+  const toggleLike = useCallback((id) => {
     hapticLight();
     playTapChime();
     setLikes((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
-  };
+  }, []);
 
   const cartKey = (pid, size, colorKey) => `${pid}-${size}-${colorKey}`;
 
@@ -2508,6 +2544,17 @@ function GlobalStyles() {
         animation: fabPulse 2.6s cubic-bezier(0.4,0,0.6,1) infinite;
         will-change: transform, opacity;
       }
+      /* The WhatsApp button is fixed to the screen, so it's never off it —
+         an intersection observer would never fire. Instead the pulse stops
+         itself after a while: its job is to draw the eye when the page
+         settles, and a ring still pulsing minutes later is decoration the
+         phone is paying for continuously. */
+      .fab-pulse::before { animation-iteration-count: 6; }
+      @media (max-width: 900px) {
+        /* Fewer still on a phone, where the button is proportionally
+           larger and the pulse more obvious. */
+        .fab-pulse::before { animation-iteration-count: 4; }
+      }
       .fab-label {
         max-width: 0; opacity: 0; overflow: hidden; white-space: nowrap;
         transition: max-width 0.45s cubic-bezier(0.16,1,0.3,1), opacity 0.3s ease, margin 0.45s ease;
@@ -2591,6 +2638,24 @@ function GlobalStyles() {
         display: inline-block; padding: 4px 12px; border-radius: 9999px; font-family: 'Inter', sans-serif;
         font-size: 0.7rem; font-weight: 500; color: #fff; background: rgba(0,0,0,0.4);
         backdrop-filter: blur(6px); border: 1px solid rgba(255,255,255,0.25);
+      }
+
+      /* Anything inside a paused container stops animating.
+         ------------------------------------------------------------
+         An animation that has scrolled off screen still costs the
+         compositor a frame of work every 16ms — it's simply doing that
+         work where nobody can see it. On a laptop that's spare capacity;
+         on a phone it's taken directly out of the scroll the visitor is
+         actually performing.
+
+         The universal selector plus the pseudo-element selectors covers
+         including animations that live on ::before / ::after and so
+         can't be observed individually. */
+      .anim-paused,
+      .anim-paused *,
+      .anim-paused *::before,
+      .anim-paused *::after {
+        animation-play-state: paused !important;
       }
 
       /* ============================================================
@@ -2907,6 +2972,10 @@ function GlobalStyles() {
       .skeleton {
         position: absolute; inset: 0; overflow: hidden;
         background: var(--field-bg);
+        /* Skeletons are only ever mounted while a photo is still loading —
+           the moment it arrives React unmounts them, so the animation
+           stops with the element. Nothing to pause here; noted so it
+           isn't "fixed" later by adding an observer that does nothing. */
       }
       .skeleton::after {
         content: ''; position: absolute; inset: 0;
@@ -3819,6 +3888,7 @@ function HomeView({ products, loading, goCatalog, goSale, openProduct, likes, to
   const maxDiscount = saleCount ? Math.max(...onSale.map((p) => p.discount)) : 0;
   const [spot, setSpot] = useState({ x: 50, y: 50 });
   const scrollY = useHeroParallax();
+  const heroRef = usePauseOffscreen();
 
   // Two photographed pieces for the desktop hero. Skipped entirely if the
   // shop doesn't have two products with real photos yet.
@@ -3844,7 +3914,12 @@ function HomeView({ products, loading, goCatalog, goSale, openProduct, likes, to
           header's height puts the glow behind it, and the padding below
           puts it back so nothing is covered. The chip still clears the
           header, which is what the padding was added for originally. */}
+      {/* Pausing the whole hero covers everything inside it at once — the
+          drifting glow, the breathing delivery chips, the floating product
+          pair. Once you've scrolled past, none of it needs a single frame
+          of work. */}
       <section
+        ref={heroRef}
         onMouseMove={onHeroMove}
         className="relative px-4 sm:px-6 pb-14 sm:pb-20 overflow-hidden"
         style={{ marginTop: "calc(-1 * var(--header-h))", paddingTop: "calc(var(--header-h) + 3.5rem)" }}
@@ -4025,7 +4100,7 @@ function HomeView({ products, loading, goCatalog, goSale, openProduct, likes, to
               ))
             : featured.map((p, i) => (
                 <Reveal key={p.id} delay={i * 60}>
-                  <ProductCard product={p} onOpen={openProduct} liked={likes.includes(p.id)} onToggleLike={() => toggleLike(p.id)} />
+                  <ProductCard product={p} onOpen={openProduct} liked={likes.includes(p.id)} onToggleLike={toggleLike} />
                 </Reveal>
               ))}
         </div>
@@ -4288,7 +4363,7 @@ function NativeHomeView({ products, loading, error, onRetry, goCatalog, goSale, 
           <div className="flex gap-4 overflow-x-auto px-4 sm:px-6 pb-1" style={{ scrollbarWidth: "none" }}>
             {recentProducts.map((p) => (
               <div key={p.id} className="flex-shrink-0" style={{ width: 130 }}>
-                <ProductCard product={p} onOpen={openProduct} liked={likes.includes(p.id)} onToggleLike={() => toggleLike(p.id)} />
+                <ProductCard product={p} onOpen={openProduct} liked={likes.includes(p.id)} onToggleLike={toggleLike} />
               </div>
             ))}
           </div>
@@ -4318,7 +4393,7 @@ function NativeHomeView({ products, loading, error, onRetry, goCatalog, goSale, 
           <div className="flex gap-4 overflow-x-auto px-4 sm:px-6 pb-1" style={{ scrollbarWidth: "none" }}>
             {featured.map((p) => (
               <div key={p.id} className="flex-shrink-0" style={{ width: 150 }}>
-                <ProductCard product={p} onOpen={openProduct} liked={likes.includes(p.id)} onToggleLike={() => toggleLike(p.id)} />
+                <ProductCard product={p} onOpen={openProduct} liked={likes.includes(p.id)} onToggleLike={toggleLike} />
               </div>
             ))}
           </div>
@@ -4424,7 +4499,7 @@ function ExclusivesView({ products, loading, likes, openProduct, toggleLike }) {
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
           {exclusives.map((p) => (
-            <ProductCard key={p.id} product={p} onOpen={openProduct} liked={likes.includes(p.id)} onToggleLike={() => toggleLike(p.id)} />
+            <ProductCard key={p.id} product={p} onOpen={openProduct} liked={likes.includes(p.id)} onToggleLike={toggleLike} />
           ))}
         </div>
       )}
@@ -4485,7 +4560,7 @@ function FavoritesView({ products, loading, likes, openProduct, toggleLike, goCa
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
           {favProducts.map((p, i) => (
             <Reveal key={p.id} delay={(i % 8) * 50}>
-              <ProductCard product={p} onOpen={openProduct} liked={true} onToggleLike={() => toggleLike(p.id)} />
+              <ProductCard product={p} onOpen={openProduct} liked={true} onToggleLike={toggleLike} />
             </Reveal>
           ))}
         </div>
@@ -4595,7 +4670,7 @@ function CatalogView({ activeCategory, activeSub, loading, error, onRetry, goCat
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
             {visible.map((p, i) => (
               <Reveal key={p.id} delay={(i % 8) * 50}>
-                <ProductCard product={p} onOpen={openProduct} liked={likes.includes(p.id)} onToggleLike={() => toggleLike(p.id)} />
+                <ProductCard product={p} onOpen={openProduct} liked={likes.includes(p.id)} onToggleLike={toggleLike} />
               </Reveal>
             ))}
           </div>
@@ -4935,7 +5010,7 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
           <h2 className="font-display font-bold text-xl mb-5">You might also like</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 sm:gap-6">
             {related.map((p) => (
-              <ProductCard key={p.id} product={p} onOpen={openProduct} liked={false} onToggleLike={() => {}} />
+              <ProductCard key={p.id} product={p} onOpen={openProduct} liked={false} onToggleLike={NOOP} />
             ))}
           </div>
         </div>

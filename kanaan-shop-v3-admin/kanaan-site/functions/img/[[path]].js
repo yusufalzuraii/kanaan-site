@@ -5,33 +5,45 @@ export async function onRequestGet(context) {
   if (!env.BUCKET) return new Response("Not configured", { status: 500 });
 
   const key = Array.isArray(params.path) ? params.path.join("/") : String(params.path || "");
-  if (!key) return new Response("Not found", { status: 404 });
+  if (!key) return notFound();
 
   let obj = await env.BUCKET.get(key);
 
   /* Fall back to the full image when a thumbnail is missing.
      ------------------------------------------------------------
-     Every photo uploaded before the thumbnail feature existed has no
-     "-thumb" file in storage — the site correctly requests one anyway
-     (it doesn't know a product's history), gets a 404, and the browser
-     falls back to the full image. That's a real, working fallback, but
-     it costs a whole failed round trip first and shows up as a 404 in
-     the console on every single view of an older product.
+     Some photos never get a "-thumb" file: either they predate the
+     thumbnail feature, or they were already small enough on upload that
+     the optimizer intentionally left them untouched (see
+     src/imageOptimizer.js — anything under ~120KB is skipped, since
+     re-encoding a file that small risks losing more quality than it
+     saves). Either way, the site correctly asks for a thumbnail without
+     knowing in advance whether one exists.
 
-     Resolving it here instead means the visitor never sees the failed
-     request at all: this key is requested once, and — since the miss
-     only ever means "this is an old photo" — the full image comes back
-     with a normal 200. */
+     Resolving it here means that request never surfaces as a failure:
+     it's answered with the full image and a normal 200, in one request. */
   if (!obj && /-thumb\.[a-z0-9]+$/i.test(key)) {
     const fullKey = key.replace(/-thumb(\.[a-z0-9]+)$/i, "$1");
     if (fullKey !== key) obj = await env.BUCKET.get(fullKey);
   }
 
-  if (!obj) return new Response("Not found", { status: 404 });
+  if (!obj) return notFound();
 
   const headers = new Headers();
   headers.set("Content-Type", (obj.httpMetadata && obj.httpMetadata.contentType) || "image/jpeg");
   headers.set("Cache-Control", "public, max-age=31536000, immutable");
   if (obj.httpEtag) headers.set("ETag", obj.httpEtag);
   return new Response(obj.body, { headers });
+}
+
+/* A 404 with no caching instructions can still end up cached at
+   Cloudflare's edge based on status code and file extension alone —
+   which is exactly what let an old "not found" respons survive past a
+   fix that made the same request succeed. Every miss now says explicitly
+   not to be stored anywhere, so a fix always takes effect on the very
+   next request instead of waiting out a stale edge cache. */
+function notFound() {
+  return new Response("Not found", {
+    status: 404,
+    headers: { "Cache-Control": "no-store" },
+  });
 }

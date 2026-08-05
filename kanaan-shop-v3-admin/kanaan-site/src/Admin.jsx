@@ -347,6 +347,8 @@ function NotifyTab() {
   const [result, setResult] = useState(null); // { ok, sent, failed, removed, total } | { error }
 
   const [appVersion, setAppVersion] = useState(null);
+  const [versionInput, setVersionInput] = useState("");
+  const [versionMsg, setVersionMsg] = useState(null);
   const [versionSaving, setVersionSaving] = useState(false);
 
   useEffect(() => {
@@ -354,22 +356,44 @@ function NotifyTab() {
       try {
         const r = await fetch("/api/admin/app-version");
         const d = await r.json();
-        setAppVersion(d.latest ?? 1);
-      } catch { setAppVersion(1); }
+        const v = d.latest ?? 1;
+        setAppVersion(v);
+        setVersionInput(String(v));
+      } catch { setAppVersion(1); setVersionInput("1"); }
     })();
   }, []);
 
-  const bumpVersion = async () => {
+  /* حفظ رقم النسخة المنشورة فعلياً على Google Play.
+
+     ليش صار حقل إدخال بدل زر "+1": الزر القديم كان بيزيد عدّاد أعمى
+     ما إلو أي علاقة بالرقم الحقيقي المنشور. أي ضغطة تجريبية كانت
+     بتخلي الرقم يسبق الواقع (مثلاً صار 4 والمنشور فعلياً 1)، والنتيجة
+     إنو *كل* المستخدمين بيشوفوا بانر "في تحديث" للأبد — وهو تحديث
+     مش موجود أصلاً. هلق بتكتب الرقم بالضبط زي ما هو بـ Play Console،
+     فما بيقدر يبعد عن الواقع مهما ضغطت. */
+  const saveVersion = async () => {
+    const n = parseInt(versionInput, 10);
+    if (!n || n < 1) {
+      setVersionMsg({ error: "اكتب رقم صحيح (1 أو أكبر)." });
+      return;
+    }
     setVersionSaving(true);
+    setVersionMsg(null);
     try {
-      const next = (appVersion || 1) + 1;
-      await fetch("/api/admin/app-version", {
+      const r = await fetch("/api/admin/app-version", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ latest: next }),
+        body: JSON.stringify({ latest: n }),
       });
-      setAppVersion(next);
-    } catch { /* تجاهل */ }
+      if (r.ok) {
+        setAppVersion(n);
+        setVersionMsg({ ok: true });
+      } else {
+        setVersionMsg({ error: "ما انحفظ، جرب كمان مرة." });
+      }
+    } catch {
+      setVersionMsg({ error: "مشكلة اتصال." });
+    }
     setVersionSaving(false);
   };
 
@@ -507,20 +531,36 @@ function NotifyTab() {
 
       <div className="glass rounded-2xl p-5">
         <p className="font-body text-sm font-medium mb-1">بانر "تحديث متوفر" بالتطبيق</p>
-        <p className="font-body text-xs text-muted mb-3">
-          بعد ما ترفع APK/AAB جديد فيه إصلاح مهم لـ Google Play، اضغط الزر تحت — هيك أي مستخدم عندو نسخة أقدم بيشوفلو بانر لطيف يقترح عليه يحدّث.
+        <p className="font-body text-xs text-muted mb-1">
+          اكتب هون <strong>رقم النسخة (versionCode) المنشورة فعلياً على Google Play</strong> — نفس الرقم يلي بيبين بـ Play Console تحت الإصدار، مثلاً <span className="font-num">1 (1.0)</span> ← الرقم هو <span className="font-num">1</span>.
         </p>
-        <div className="flex items-center gap-3">
-          <span className="font-num text-sm">النسخة الحالية المعروفة: {appVersion ?? "..."}</span>
+        <p className="font-body text-xs text-muted mb-3">
+          أي مستخدم رقم نسخته <em>أقل</em> من هالرقم بيشوف بانر يقترح عليه يحدّث. ⚠️ لا تكتب رقم أكبر من المنشور فعلياً — وقتها بيشوف الكل بانر تحديث وهمي ما إلو وجود.
+        </p>
+        <div className="flex items-center gap-2 flex-wrap">
+          <input
+            type="number"
+            min="1"
+            value={versionInput}
+            onChange={(e) => { setVersionInput(e.target.value); setVersionMsg(null); }}
+            className="a-field"
+            style={{ width: 110 }}
+            placeholder="1"
+          />
           <button
-            onClick={bumpVersion}
+            onClick={saveVersion}
             disabled={versionSaving || appVersion === null}
             className="a-chip tap-scale"
             style={{ cursor: "pointer", opacity: versionSaving ? 0.6 : 1 }}
           >
-            {versionSaving ? "..." : "🔔 أعلن عن نسخة جديدة"}
+            {versionSaving ? "..." : "احفظ"}
           </button>
+          <span className="font-body text-xs text-muted">
+            المحفوظ حالياً: <span className="font-num">{appVersion ?? "..."}</span>
+          </span>
         </div>
+        {versionMsg?.error && <p className="font-body text-xs text-coral mt-2">{versionMsg.error}</p>}
+        {versionMsg?.ok && <p className="font-body text-xs text-teal mt-2">✓ انحفظ</p>}
       </div>
     </div>
   );

@@ -2087,16 +2087,6 @@ function KanaanShop() {
     return () => { alive = false; };
   }, []);
 
-  useEffect(() => {
-    if (!isNativeApp) return;
-    let alive = true;
-    (async () => {
-      const info = await checkAppUpdate(apiBase);
-      if (alive) setUpdateInfo(info);
-    })();
-    return () => { alive = false; };
-  }, []);
-
   const goHome = () => navigate("/");
   const goCatalog = (cat, sub) => {
     if (!cat || cat === "all") navigate("/shop");
@@ -3135,8 +3125,19 @@ function GlobalStyles() {
         .splash-root { animation: none !important; }
       }
 
+      /* min-height بدل height ثابت: لو المستخدم مكبّر خط النظام، النص
+         بيحتاج مساحة أطول — بارتفاع ثابت كان بيطلع برا الشريط. هيك
+         الشريط بيتمدد لتحت بهدوء بدل ما ينكسر. */
       .native-tab-bar {
-        height: 60px;
+        min-height: 60px;
+      }
+      /* نفس المنطق للبادجات: بدل أبعاد ثابتة بتقص الرقم لما يكبر الخط،
+         منخلي الحد الأدنى ثابت والباقي بيتمدد مع المحتوى. */
+      .native-badge {
+        min-width: 1.25em;
+        min-height: 1.25em;
+        padding: 0 0.35em;
+        line-height: 1;
       }
 
       /* انتقالات الصفحات — حصري للتطبيق. الصفحة الجديدة بتنزلق من
@@ -4275,8 +4276,11 @@ function NativeHomeView({ products, loading, error, onRetry, goCatalog, goSale, 
               <button
                 key={c.id}
                 onClick={() => goCatalog(c.id)}
-                className="glass rounded-xl flex flex-col items-center justify-center gap-1.5 tap-scale"
-                style={{ aspectRatio: "1/1" }}
+                className="glass rounded-xl flex flex-col items-center justify-center gap-1.5 tap-scale py-2"
+                /* minHeight بدل aspectRatio ثابت: مع تكبير خط النظام،
+                   اسم الفئة بيلف على سطرين وبيحتاج ارتفاع أكبر —
+                   بنسبة ثابتة كان بينقص وبيتقص النص. */
+                style={{ minHeight: "4.5rem" }}
               >
                 <span
                   className="rounded-lg flex items-center justify-center"
@@ -5522,8 +5526,7 @@ function AppTopBar({ title, canGoBack, onBack, cartCount, onCart }) {
           <ShoppingBag className="w-5 h-5" />
           {cartCount > 0 && (
             <span
-              className="absolute top-0.5 right-0.5 bg-coral text-white text-[9px] font-num rounded-full flex items-center justify-center"
-              style={{ minWidth: 15, height: 15 }}
+              className="native-badge absolute top-0.5 right-0.5 bg-coral text-white text-[9px] font-num rounded-full flex items-center justify-center"
             >
               {cartCount}
             </span>
@@ -5643,8 +5646,8 @@ function BottomTabBar({ activeType, goHome, goCatalog, onSearch, goFavorites, on
             <Icon className="w-5 h-5" fill={key === "favorites" && active ? "#fff" : "none"} />
             {!!badge && (
               <span
-                className="absolute -top-1.5 -right-2 text-white text-[9px] font-num rounded-full flex items-center justify-center"
-                style={{ minWidth: 14, height: 14, padding: "0 3px", background: active ? "rgba(255,255,255,0.35)" : "var(--coral)" }}
+                className="native-badge absolute -top-1.5 -right-2 text-white text-[9px] font-num rounded-full flex items-center justify-center"
+                style={{ background: active ? "rgba(255,255,255,0.35)" : "var(--coral)" }}
               >
                 {badge}
               </span>

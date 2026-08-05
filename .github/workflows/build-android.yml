@@ -58,6 +58,11 @@ jobs:
           GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
         run: echo "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
 
+      # مجلد android/ بيتولّد من الصفر كل بناء، فأي تعديل على الكود
+      # النيتف لازم ينحط من جديد هون — نفس منطق colors.xml تحت.
+      - name: تركيب MainActivity المعدّل (سقف تكبير خط النظام)
+        run: cp android-src/MainActivity.java android/app/src/main/java/com/kanaanshop/app/MainActivity.java
+
       - name: إضافة ألوان الهوية الأساسية (colorPrimary/colorAccent) — ثيم أندرويد الافتراضي بيحتاجها
         run: |
           cat > android/app/src/main/res/values/colors.xml << 'EOF'

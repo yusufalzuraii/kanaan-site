@@ -1,1 +1,33 @@
-/*    /index.html   200
+# SPA fallback — MUST stay narrower than /*
+#
+# This file previously contained a single catch-all:
+#
+#     /*    /index.html   200
+#
+# On Cloudflare Pages, _redirects is evaluated BEFORE Functions. That one
+# line meant every request — /product/x, /shop/jeans, /sitemap.xml,
+# /feed.xml — was answered with the empty index.html shell before the
+# function that renders real content for crawlers ever ran.
+#
+# The result: a month online with nothing indexed but the bare domain.
+# Every meta tag, every piece of structured data, the sitemap and the
+# Merchant Center feed were all being generated correctly and none of
+# them were ever reachable.
+#
+# Routes handled by Functions must NOT appear here. Only genuinely
+# client-side routes need the fallback:
+#
+#   /checkout        cart and delivery form
+#   /admin           admin panel
+#   /privacy         privacy policy
+#   /sale            sale listing
+#
+# Handled by Functions instead (do not add them below):
+#   /                /product/*      /shop  /shop/*
+#   /sitemap.xml     /feed.xml       /img/*  /api/*
+
+/checkout    /index.html   200
+/admin       /index.html   200
+/admin/*     /index.html   200
+/privacy     /index.html   200
+/sale        /index.html   200

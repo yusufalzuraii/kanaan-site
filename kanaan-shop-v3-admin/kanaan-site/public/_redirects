@@ -31,3 +31,5 @@
 /admin/*     /index.html   200
 /privacy     /index.html   200
 /sale        /index.html   200
+/favorites   /index.html   200
+/exclusives  /index.html   200

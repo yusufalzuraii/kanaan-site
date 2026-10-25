@@ -100,6 +100,16 @@ export async function isAuthed(request, env) {
   return safeEqual(m[1], expected);
 }
 
+/* Kanaan POS bridge, recovery key: "Authorization: Bearer <POS_SYNC_KEY>" (the setup key made in the program and
+   pasted once into Cloudflare). Devices normally use their own Kanaan Cloud key instead (see _shared/pos.js). */
+export function posAuthed(request, env) {
+  const key = env.POS_SYNC_KEY;
+  if (!key || String(key).length < 32) return false;
+  const h = request.headers.get("Authorization") || "";
+  const m = h.match(/^Bearer\s+(.+)$/);
+  return !!m && safeEqual(m[1].trim(), String(key));
+}
+
 export function cookieHeader(token) {
   // 30 days
   return `kanaan_admin=${token}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=2592000`;
@@ -162,19 +172,21 @@ export function rowToProduct(r) {
     sortOrder: Number(r.sort_order) || 0,
     isSpotlight: !!r.is_spotlight,
     appExclusive: !!r.app_exclusive,
+    source: r.source || "", // 'pos' = published and run from Kanaan POS
   };
 }
 
 /* Normalize an incoming product payload from the admin form into DB columns. */
-export function payloadToRow(body) {
+export function payloadToRow(body, cats) {
   const clean = (s) => String(s == null ? "" : s).trim();
   const list = (v) => (Array.isArray(v) ? v : String(v || "").split(",")).map((x) => String(x).trim()).filter(Boolean);
 
+  const ids = cats ? cats.ids : CATEGORY_IDS;
   const name = clean(body.name);
-  const category = CATEGORY_IDS.includes(clean(body.category)) ? clean(body.category) : "tshirts";
+  const category = ids.includes(clean(body.category)) ? clean(body.category) : ids[0] || "tshirts";
   // A fit only sticks if it's actually offered for this category.
   const subRaw = clean(body.subcategory);
-  const subcategory = isValidSub(category, subRaw) ? subRaw : "";
+  const subcategory = (cats ? (cats.subs[category] || []).some((s) => s.id === subRaw) : isValidSub(category, subRaw)) ? subRaw : "";
   const price = Math.max(0, Math.round(Number(body.price) || 0));
   const colors = list(body.colors).filter((c) => COLOR_KEYS.includes(c));
   const sizes = list(body.sizes);

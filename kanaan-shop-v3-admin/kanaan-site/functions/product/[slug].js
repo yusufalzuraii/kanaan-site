@@ -22,7 +22,8 @@ const esc = (s) =>
 // the one sequence that would otherwise break out of the tag early.
 const jsonLd = (obj) => JSON.stringify(obj).replace(/</g, "\\u003c");
 
-import { parseImages, CATEGORY_LABELS, rowToProduct } from "../_shared/util.js";
+import { parseImages, rowToProduct } from "../_shared/util.js";
+import { loadCategories } from "../_shared/site.js";
 import { renderProductContent, injectContent } from "../_shared/ssr.js";
 
 export async function onRequestGet(context) {
@@ -50,7 +51,20 @@ export async function onRequestGet(context) {
   } catch {
     return res;
   }
-  if (!row) return res;
+  if (!row) {
+    // a product taken off the site: its link (shared on WhatsApp, Instagram, Google) never dead-ends —
+    // it goes to the product that replaced it, or to its category
+    try {
+      const gone = await env.DB.prepare("SELECT category, replaced_by FROM products WHERE id = ? AND active = 0").bind(slug).first();
+      if (gone) {
+        let to = "";
+        if (gone.replaced_by) { const n = await env.DB.prepare("SELECT id FROM products WHERE id = ? AND active = 1").bind(gone.replaced_by).first(); if (n) to = `/product/${n.id}`; }
+        if (!to) { const cats = await loadCategories(env); to = cats.ids.includes(gone.category) ? `/shop/${gone.category}` : "/shop"; }
+        return Response.redirect(new URL(to, request.url).toString(), 301);
+      }
+    } catch { /* fall back to the app */ }
+    return res;
+  }
 
   const origin = new URL(request.url).origin;
   const url = `${origin}/product/${row.id}`;
@@ -74,7 +88,7 @@ export async function onRequestGet(context) {
   // products row alone (that lives in `variants`) — sold_out is the
   // explicit owner override, which is what search results should reflect.
   const availability = row.sold_out ? "https://schema.org/OutOfStock" : "https://schema.org/InStock";
-  const categoryLabel = CATEGORY_LABELS[row.category] || "Menswear";
+  const categoryLabel = (await loadCategories(env)).labels[row.category] || "Menswear";
 
   const productLd = jsonLd({
     "@context": "https://schema.org",

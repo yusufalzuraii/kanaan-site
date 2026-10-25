@@ -1,7 +1,8 @@
 /* GET /shop/:category/:sub  (e.g. /shop/jeans/baggy)
    Same purpose as the category-level function, one level deeper. */
 
-import { CATEGORY_IDS, CATEGORY_LABELS, subcategoriesFor, parseImages } from "../../_shared/util.js";
+import { parseImages } from "../../_shared/util.js";
+import { loadCategories } from "../../_shared/site.js";
 import { renderListingContent, injectContent } from "../../_shared/ssr.js";
 
 const esc = (s) =>
@@ -28,8 +29,10 @@ export async function onRequestGet(context) {
 
   const category = String(params.category || "").trim();
   const sub = String(params.sub || "").trim();
-  const subMeta = subcategoriesFor(category).find((s) => s.id === sub);
-  if (!CATEGORY_IDS.includes(category) || !subMeta || !env.DB) return res;
+  if (!env.DB) return res;
+  const cats = await loadCategories(env);
+  const subMeta = (cats.subs[category] || []).find((s) => s.id === sub);
+  if (!cats.ids.includes(category) || !subMeta) return res;
 
   let rows;
   try {
@@ -43,7 +46,7 @@ export async function onRequestGet(context) {
 
   const origin = new URL(request.url).origin;
   const url = `${origin}/shop/${category}/${sub}`;
-  const catLabel = CATEGORY_LABELS[category] || "Shop";
+  const catLabel = cats.labels[category] || "Shop";
   const label = `${catLabel} — ${subMeta.label}`;
   const count = rows.length;
 

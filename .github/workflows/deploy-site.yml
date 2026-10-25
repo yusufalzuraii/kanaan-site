@@ -1,0 +1,27 @@
+name: Deploy website
+
+# Cloudflare Pages does not start a build for changes pushed by the Claude app (only for the owner's own
+# commits), so every change to the site on main asks Cloudflare to build through a Deploy Hook.
+# One-time setup: Cloudflare → Workers & Pages → kanaan-site → Settings → Builds → Deploy Hooks → Add
+# (branch: main) → copy the URL → GitHub → this repo → Settings → Secrets and variables → Actions →
+# New repository secret, name CF_DEPLOY_HOOK, value = the URL.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'kanaan-shop-v3-admin/kanaan-site/**'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Ask Cloudflare to build the site
+        env:
+          HOOK: ${{ secrets.CF_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "::warning::CF_DEPLOY_HOOK is not set: Cloudflare builds only on the owner's own commits."
+            exit 0
+          fi
+          curl -fsS -X POST "$HOOK" > /dev/null && echo "::notice::Cloudflare is building the site now."

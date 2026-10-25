@@ -11,7 +11,8 @@
    price, brand, condition, product_type. Sale items also get
    sale_price so Google Shopping shows the strikethrough price. */
 
-import { rowToProduct, CATEGORY_LABELS, loadStock } from "../_shared/util.js";
+import { rowToProduct, loadStock } from "../_shared/util.js";
+import { loadCategories } from "../_shared/site.js";
 
 const esc = (s) =>
   String(s == null ? "" : s)
@@ -23,6 +24,7 @@ const esc = (s) =>
 
 export async function onRequestGet(context) {
   const { env } = context;
+  const catLabels = (await loadCategories(env)).labels;
   const origin = "https://kanaanshop.com";
 
   let products = [];
@@ -61,7 +63,7 @@ export async function onRequestGet(context) {
       const image = absolute(p.images[0].url);
       const extraImages = p.images.slice(1, 11).map((im) => absolute(im.url)); // Google allows up to 10 extra images
       const desc = (p.desc || `${p.name} — available now at Kanaan Shop.`).replace(/\s+/g, " ").trim().slice(0, 5000);
-      const productType = CATEGORY_LABELS[p.category] || "Menswear";
+      const productType = catLabels[p.category] || "Menswear";
 
       return `
     <item>

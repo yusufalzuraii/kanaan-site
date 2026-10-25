@@ -1,6 +1,10 @@
 const SITE = "https://kanaanshop.com";
 import { json, isAuthed, rowToProduct, payloadToRow, saveVariants, parseImages , deleteUploadedImage , pingIndexNow } from "../../../_shared/util.js";
 import { sendPushToTokens } from "../../../_shared/fcm.js";
+import { loadCategories, ensureSchema } from "../../../_shared/site.js";
+
+// products published from Kanaan POS are managed there (photos, price, stock): the old admin can only look
+const POS_OWNED = "This product is managed in Kanaan POS (Management → Website). Change it there.";
 
 // PUT /api/admin/products/:id  -> update
 export async function onRequestPut(context) {
@@ -8,12 +12,14 @@ export async function onRequestPut(context) {
   if (!(await isAuthed(request, env))) return json({ error: "unauthorized" }, 401);
   const id = params.id;
 
-  const existing = await env.DB.prepare("SELECT id, sold_out, name FROM products WHERE id = ?").bind(id).first();
+  await ensureSchema(env);
+  const existing = await env.DB.prepare("SELECT id, sold_out, name, source FROM products WHERE id = ?").bind(id).first();
   if (!existing) return json({ error: "not found" }, 404);
+  if (existing.source === "pos") return json({ error: POS_OWNED }, 409);
 
   let body = {};
   try { body = await request.json(); } catch { return json({ error: "bad json" }, 400); }
-  const row = payloadToRow(body);
+  const row = payloadToRow(body, await loadCategories(env));
   if (!row.name) return json({ error: "Name is required." }, 400);
 
   await env.DB.prepare(
@@ -55,6 +61,9 @@ export async function onRequestDelete(context) {
   const { request, env, params } = context;
   if (!(await isAuthed(request, env))) return json({ error: "unauthorized" }, 401);
   const id = params.id;
+  await ensureSchema(env);
+  const own = await env.DB.prepare("SELECT source FROM products WHERE id = ?").bind(id).first();
+  if (own && own.source === "pos") return json({ error: POS_OWNED }, 409);
 
   // best-effort: remove this product's uploaded images from R2
   try {

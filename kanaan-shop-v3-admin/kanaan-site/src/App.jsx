@@ -114,7 +114,7 @@ const FALLBACK_CATEGORIES = [
   { id: "oldmoney", label: "Old Money Collection" },
 ];
 
-/* Fits. Only these two categories are split; the rest have none. */
+/* Fits. Built-in fallback; the real list (and new categories) come from Kanaan POS with the products. */
 const SUBCATEGORIES = {
   tshirts: [
     { id: "oversized", label: "Oversized" },
@@ -140,9 +140,10 @@ function slugify(str) {
 }
 
 
-/* Colors and categories are fixed sets (used by the shop and the admin form).
-   Products themselves come live from the database via /api/products. */
-const CATEGORIES = FALLBACK_CATEGORIES;
+/* Categories are edited from Kanaan POS (Management → Website → Categories) and arrive with /api/products.
+   These arrays are filled in place (applyCategories), so every part of the shop reading them stays in step;
+   the built-in list is only the first-paint fallback (and the last list seen is remembered on the device). */
+const CATEGORIES = [...FALLBACK_CATEGORIES];
 
 // ترتيب مخصص لشبكة "Browse" بالتطبيق: القطع الأكتر تصفّحاً أول (صف
 // أول)، والباقي بصف تاني — و"Old Money Collection" مستثناة عمداً
@@ -154,6 +155,32 @@ const BROWSE_GRID_CATEGORIES = [
 ]
   .map((id) => CATEGORIES.find((c) => c.id === id))
   .filter(Boolean);
+
+/* The shop's categories from the server: [{ id, label, sort, active, grid, subs: [{id, label}] }]. */
+function applyCategories(list, remember = true) {
+  if (!Array.isArray(list) || !list.length) return false;
+  const clean = list.filter((c) => c && c.id && c.label && c.active !== 0);
+  if (!clean.length) return false;
+  CATEGORIES.splice(0, CATEGORIES.length, ...clean.map((c) => ({ id: c.id, label: c.label })));
+  for (const k of Object.keys(SUBCATEGORIES)) delete SUBCATEGORIES[k];
+  for (const c of clean) if (Array.isArray(c.subs) && c.subs.length) SUBCATEGORIES[c.id] = c.subs.map((x) => ({ id: x.id, label: x.label }));
+  const grid = clean.filter((c) => c.grid !== 0).map((c) => ({ id: c.id, label: c.label }));
+  BROWSE_GRID_CATEGORIES.splice(0, BROWSE_GRID_CATEGORIES.length, ...grid);
+  if (remember) { try { localStorage.setItem("kanaan-cats", JSON.stringify(clean)); } catch { /* private mode */ } }
+  return true;
+}
+try { const saved = JSON.parse(localStorage.getItem("kanaan-cats") || "null"); if (saved) applyCategories(saved, false); } catch { /* first visit */ }
+
+/* A tiny visit counter for the shop's statistics in Kanaan POS: page seen, product seen, added to cart,
+   checkout, order, search. No cookies, nothing personal: the server only counts. Never slows a page. */
+function track(kind, data = {}) {
+  try {
+    const body = JSON.stringify({ kind, app: isNativeApp ? 1 : 0, ...data });
+    const url = `${apiBase}/api/hit`;
+    if (!isNativeApp && navigator.sendBeacon) navigator.sendBeacon(url, new Blob([body], { type: "text/plain" }));
+    else fetch(url, { method: "POST", body, keepalive: true, headers: { "Content-Type": "text/plain" } }).catch(() => {});
+  } catch { /* never break the shop */ }
+}
 const COLORS = FALLBACK_COLORS;
 
 const LEBANON_GOVERNORATES = [
@@ -1183,6 +1210,13 @@ function SearchOverlay({ open, onClose, products, openProduct, goCatalog, goSale
   const [q, setQ] = useState("");
   const [cursor, setCursor] = useState(0);
   const inputRef = useRef(null);
+  // what people look for (counted once they stop typing), for the shop's statistics
+  useEffect(() => {
+    const t = q.trim();
+    if (!open || t.length < 2) return undefined;
+    const timer = setTimeout(() => track("search", { key: t.slice(0, 60) }), 1400);
+    return () => clearTimeout(timer);
+  }, [q, open]);
 
   useEffect(() => {
     if (open) {
@@ -1897,6 +1931,17 @@ function KanaanShop() {
   const { theme } = useApp();
   const [path, navigate, navDirection, canGoBack] = useRouter();
   const route = parseRoute(path);
+  const firstView = useRef(true);
+  useEffect(() => {
+    if (route.type === "admin") return;
+    const extra = {};
+    if (firstView.current) {
+      firstView.current = false;
+      try { extra.ref = document.referrer || ""; const q = new URLSearchParams(window.location.search); extra.utm = q.get("utm_source") || q.get("ref") || ""; } catch { /* ignore */ }
+    }
+    track("pv", { path, ...extra });
+    if (route.type === "checkout") track("checkout");
+  }, [path]);
 
   const [cart, setCart] = useState([]);
   const [likes, setLikes] = useState([]);
@@ -2054,6 +2099,7 @@ function KanaanShop() {
         headers: isNativeApp ? { "X-Kanaan-Client": "app" } : {},
       });
       const data = await res.json();
+      if (Array.isArray(data.categories)) applyCategories(data.categories);
       if (Array.isArray(data.products)) {
         setProducts(data.products);
         setProductsError(false);
@@ -2147,6 +2193,7 @@ function KanaanShop() {
   // colorKey = the palette key we track stock against ("black")
   // colorLabel = what the shopper reads ("Black")
   const addToCart = (product, size, colorKey, colorLabel, qty) => {
+    track("cart", { key: product.id });
     setCart((prev) => {
       const key = cartKey(product.id, size, colorKey);
       const limit = stockFor(product, colorKey, size); // Infinity when untracked
@@ -2215,6 +2262,11 @@ function KanaanShop() {
   }, [route.type, route.category, route.sub, products]);
 
   const currentProduct = route.type === "product" ? products.find((p) => p.slug === route.slug) : null;
+  const seenProduct = useRef("");
+  useEffect(() => {
+    if (currentProduct && seenProduct.current !== currentProduct.id) { seenProduct.current = currentProduct.id; track("product", { key: currentProduct.id }); }
+    if (!currentProduct) seenProduct.current = "";
+  }, [currentProduct && currentProduct.id]);
 
   if (route.type === "admin") {
     return (
@@ -2337,6 +2389,7 @@ function KanaanShop() {
             cart={cart}
             total={cartTotal}
             onSubmitted={(orderInfo) => {
+              track("order", { key: String(orderInfo && orderInfo.orderNumber || "") });
               setLastOrder(orderInfo);
               setCart([]);
               setOrderPlaced(true);

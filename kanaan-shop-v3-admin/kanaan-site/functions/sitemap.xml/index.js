@@ -8,7 +8,7 @@
    Includes the <image:image> extension so product photos can be found
    through Google Image Search too, not just the page itself. */
 
-import { CATEGORY_IDS, subcategoriesFor } from "../_shared/util.js";
+import { loadCategories } from "../_shared/site.js";
 
 const esc = (s) =>
   String(s == null ? "" : s)
@@ -33,9 +33,10 @@ export async function onRequestGet(context) {
   add(`${origin}/shop`, { priority: "0.9", changefreq: "daily" });
   add(`${origin}/sale`, { priority: "0.8", changefreq: "daily" });
 
-  for (const cat of CATEGORY_IDS) {
+  const cats = await loadCategories(env); // edited from Kanaan POS; hidden ones left out
+  for (const cat of cats.list.filter((c) => c.active).map((c) => c.id)) {
     add(`${origin}/shop/${cat}`, { priority: "0.7", changefreq: "daily" });
-    for (const sub of subcategoriesFor(cat)) {
+    for (const sub of cats.subs[cat] || []) {
       add(`${origin}/shop/${cat}/${sub.id}`, { priority: "0.6", changefreq: "daily" });
     }
   }

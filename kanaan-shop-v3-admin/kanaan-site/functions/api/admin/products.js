@@ -1,5 +1,6 @@
 const SITE = "https://kanaanshop.com";
 import { json, isAuthed, rowToProduct, payloadToRow, slugify, saveVariants, loadVariantsForProducts , pingIndexNow } from "../../_shared/util.js";
+import { loadCategories } from "../../_shared/site.js";
 
 // GET /api/admin/products -> all products (including hidden), with stock
 export async function onRequestGet(context) {
@@ -31,7 +32,7 @@ export async function onRequestPost(context) {
 
   let body = {};
   try { body = await request.json(); } catch { return json({ error: "bad json" }, 400); }
-  const row = payloadToRow(body);
+  const row = payloadToRow(body, await loadCategories(env));
   if (!row.name) return json({ error: "Name is required." }, 400);
 
   let base = slugify(row.name) || "product";

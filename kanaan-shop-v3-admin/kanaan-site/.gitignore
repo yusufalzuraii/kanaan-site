@@ -1,0 +1,5 @@
+# never in the repository: the local test key, build output, local Cloudflare data
+.dev.vars
+.wrangler/
+dist/
+node_modules/

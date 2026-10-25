@@ -72,6 +72,13 @@ export default function Admin({ onExit }) {
   const [authed, setAuthed] = useState(false);
 
   useEffect(() => {
+    // the categories are edited in Kanaan POS now: the lists here follow the site's own
+    fetch("/api/categories").then((r) => r.json()).then((d) => {
+      if (!d || !Array.isArray(d.categories) || !d.categories.length) return;
+      CATEGORIES.splice(0, CATEGORIES.length, ...d.categories.map((c) => ({ id: c.id, label: c.label })));
+      for (const k of Object.keys(SUBCATEGORIES)) delete SUBCATEGORIES[k];
+      for (const c of d.categories) if ((c.subs || []).length) SUBCATEGORIES[c.id] = c.subs.map((s) => ({ id: s.id, label: s.label }));
+    }).catch(() => {});
     (async () => {
       try {
         const r = await fetch("/api/admin/session");
@@ -1186,10 +1193,15 @@ function ProductCardRow({ p, onEdit, onDelete }) {
           {!p.active && <span className="a-chip" style={{ fontSize: "0.68rem", padding: "1px 8px" }}>Hidden</span>}
           {p.badge && <span className="a-chip" style={{ fontSize: "0.68rem", padding: "1px 8px", color: p.badge === "sale" ? "var(--coral)" : "var(--teal)" }}>{p.badge}</span>}
           {tracked && totalStock === 0 && <span className="a-chip" style={{ fontSize: "0.68rem", padding: "1px 8px", color: "var(--coral)" }}>No stock</span>}
+          {p.source === "pos" && <span className="a-chip" style={{ fontSize: "0.68rem", padding: "1px 8px", color: "var(--teal)" }}>Kanaan POS</span>}
         </div>
       </div>
-      <button onClick={() => onEdit(p)} className="glass rounded-full p-2 tap-scale" aria-label="Edit"><Pencil className="w-4 h-4" /></button>
-      <button onClick={() => onDelete(p)} className="glass rounded-full p-2 tap-scale" aria-label="Delete"><Trash2 className="w-4 h-4" style={{ color: "var(--coral)" }} /></button>
+      {p.source === "pos" ? (
+        <span className="font-body text-xs text-muted" style={{ maxWidth: 150, textAlign: "right" }}>Managed in Kanaan POS → Website</span>
+      ) : (<>
+        <button onClick={() => onEdit(p)} className="glass rounded-full p-2 tap-scale" aria-label="Edit"><Pencil className="w-4 h-4" /></button>
+        <button onClick={() => onDelete(p)} className="glass rounded-full p-2 tap-scale" aria-label="Delete"><Trash2 className="w-4 h-4" style={{ color: "var(--coral)" }} /></button>
+      </>)}
     </div>
   );
 }

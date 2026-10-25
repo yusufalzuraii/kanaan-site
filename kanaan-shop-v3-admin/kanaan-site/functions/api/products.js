@@ -1,4 +1,5 @@
 import { json, rowToProduct, loadStock, releaseExpiredOrders } from "../_shared/util.js";
+import { loadCategories } from "../_shared/site.js";
 
 // GET /api/products — public list of visible products, with stock info.
 //
@@ -36,7 +37,10 @@ export async function onRequestGet(context) {
       p.stock = s ? s.stock : null;
     }
 
-    return json({ products, appExclusiveCount: exclusiveCount }, 200, { "Cache-Control": "no-store" });
+    // the shop's categories and fits (edited from Kanaan POS) come with the products: one request, always in step
+    let categories = null;
+    try { categories = (await loadCategories(env)).list.filter((c) => c.active); } catch { categories = null; }
+    return json({ products, appExclusiveCount: exclusiveCount, categories }, 200, { "Cache-Control": "no-store" });
   } catch (err) {
     return json({ products: [], error: String((err && err.message) || err) }, 200);
   }

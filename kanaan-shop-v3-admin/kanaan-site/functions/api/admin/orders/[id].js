@@ -22,6 +22,13 @@ export async function onRequestPost(context) {
 
   if (action === "confirm") {
     if (row.status !== "pending") return json({ error: `Order is already ${row.status}.` }, 409);
+    // pieces published from Kanaan POS: the order becomes a delivery invoice there, so the shop's stock and
+    // accounts stay right (confirming here would take the pieces only from the website)
+    const ids = [...new Set(items.map((i) => i.productId).filter(Boolean))];
+    if (ids.length) {
+      const pos = await env.DB.prepare(`SELECT COUNT(*) n FROM products WHERE id IN (${ids.map(() => "?").join(",")}) AND source = 'pos'`).bind(...ids).first().catch(() => null);
+      if (pos && pos.n > 0) return json({ error: "This order has pieces from Kanaan POS: accept it in the program (Management → Website → Orders)." }, 409);
+    }
     await confirmReservation(env, items);
     await env.DB.prepare("UPDATE orders SET status = 'confirmed', updated_at = ? WHERE id = ?")
       .bind(Date.now(), id).run();

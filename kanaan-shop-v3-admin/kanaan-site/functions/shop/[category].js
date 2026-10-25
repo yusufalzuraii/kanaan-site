@@ -7,7 +7,8 @@
    each category its own title, description, canonical URL, and an
    ItemList of what's actually in stock there right now. */
 
-import { CATEGORY_IDS, CATEGORY_LABELS, parseImages } from "../_shared/util.js";
+import { parseImages } from "../_shared/util.js";
+import { loadCategories } from "../_shared/site.js";
 import { renderListingContent, injectContent } from "../_shared/ssr.js";
 
 const esc = (s) =>
@@ -33,7 +34,9 @@ export async function onRequestGet(context) {
   if (!ct.includes("text/html")) return res;
 
   const category = String(params.category || "").trim();
-  if (!CATEGORY_IDS.includes(category) || !env.DB) return res;
+  if (!env.DB) return res;
+  const cats = await loadCategories(env); // categories are edited from Kanaan POS (built-in list as fallback)
+  if (!cats.ids.includes(category)) return res;
 
   let rows;
   try {
@@ -47,7 +50,7 @@ export async function onRequestGet(context) {
 
   const origin = new URL(request.url).origin;
   const url = `${origin}/shop/${category}`;
-  const label = CATEGORY_LABELS[category] || "Shop";
+  const label = cats.labels[category] || "Shop";
   const count = rows.length;
 
   const title = `${label} — Kanaan Shop`;

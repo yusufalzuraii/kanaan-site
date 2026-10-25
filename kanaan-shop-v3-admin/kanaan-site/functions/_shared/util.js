@@ -92,12 +92,24 @@ function safeEqual(a, b) {
 }
 
 export async function isAuthed(request, env) {
+  // Kanaan POS (the shop computer) signs in with its own secret key instead of the admin cookie
+  if (posAuthed(request, env)) return true;
   if (!env.ADMIN_PASSWORD) return false;
   const cookie = request.headers.get("Cookie") || "";
   const m = cookie.match(/(?:^|;\s*)kanaan_admin=([a-f0-9]+)/);
   if (!m) return false;
   const expected = await makeToken(env.ADMIN_PASSWORD);
   return safeEqual(m[1], expected);
+}
+
+/* Kanaan POS bridge: "Authorization: Bearer <POS_SYNC_KEY>". The key is made by the program on the shop
+   computer and pasted once into Cloudflare (Settings → Variables). Without it set, the bridge stays closed. */
+export function posAuthed(request, env) {
+  const key = env.POS_SYNC_KEY;
+  if (!key || String(key).length < 32) return false;
+  const h = request.headers.get("Authorization") || "";
+  const m = h.match(/^Bearer\s+(.+)$/);
+  return !!m && safeEqual(m[1].trim(), String(key));
 }
 
 export function cookieHeader(token) {
@@ -166,15 +178,16 @@ export function rowToProduct(r) {
 }
 
 /* Normalize an incoming product payload from the admin form into DB columns. */
-export function payloadToRow(body) {
+export function payloadToRow(body, cats) {
   const clean = (s) => String(s == null ? "" : s).trim();
   const list = (v) => (Array.isArray(v) ? v : String(v || "").split(",")).map((x) => String(x).trim()).filter(Boolean);
 
+  const ids = cats ? cats.ids : CATEGORY_IDS;
   const name = clean(body.name);
-  const category = CATEGORY_IDS.includes(clean(body.category)) ? clean(body.category) : "tshirts";
+  const category = ids.includes(clean(body.category)) ? clean(body.category) : ids[0] || "tshirts";
   // A fit only sticks if it's actually offered for this category.
   const subRaw = clean(body.subcategory);
-  const subcategory = isValidSub(category, subRaw) ? subRaw : "";
+  const subcategory = (cats ? (cats.subs[category] || []).some((s) => s.id === subRaw) : isValidSub(category, subRaw)) ? subRaw : "";
   const price = Math.max(0, Math.round(Number(body.price) || 0));
   const colors = list(body.colors).filter((c) => COLOR_KEYS.includes(c));
   const sizes = list(body.sizes);

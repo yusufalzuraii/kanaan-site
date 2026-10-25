@@ -1,4 +1,5 @@
 import { json, releaseExpiredOrders, releaseReservation, rateLimit, tooManyRequests } from "../_shared/util.js";
+import { notifyShop } from "../_shared/webpush.js";
 
 /* POST /api/orders
    ------------------------------------------------------------
@@ -171,6 +172,14 @@ export async function onRequestPost(context) {
     await rollback();
     return json({ error: "Could not save your order. Please try again." }, 500);
   }
+
+  // the shop's iPhones (Kanaan POS on the phone) hear about it at once — after the answer, never delaying it
+  const pieces = items.reduce((a, it) => a + it.qty, 0);
+  const job = (async () => {
+    const w = await env.DB.prepare("SELECT COUNT(*) AS n FROM orders WHERE status IN ('pending','processing')").first().catch(() => null);
+    await notifyShop(env, { title: `🛍 New order #${id}`, body: `${name} · ${pieces} ${pieces === 1 ? "piece" : "pieces"} · $${total}${area ? ` · ${area}` : ""}`, tag: `order-${id}`, url: "/pos/#orders", badge: w ? w.n : 1 });
+  })();
+  if (context.waitUntil) context.waitUntil(job); else await job;
 
   return json({ ok: true, orderNumber: id, subtotal, delivery: DELIVERY_FEE, total, items });
 }

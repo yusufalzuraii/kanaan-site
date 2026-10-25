@@ -25,6 +25,8 @@ export async function ensureSchema(env) {
        PRIMARY KEY (day, kind, key))`,
     `CREATE TABLE IF NOT EXISTS analytics_uniques (day TEXT NOT NULL, h TEXT NOT NULL, PRIMARY KEY (day, h))`,
     `CREATE TABLE IF NOT EXISTS pos_state (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')`,
+    // the shop's phones that get a notification for each website order (Web Push)
+    `CREATE TABLE IF NOT EXISTS pos_push (endpoint TEXT PRIMARY KEY, keys TEXT NOT NULL, device_no INTEGER, user_name TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL DEFAULT 0, last_ok INTEGER NOT NULL DEFAULT 0, fails INTEGER NOT NULL DEFAULT 0)`,
   ];
   for (const s of stmts) await env.DB.prepare(s).run();
   // products published by the POS are marked, so the storefront and the old admin treat their stock right

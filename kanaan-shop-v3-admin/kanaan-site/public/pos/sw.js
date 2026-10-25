@@ -15,3 +15,24 @@ self.addEventListener('fetch', (e) => {
     try { const r = await fetch(e.request, { cache: 'no-store' }); if (r.ok) (await caches.open(CACHE)).put(e.request, r.clone()); return r; } catch { const c = await caches.open(CACHE); return (await c.match(e.request)) || (await c.match('/pos/')) || Response.error(); }
   })());
 });
+
+/* Website orders, even when the app is closed (iOS 16.4+ on the home screen). The message is encrypted for this phone
+   by the shop's site; it carries the order number and the customer's name. */
+self.addEventListener('push', (e) => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch { d = { body: e.data ? e.data.text() : '' }; }
+  if (d.badge != null && self.navigator && self.navigator.setAppBadge) self.navigator.setAppBadge(d.badge).catch(() => {});
+  e.waitUntil(self.registration.showNotification(d.title || 'Kanaan', {
+    body: d.body || 'Something new in the shop', tag: d.tag || 'kanaan', renotify: true,
+    icon: '/pos/icon-192.png', badge: '/pos/icon-192.png', data: { url: d.url || '/pos/' },
+  }));
+});
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const url = (e.notification.data && e.notification.data.url) || '/pos/';
+  e.waitUntil((async () => {
+    const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const c of all) { if (new URL(c.url).pathname.startsWith('/pos/')) { await c.focus(); c.postMessage({ kanaan: 'open', url }); return; } }
+    await self.clients.openWindow(url);
+  })());
+});

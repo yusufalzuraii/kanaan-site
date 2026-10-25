@@ -104,6 +104,8 @@ export async function setup(db, env, body) {
   if (!safeEqual(String(body.key || ''), String(key))) throw new HubError('Wrong setup key', 403);
   await ensureHub(db);
   const count = (await db.prepare('SELECT COUNT(*) n FROM hub_devices').first()).n;
+  // a phone joins a shop that is already in the cloud: the shop computer always comes first (it has the data)
+  if (count === 0 && body.kind === 'phone') throw new HubError('The shop computer has to connect to Kanaan Cloud first.', 409);
   const dev = await newDevice(db, body);
   const v = (await db.prepare("SELECT v FROM hub_meta WHERE k = 'v'").first()).v;
   return { ...dev, first: count === 0, v };

@@ -5,9 +5,13 @@
   "compatibility_flags": ["nodejs_compat"],
   "pages_build_output_dir": "./dist",
   "d1_databases": [
-    { "binding": "DB", "database_name": "kanaan-db", "database_id": "9b955aee-9527-454c-976f-295bfb5166d5" }
+    { "binding": "DB", "database_name": "kanaan-db", "database_id": "9b955aee-9527-454c-976f-295bfb5166d5" },
+    // Kanaan Cloud (the POS database shared by the shop computer and the phone). Separate from the site's data.
+    { "binding": "POS_DB", "database_name": "kanaan-pos", "database_id": "7606a2e3-babc-4d36-a7b5-53cd134563ff" }
   ],
   "r2_buckets": [
-    { "binding": "BUCKET", "bucket_name": "kanaan-images" }
+    { "binding": "BUCKET", "bucket_name": "kanaan-images" },
+    // whole copies of the POS database (first copy, daily backups) — private, never served by /img
+    { "binding": "POS_BACKUPS", "bucket_name": "kanaan-pos-backups" }
   ]
 }

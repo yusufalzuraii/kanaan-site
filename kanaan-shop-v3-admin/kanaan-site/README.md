@@ -4,7 +4,6 @@
 npm install
 npm run dev
 
-
 ## Build for production
 npm run build
 # output goes to the dist/ folder

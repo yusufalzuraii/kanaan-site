@@ -48,7 +48,7 @@ jobs:
         run: npm ci
 
       - name: بناء الموقع (Vite)
-        run: npm run build
+        run: npm run build && rm -rf dist/pos   # the shop's own phone app (/pos) stays on the website, not in the shoppers' app
 
       - name: إضافة منصة أندرويد (تتولّد من جديد كل مرة، ما بتترفع عالريبو)
         run: npx cap add android

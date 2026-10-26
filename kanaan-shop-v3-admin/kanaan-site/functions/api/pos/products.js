@@ -1,5 +1,5 @@
 const SITE = "https://kanaanshop.com";
-import { json, payloadToRow, slugify, pingIndexNow, COLOR_KEYS, parseImages } from "../../_shared/util.js";
+import { json, payloadToRow, slugify, pingIndexNow, COLOR_KEYS, parseImages, deleteUploadedImage } from "../../_shared/util.js";
 import { guard, setStock, restockPush, productWithStock } from "../../_shared/pos.js";
 import { loadCategories } from "../../_shared/site.js";
 
@@ -39,6 +39,9 @@ export async function onRequestPost(context) {
   }
   let id;
   const now = Date.now();
+  // the photos this page showed before: the ones it no longer uses (and no other page uses) leave the storage
+  let before = [];
+  if (existing) { const r = await env.DB.prepare("SELECT images FROM products WHERE id = ?").bind(existing.id).first(); before = parseImages(r && r.images).map((im) => im.url).filter(Boolean); }
   if (existing) {
     id = existing.id;
     await env.DB.prepare(`UPDATE products SET name=?, category=?, subcategory=?, price=?, colors=?, sizes=?, description=?, badge=?, discount=?, images=?,
@@ -66,6 +69,12 @@ export async function onRequestPost(context) {
     if (old === id) continue;
     const r = await env.DB.prepare("UPDATE products SET active = 0, replaced_at = ?, replaced_by = ? WHERE id = ? AND source <> 'pos'").bind(now, id, old).run();
     if (r.meta && r.meta.changes) replaced.push(old);
+  }
+  const nowUsed = new Set(parseImages(row.images).map((im) => im.url));
+  for (const url of before) {
+    if (nowUsed.has(url) || !String(url).startsWith("/img/")) continue;
+    const still = await env.DB.prepare("SELECT id FROM products WHERE images LIKE ? LIMIT 1").bind(`%${url}%`).first();
+    if (!still) { try { await deleteUploadedImage(env, url); } catch { /* best effort */ } }
   }
   if (row.active) pingIndexNow([`${SITE}/product/${id}`, `${SITE}/shop/${row.category}`, `${SITE}/sitemap.xml`, ...replaced.map((o) => `${SITE}/product/${o}`)]);
   return json({ ok: true, id, url: `${SITE}/product/${id}`, replaced, adopted, product: await productWithStock(env, id) });

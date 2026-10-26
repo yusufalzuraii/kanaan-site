@@ -13,11 +13,48 @@
     <link rel="manifest" href="/pos/manifest.webmanifest" />
     <link rel="apple-touch-icon" href="/pos/icon-180.png" />
     <link rel="icon" type="image/png" href="/pos/icon-192.png" />
+    <!-- iPhone: the screen it shows while the app starts (instead of white) -->
+    <link rel="apple-touch-startup-image" href="/pos/splash/splash-1290x2796.jpg" media="(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" />
+    <link rel="apple-touch-startup-image" href="/pos/splash/splash-1290x2796-dark.jpg" media="(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait) and (prefers-color-scheme: dark)" />
+    <link rel="apple-touch-startup-image" href="/pos/splash/splash-1179x2556.jpg" media="(device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" />
+    <link rel="apple-touch-startup-image" href="/pos/splash/splash-1179x2556-dark.jpg" media="(device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait) and (prefers-color-scheme: dark)" />
+    <link rel="apple-touch-startup-image" href="/pos/splash/splash-1206x2622.jpg" media="(device-width: 402px) and (device-height: 874px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" />
+    <link rel="apple-touch-startup-image" href="/pos/splash/splash-1206x2622-dark.jpg" media="(device-width: 402px) and (device-height: 874px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait) and (prefers-color-scheme: dark)" />
+    <link rel="apple-touch-startup-image" href="/pos/splash/splash-1320x2868.jpg" media="(device-width: 440px) and (device-height: 956px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" />
+    <link rel="apple-touch-startup-image" href="/pos/splash/splash-1320x2868-dark.jpg" media="(device-width: 440px) and (device-height: 956px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait) and (prefers-color-scheme: dark)" />
+    <link rel="apple-touch-startup-image" href="/pos/splash/splash-1170x2532.jpg" media="(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" />
+    <link rel="apple-touch-startup-image" href="/pos/splash/splash-1170x2532-dark.jpg" media="(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait) and (prefers-color-scheme: dark)" />
+    <link rel="apple-touch-startup-image" href="/pos/splash/splash-1284x2778.jpg" media="(device-width: 428px) and (device-height: 926px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" />
+    <link rel="apple-touch-startup-image" href="/pos/splash/splash-1284x2778-dark.jpg" media="(device-width: 428px) and (device-height: 926px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait) and (prefers-color-scheme: dark)" />
+    <link rel="apple-touch-startup-image" href="/pos/splash/splash-1125x2436.jpg" media="(device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" />
+    <link rel="apple-touch-startup-image" href="/pos/splash/splash-1125x2436-dark.jpg" media="(device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait) and (prefers-color-scheme: dark)" />
+    <link rel="apple-touch-startup-image" href="/pos/splash/splash-1242x2688.jpg" media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" />
+    <link rel="apple-touch-startup-image" href="/pos/splash/splash-1242x2688-dark.jpg" media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait) and (prefers-color-scheme: dark)" />
+    <link rel="apple-touch-startup-image" href="/pos/splash/splash-828x1792.jpg" media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)" />
+    <link rel="apple-touch-startup-image" href="/pos/splash/splash-828x1792-dark.jpg" media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait) and (prefers-color-scheme: dark)" />
+    <link rel="apple-touch-startup-image" href="/pos/splash/splash-750x1334.jpg" media="(device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)" />
+    <link rel="apple-touch-startup-image" href="/pos/splash/splash-750x1334-dark.jpg" media="(device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait) and (prefers-color-scheme: dark)" />
     <title>Kanaan POS</title>
-    <script type="module" crossorigin src="/pos/assets/index-D0wvlMvG.js"></script>
-    <link rel="stylesheet" crossorigin href="/pos/assets/index-DRp3aexk.css">
+    <!-- the first thing on screen, before anything loads: the shop's colours and name (no white flash) -->
+    <style>
+      html, body { margin: 0; height: 100%; background: #F2F2F4; }
+      @media (prefers-color-scheme: dark) { html, body { background: #0B0B0E; } }
+      .splash { position: fixed; inset: 0; display: grid; place-items: center; align-content: center; gap: 22px; background: radial-gradient(70% 50% at 10% 0%, rgba(255,69,34,.16), transparent 60%), radial-gradient(60% 50% at 100% 100%, rgba(18,179,160,.14), transparent 60%), #F2F2F4; color: #14141A; }
+      .splash-mark { font: 700 26px/1 'Space Grotesk', -apple-system, 'Helvetica Neue', Arial, sans-serif; letter-spacing: .42em; padding-left: .42em; }
+      .splash-bar { width: 64px; height: 3px; border-radius: 3px; background: rgba(20,20,26,.1); overflow: hidden; }
+      .splash-bar i { display: block; width: 40%; height: 100%; border-radius: 3px; background: #FF4522; animation: splash-go 1.1s ease-in-out infinite; }
+      @keyframes splash-go { 0% { transform: translateX(-110%); } 100% { transform: translateX(260%); } }
+      @media (prefers-color-scheme: dark) { .splash { background: radial-gradient(70% 50% at 10% 0%, rgba(255,69,34,.22), transparent 60%), radial-gradient(60% 50% at 100% 100%, rgba(18,179,160,.18), transparent 60%), #0B0B0E; color: #F5F5F7; } .splash-bar { background: rgba(255,255,255,.12); } }
+      :root[data-theme="light"] .splash { background: radial-gradient(70% 50% at 10% 0%, rgba(255,69,34,.16), transparent 60%), radial-gradient(60% 50% at 100% 100%, rgba(18,179,160,.14), transparent 60%), #F2F2F4; color: #14141A; }
+      :root[data-theme="dark"] .splash { background: radial-gradient(70% 50% at 10% 0%, rgba(255,69,34,.22), transparent 60%), radial-gradient(60% 50% at 100% 100%, rgba(18,179,160,.18), transparent 60%), #0B0B0E; color: #F5F5F7; }
+      .splash-note { margin: 0; max-width: 260px; text-align: center; font: 500 13.5px/1.45 Inter, -apple-system, 'Helvetica Neue', Arial, sans-serif; opacity: .6; }
+      @media (prefers-reduced-motion: reduce) { .splash-bar i { animation: none; width: 100%; } }
+    </style>
+    <script>try { var t = localStorage.getItem('kanaan-theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}</script>
+    <script type="module" crossorigin src="/pos/assets/index-DYMvL3zi.js"></script>
+    <link rel="stylesheet" crossorigin href="/pos/assets/index-DNNt9_EQ.css">
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root"><div class="splash"><div class="splash-mark">KANAAN</div><div class="splash-bar"><i></i></div></div></div>
   </body>
 </html>

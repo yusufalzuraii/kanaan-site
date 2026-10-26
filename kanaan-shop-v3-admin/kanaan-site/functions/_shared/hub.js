@@ -12,6 +12,8 @@
  *  - the old history is not written here row by row: it is a database file ("base") in R2.
  *
  * Tables: hub_meta (k, v) · hub_rows (t, pk, d JSON | NULL = deleted, v, dev, at, pt) · hub_devices · hub_pair · hub_bases
+ *         · hub_claims (one device does a job: a WhatsApp receipt is sent once, by the computer or the server)
+ *         · hub_cmds (a device asks another one to do something: the WhatsApp server links WhatsApp, …)
  *
  * Rows come whole ({d}: a new row), as changed columns only ({p}: merged into the row here, so two devices changing
  * different columns of the same row both keep their change), or deleted ({d: null}: a deletion always wins).
@@ -33,9 +35,14 @@ export const HUB_SCHEMA = [
   `CREATE TABLE IF NOT EXISTS hub_pair (code_hash TEXT PRIMARY KEY, expires INTEGER NOT NULL, by_dev INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS hub_bases (id INTEGER PRIMARY KEY, r2_key TEXT NOT NULL, v INTEGER NOT NULL, dev INTEGER NOT NULL,
      size INTEGER NOT NULL, at INTEGER NOT NULL, kind TEXT NOT NULL DEFAULT 'base')`,
+  `CREATE TABLE IF NOT EXISTS hub_claims (t TEXT NOT NULL, k TEXT NOT NULL, dev INTEGER NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (t, k)) WITHOUT ROWID`,
+  `CREATE TABLE IF NOT EXISTS hub_cmds (id INTEGER PRIMARY KEY, to_dev INTEGER NOT NULL, by_dev INTEGER NOT NULL, cmd TEXT NOT NULL, at INTEGER NOT NULL,
+     done_at INTEGER, result TEXT)`,
 ];
+// added later to hub_devices (an old hub gets them at its next start; "duplicate column" means it is there already)
+const HUB_COLUMNS = ['ALTER TABLE hub_devices ADD COLUMN status TEXT', 'ALTER TABLE hub_pair ADD COLUMN kind TEXT'];
 
-export const LIMITS = { pushBytes: 512 * 1024, pullRows: 400, pairMinutes: 10, keepBases: 30 };
+export const LIMITS = { pushBytes: 512 * 1024, pullRows: 400, pairMinutes: 10, serverPairHours: 24, keepBases: 30, statusBytes: 4096, keepClaimsDays: 30 };
 
 export class HubError extends Error { constructor(message, status = 400) { super(message); this.status = status; } }
 
@@ -66,6 +73,7 @@ let ready = false;
 export async function ensureHub(db) {
   if (ready) return;
   await db.batch(HUB_SCHEMA.map((s) => db.prepare(s)));
+  for (const s of HUB_COLUMNS) { try { await db.prepare(s).run(); } catch (e) { if (!/duplicate column/i.test(String(e && e.message))) throw e; } }
   ready = true;
 }
 /** Tests: a new hub database. */
@@ -110,29 +118,105 @@ export async function setup(db, env, body) {
   const v = (await db.prepare("SELECT v FROM hub_meta WHERE k = 'v'").first()).v;
   return { ...dev, first: count === 0, v };
 }
-/** A connected device asks for a code to connect another one (valid 10 minutes, one use). */
-export async function pairStart(db, dev) {
+/**
+ * A connected device asks for a code to connect another one (valid 10 minutes, one use). kind 'server': a code for
+ * the shop's WhatsApp server, typed while the server is being made in the cloud — valid a day, only for a server.
+ */
+export async function pairStart(db, dev, { kind } = {}) {
   const code = pairCode();
-  const expires = Date.now() + LIMITS.pairMinutes * 60000;
+  const server = kind === 'server';
+  const expires = Date.now() + (server ? LIMITS.serverPairHours * 3600000 : LIMITS.pairMinutes * 60000);
   await db.batch([
     db.prepare('DELETE FROM hub_pair WHERE expires < ?').bind(Date.now()),
-    db.prepare('INSERT INTO hub_pair (code_hash, expires, by_dev) VALUES (?, ?, ?)').bind(await sha256Hex(code), expires, dev.no),
+    db.prepare('INSERT INTO hub_pair (code_hash, expires, by_dev, kind) VALUES (?, ?, ?, ?)').bind(await sha256Hex(code), expires, dev.no, server ? 'server' : null),
   ]);
-  return { code, expires };
+  return { code, expires, kind: server ? 'server' : null };
 }
 export async function pairFinish(db, body) {
   const code = String(body.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (code.length !== 8) throw new HubError('The code has 8 letters and numbers');
   const hash = await sha256Hex(code);
-  const row = await db.prepare('DELETE FROM hub_pair WHERE code_hash = ? AND expires >= ? RETURNING by_dev').bind(hash, Date.now()).first();
+  const row = await db.prepare('DELETE FROM hub_pair WHERE code_hash = ? AND expires >= ? RETURNING by_dev, kind').bind(hash, Date.now()).first();
   if (!row) throw new HubError('This code is wrong or expired. Make a new one on the other device.', 403);
-  const dev = await newDevice(db, body);
+  // a server code makes a server (and only a server); an ordinary code never makes one
+  const kind = row.kind === 'server' ? 'server' : body.kind === 'server' ? 'phone' : body.kind;
+  const dev = await newDevice(db, { ...body, kind });
   const v = (await db.prepare("SELECT v FROM hub_meta WHERE k = 'v'").first()).v;
   return { ...dev, v, by: row.by_dev };
 }
 export async function listDevices(db) {
-  const { results } = await db.prepare('SELECT no, name, kind, created_at, last_seen, last_v, pushed, app, revoked, whatsapp FROM hub_devices ORDER BY no').all();
-  return results || [];
+  const { results } = await db.prepare('SELECT no, name, kind, created_at, last_seen, last_v, pushed, app, revoked, whatsapp, status FROM hub_devices ORDER BY no').all();
+  return (results || []).map((r) => { let st = null; try { st = r.status ? JSON.parse(r.status) : null; } catch { st = null; } return { ...r, status: st }; });
+}
+
+/* ---------- one device does a job (claims) ---------- */
+/**
+ * "This one is mine": the first device to claim (t, k) gets it, every other device is told who has it. The WhatsApp
+ * receipts use it — the shop computer and the WhatsApp server both may send, a receipt goes out once.
+ */
+export async function claim(db, dev, body) {
+  const t = String(body.t || '').slice(0, 40); const k = String(body.k || '').slice(0, 80);
+  if (!t || !k) throw new HubError('Nothing to claim');
+  const now = Date.now();
+  // staleMs (a minute or more): the job is taken over when the device that has it went quiet that long (switched off
+  // halfway) or was disconnected — so a receipt is never stuck with a device that is gone
+  const stale = Math.floor(Number(body.staleMs) || 0);
+  const res = await db.batch([
+    db.prepare('INSERT OR IGNORE INTO hub_claims (t, k, dev, at) VALUES (?, ?, ?, ?)').bind(t, k, dev.no, now),
+    db.prepare(`UPDATE hub_claims SET dev = ?1, at = ?2 WHERE t = ?3 AND k = ?4 AND dev <> ?1 AND ?5 >= 60000
+        AND NOT EXISTS (SELECT 1 FROM hub_devices d WHERE d.no = hub_claims.dev AND d.revoked = 0 AND d.last_seen >= ?2 - ?5)`).bind(dev.no, now, t, k, stale),
+    db.prepare('SELECT dev, at FROM hub_claims WHERE t = ? AND k = ?').bind(t, k),
+    db.prepare('UPDATE hub_devices SET last_seen = ? WHERE no = ?').bind(now, dev.no),
+  ]);
+  if (res[0].meta && res[0].meta.changes && Math.random() < 0.02) await db.prepare('DELETE FROM hub_claims WHERE at < ?').bind(now - LIMITS.keepClaimsDays * 86400000).run();
+  const row = res[2].results[0];
+  return { ok: row.dev === dev.no, holder: row.dev, at: row.at };
+}
+/** A job given back (it could not be done here — another device may do it). */
+export async function unclaim(db, dev, body) {
+  await db.prepare('DELETE FROM hub_claims WHERE t = ? AND k = ? AND dev = ?').bind(String(body.t || ''), String(body.k || ''), dev.no).run();
+  return { ok: true };
+}
+
+/* ---------- how a device is (the WhatsApp server says it is on, and how its WhatsApp is) ---------- */
+export async function presence(db, dev, text) {
+  if (typeof text !== 'string' || text.length > LIMITS.statusBytes) throw new HubError('Status too big');
+  try { JSON.parse(text); } catch { throw new HubError('Bad status'); }
+  const res = await db.batch([
+    db.prepare('UPDATE hub_devices SET last_seen = ?, status = ? WHERE no = ?').bind(Date.now(), text, dev.no),
+    db.prepare('SELECT COUNT(*) n FROM hub_cmds WHERE to_dev = ? AND done_at IS NULL').bind(dev.no),
+  ]);
+  // cmds: requests waiting for this device (it asks for them only then — fewer requests on the free plan)
+  return { ok: true, time: Date.now(), cmds: (res[1].results[0] || {}).n || 0 };
+}
+
+/* ---------- a device asks another one to do something ---------- */
+export async function sendCmd(db, dev, body) {
+  const to = Math.floor(Number(body.to));
+  if (!Number.isFinite(to)) throw new HubError('Which device?');
+  const target = await db.prepare('SELECT no, revoked FROM hub_devices WHERE no = ?').bind(to).first();
+  if (!target || target.revoked) throw new HubError('That device is not in the shop', 404);
+  const cmd = JSON.stringify(body.cmd || {});
+  if (cmd.length > 2048) throw new HubError('Too big');
+  const now = Date.now();
+  const row = await db.prepare('INSERT INTO hub_cmds (to_dev, by_dev, cmd, at) VALUES (?, ?, ?, ?) RETURNING id').bind(to, dev.no, cmd, now).first();
+  await db.prepare('DELETE FROM hub_cmds WHERE at < ?').bind(now - 7 * 86400000).run();
+  return { ok: true, id: row.id };
+}
+export async function myCmds(db, dev) {
+  const { results } = await db.prepare('SELECT id, by_dev, cmd, at FROM hub_cmds WHERE to_dev = ? AND done_at IS NULL ORDER BY id LIMIT 20').bind(dev.no).all();
+  return { cmds: (results || []).map((r) => { let c = {}; try { c = JSON.parse(r.cmd); } catch { c = {}; } return { id: r.id, by: r.by_dev, cmd: c, at: r.at }; }) };
+}
+export async function cmdDone(db, dev, id, body) {
+  const result = JSON.stringify((body && body.result) || {}).slice(0, 2048);
+  await db.prepare('UPDATE hub_cmds SET done_at = ?, result = ? WHERE id = ? AND to_dev = ?').bind(Date.now(), result, Math.floor(Number(id)), dev.no).run();
+  return { ok: true };
+}
+export async function cmdResult(db, dev, id) {
+  const r = await db.prepare('SELECT id, to_dev, done_at, result FROM hub_cmds WHERE id = ? AND by_dev = ?').bind(Math.floor(Number(id)), dev.no).first();
+  if (!r) throw new HubError('Not found', 404);
+  let result = null; try { result = r.result ? JSON.parse(r.result) : null; } catch { result = null; }
+  return { id: r.id, done: !!r.done_at, result };
 }
 export async function revokeDevice(db, dev, no) {
   if (Number(no) === dev.no) throw new HubError("A device can't disconnect itself here");
@@ -253,7 +337,14 @@ export async function handle(request, env, path) {
     }
     if (path === 'pull' && method === 'GET') return json(await pull(db, dev, url.searchParams.get('since'), url.searchParams.get('limit')));
     if (path === 'status' && method === 'GET') return json({ ...(await status(db)), me: dev.no });
-    if (path === 'pair/start' && method === 'POST') return json(await pairStart(db, dev));
+    if (path === 'pair/start' && method === 'POST') { let b = {}; try { b = await request.json(); } catch { b = {}; } return json(await pairStart(db, dev, b)); }
+    if (path === 'claim' && method === 'POST') return json(await claim(db, dev, await request.json()));
+    if (path === 'unclaim' && method === 'POST') return json(await unclaim(db, dev, await request.json()));
+    if (path === 'presence' && method === 'POST') return json(await presence(db, dev, await request.text()));
+    if (path === 'cmds' && method === 'POST') return json(await sendCmd(db, dev, await request.json()));
+    if (path === 'cmds' && method === 'GET') return json(await myCmds(db, dev));
+    if (path.startsWith('cmds/') && path.endsWith('/done') && method === 'POST') return json(await cmdDone(db, dev, path.split('/')[1], await request.json()));
+    if (path.startsWith('cmds/') && method === 'GET') return json(await cmdResult(db, dev, path.split('/')[1]));
     if (path === 'devices' && method === 'GET') return json({ devices: await listDevices(db), me: dev.no });
     if (path.startsWith('devices/') && path.endsWith('/revoke') && method === 'POST') return json(await revokeDevice(db, dev, path.split('/')[1]));
     if (path === 'base' && method === 'PUT') {

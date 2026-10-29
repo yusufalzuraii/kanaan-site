@@ -182,7 +182,10 @@ export default function HomeLab({ home = false, products, loading, goCatalog, go
   }, [products]);
 
   return (
-    <div className={`lab lab-${mode}`}>
+    // lab-is-*, not lab-walk etc.: those name the tall scroll sections, and
+    // on this wrapper they made it exactly as tall as the walk, so the page
+    // footer was laid over the products below it
+    <div className={`lab lab-is-${mode}`}>
       <LabStyles />
       {home && <ScrollProgress />}
       {mode === "walk" && (

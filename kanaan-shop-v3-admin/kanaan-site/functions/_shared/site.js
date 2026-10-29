@@ -115,6 +115,18 @@ const BOT = /bot|crawl|spider|slurp|facebookexternalhit|whatsapp|preview|headles
 export function beirutDay(ts = Date.now()) {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Beirut", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(ts));
 }
+/** Beirut's offset from UTC at that moment, in minutes: +180 in summer, +120 in winter (Lebanon changes the clock). */
+function beirutOffset(ts) {
+  const p = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Beirut", hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }).formatToParts(new Date(ts));
+  const g = (t) => Number((p.find((x) => x.type === t) || {}).value || 0);
+  return Math.round((Date.UTC(g("year"), g("month") - 1, g("day"), g("hour") % 24, g("minute"), g("second")) - Math.floor(ts / 1000) * 1000) / 60000);
+}
+/** The moment a Beirut clock time happens ("2026-10-29", "23:59:59") — with that day's own offset, summer or winter. */
+export function beirutMoment(day, hms) {
+  const asIfUtc = Date.parse(`${day}T${hms}Z`);
+  const first = asIfUtc - beirutOffset(asIfUtc) * 60000;
+  return asIfUtc - beirutOffset(first) * 60000;
+}
 function sourceOf(ref, utm) {
   const s = `${utm || ""} ${ref || ""}`.toLowerCase();
   if (!s.trim()) return "direct";
@@ -179,7 +191,8 @@ export async function statsBetween(env, from, to) {
     const names = (await env.DB.prepare(`SELECT id, name, images, pos_model FROM products WHERE id IN (${ids.map(() => "?").join(",")})`).bind(...ids).all()).results || [];
     for (const t of topProducts) { const p = names.find((x) => x.id === t.key); t.name = p ? p.name : t.key; t.posModel = p ? p.pos_model : ""; t.carts = rows.filter((r) => r.kind === "cart" && r.key === t.key).reduce((a, r) => a + r.n, 0); }
   }
-  const start = new Date(`${from}T00:00:00+03:00`).getTime(); const end = new Date(`${to}T23:59:59+03:00`).getTime();
+  // the shop's days, Beirut time: +03:00 in summer, +02:00 in winter (a fixed +03:00 lost the last hour of every winter day)
+  const start = beirutMoment(from, "00:00:00"); const end = beirutMoment(to, "23:59:59") + 999;
   const orders = (await env.DB.prepare("SELECT status, COUNT(*) n, COALESCE(SUM(total),0) t FROM orders WHERE created_at BETWEEN ? AND ? GROUP BY status").bind(start, end).all()).results || [];
   return {
     from, to,

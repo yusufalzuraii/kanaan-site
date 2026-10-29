@@ -316,7 +316,7 @@ export default function HomeLab({ home = false, products, loading, goCatalog, go
    The 3D stage plus the still behind it. The still is shown first; when the
    live scene has drawn its first frame it fades in on top.
    ------------------------------------------------------------------ */
-function Stage({ mode, theme, tall, tier, look = "v1", stagePieces, neon, safe, onStore, openProduct }) {
+function Stage({ mode, theme, tall, tier, look = "v1", stagePieces, showcase, neon, safe, onStore, openProduct }) {
   const [ready, setReady] = useState(false);
   const pieces = stagePieces;
   const onSelect = useCallback((piece) => piece && piece.product && openProduct(piece.product), [openProduct]);
@@ -330,6 +330,7 @@ function Stage({ mode, theme, tall, tier, look = "v1", stagePieces, neon, safe, 
           tier={tier}
           look={look}
           products={pieces}
+          showcase={showcase}
           neon={neon}
           safeLeft={safe ? safe.left : 0}
           safeBottom={safe ? safe.bottom : 0}
@@ -682,12 +683,25 @@ function SectionWalk({ theme, tall, tier, stagePieces, sections, counts, saleCou
     </div>
   );
   const ask = (sec) => `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(`Hi Kanaan! What ${sec.ask} do you have in my size?`)}`;
+  // each section's pieces, for the 3D: they come out of their own shelf
+  // when the walk stops there (store3d/showcase.js)
+  const showcase = useMemo(() => SECTIONS.map((sec) => {
+    const st = SECTION_STATIONS.find((x) => x.id === sec.id);
+    const items = sections[sec.id].items.filter((p) => firstImage(p)).slice(0, 4).map((p) => ({
+      id: p.id,
+      image: firstImage(p),
+      product: p,
+      price: money(effectivePrice(p)),
+      was: isOnSale(p) ? money(p.price) : null,
+    }));
+    return { id: sec.id, from: st.from, to: st.to, side: sec.side, items };
+  }), [sections]);
   const reg = (id) => (el) => { stationRefs.current[id] = el; };
 
   return (
     <section ref={sectionRef} className="lab-walk" aria-label="Kanaan Shop">
       <div className="lab-sticky">
-        <Stage mode="walk" theme={theme} tall={tall} tier={tier} look="v2" stagePieces={stagePieces} safe={safe} onStore={onStore} openProduct={openProduct} />
+        <Stage mode="walk" theme={theme} tall={tall} tier={tier} look="v2" stagePieces={stagePieces} showcase={showcase} safe={safe} onStore={onStore} openProduct={openProduct} />
 
         <nav ref={barRef} className="lab-aisles glass" aria-label="Sections of the shop">
           {SECTIONS.map((sec) => (
@@ -718,7 +732,11 @@ function SectionWalk({ theme, tall, tier, stagePieces, sections, counts, saleCou
               <div className="lab-scrim" />
               <div className="lab-card">
                 <h2 className="lab-title">{sec.title}</h2>
-                {shown.length > 0 && picks(shown)}
+                {shown.length > 0 && <p className="lab-lede lab-hint">Tap a piece to see it.</p>}
+                {/* the pieces themselves float in the 3D; this list is for
+                    keyboards and screen readers, and shows itself when a
+                    keyboard reaches it */}
+                {shown.length > 0 && <div className="lab-sr">{picks(shown)}</div>}
                 {cats.length > 0 && chips(cats)}
                 {items.length === 0 && (
                   <>
@@ -1066,6 +1084,9 @@ const LAB_CSS = String.raw`
 .lab-aisles button.is-on { background: var(--fg); color: var(--bg); }
 .lab-aisles button:focus-visible { outline: 2px solid var(--coral); outline-offset: 1px; }
 @media (max-width: 420px) { .lab-aisles button { padding: 7px 11px; font-size: 0.8rem; } }
+
+.lab-hint { margin-top: 6px; font-size: 0.92rem; }
+.lab-sr:not(:focus-within) { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
 /* Lite hero */
 .lab-lite { margin-top: calc(-1 * var(--header-h)); }

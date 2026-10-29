@@ -8,11 +8,14 @@
 import React, { useEffect, useRef } from "react";
 import { KanaanStore } from "./KanaanStore.js";
 
-export default function StoreStage({ mode = "walk", theme = "light", tier = "high", look = "v1", products, neon, safeLeft = 0, safeBottom = 0, onSelect, onStore, onReady, className = "", style }) {
+export default function StoreStage({ mode = "walk", theme = "light", tier = "high", look = "v1", products, showcase, neon, safeLeft = 0, safeBottom = 0, onSelect, onStore, onReady, className = "", style }) {
   const canvasRef = useRef(null);
   const storeRef = useRef(null);
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
+  // the latest stock, for a store that is (re)built after it arrived
+  const latest = useRef({});
+  latest.current = { products, showcase, neon };
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -33,6 +36,10 @@ export default function StoreStage({ mode = "walk", theme = "light", tier = "hig
       return undefined;
     }
     storeRef.current = store;
+    const { products: p0, showcase: s0, neon: n0 } = latest.current;
+    if (p0) store.setProducts(p0);
+    if (s0) store.setShowcase(s0);
+    if (n0) store.setNeon(n0);
     if (onStore) onStore(store);
 
     const ro = new ResizeObserver(() => store.resize(canvas.clientWidth, canvas.clientHeight));
@@ -51,6 +58,7 @@ export default function StoreStage({ mode = "walk", theme = "light", tier = "hig
 
   useEffect(() => { if (storeRef.current) storeRef.current.setTheme(theme); }, [theme]);
   useEffect(() => { if (storeRef.current && products) storeRef.current.setProducts(products); }, [products]);
+  useEffect(() => { if (storeRef.current && showcase) storeRef.current.setShowcase(showcase); }, [showcase]);
   useEffect(() => { if (storeRef.current && neon) storeRef.current.setNeon(neon); }, [neon]);
   useEffect(() => { if (storeRef.current) storeRef.current.setSafe({ left: safeLeft, bottom: safeBottom }); }, [safeLeft, safeBottom]);
 

@@ -709,7 +709,6 @@ export function buildStoreV2({ tier = "high" } = {}) {
   const coats = [];  // hanging: [x, y, z, ry, length, color, kind]
 
   /* ---------------------------------------------------- the cubby wall */
-  const wallSlots = [];
   {
     const x0 = SHOP.xL, d = 0.38, z0 = -1.95, z1 = -7.35;
     const rows = 5, rowH = 0.32, y0 = 1.22, cols = 15;
@@ -763,8 +762,6 @@ export function buildStoreV2({ tier = "high" } = {}) {
     for (const [z, color] of [[z0 - colW * 4, "#262b36"], [z0 - colW * 11, "#b49c76"]]) {
       coats.push([x0 + d + 0.09, y0 + 3.6 * rowH, z, Math.PI / 2, 0.74, color, "display"]);
     }
-    // the live-stock screen at the end of the wall, by the window
-    wallSlots.push({ x: x0 + 0.03, y: 1.72, z: -7.75, ry: Math.PI / 2, w: 0.5, kind: "screen", group: "knit" });
   }
 
   /* ---------------------------------------------------- the racks, right */
@@ -807,7 +804,6 @@ export function buildStoreV2({ tier = "high" } = {}) {
   }
 
   /* ---------------------------------------------------- the table */
-  const tableSlots = [];
   {
     const cx = -0.56, cz = -4.9, L = 2.8, W = 1.0, H = 0.92;
     const top = new RoundedBoxGeometry(W, 0.06, L, 2, 0.012);
@@ -847,12 +843,9 @@ export function buildStoreV2({ tier = "high" } = {}) {
         for (let k = 0; k < n; k++) stacks.push([cx + offX, H + 0.052 + k * 0.045, cz + offZ, (r() - 0.5) * 0.08, color, 1]);
       }
     }
-    // a framed card on the table showing a live piece
-    tableSlots.push({ x: cx, y: H + 0.3, z: cz, ry: 0.0, w: 0.34, kind: "table", group: "hoodies" });
   }
 
   /* ---------------------------------------------------- the jeans wall */
-  const pantsSlots = [];
   const jeans = [];   // [x, y, z, ry, color]
   const patches = []; // [x, y, z]
   const tags = [];    // [x, y, z]
@@ -886,7 +879,6 @@ export function buildStoreV2({ tier = "high" } = {}) {
       }
     }
     addShadow(root, shadowTex, x0 + 0.3, (z0 + z1) / 2, 0.9, z0 - z1 + 0.5, 0.45);
-    pantsSlots.push({ x: x0 + 0.03, y: 1.6, z: -11.62, ry: Math.PI / 2, w: 0.48, kind: "pants", group: "pants" });
   }
 
   /* ---------------------------------------------------- mirror & counter */
@@ -978,7 +970,6 @@ export function buildStoreV2({ tier = "high" } = {}) {
   /* ---------------------------------------------------- the partition */
   // dark wall across the back right, the shop's neon on it, the sock wall
   // and a rail of trousers under it
-  const screenSlots = [];
   {
     const pz = -10.62, x0 = -0.02, x1 = SHOP.xR;
     const wall = box(x1 - x0, SHOP.ceil, 0.12, mats.partition, (x0 + x1) / 2, SHOP.ceil / 2, pz);
@@ -1042,8 +1033,6 @@ export function buildStoreV2({ tier = "high" } = {}) {
       const x = x0 + 0.22 + ((x1 - x0 - 0.44) * k) / (nT - 1);
       coats.push([x, railY - 0.02, face + 0.22, Math.PI / 2 + (r() - 0.5) * 0.15, 0.6 + r() * 0.06, TROUSERS[Math.floor(r() * TROUSERS.length)], "trousers"]);
     }
-    // a slim screen on the partition showing a live piece
-    screenSlots.push({ x: 1.95, y: 1.45, z: face + 0.01, ry: 0, w: 0.4, kind: "screen", group: "shoes" });
   }
 
   // the plant by the door: a tall snake plant in a white pot
@@ -1184,27 +1173,19 @@ export function buildStoreV2({ tier = "high" } = {}) {
   // contact shadows along the walls
   addShadow(root, shadowTex, SHOP.xL + 0.3, -4.7, 0.9, 6.0, 0.4);
 
-  /* ---------------------------------------------------- live-stock frames */
-  // A few, where a real shop has them: a screen at the end of the cubby
-  // wall, one on the partition, one by the jeans, a framed card on the
-  // table. Each shows a piece that's live on the site; tap to open it.
-  const slots = [...wallSlots, ...tableSlots, ...pantsSlots, ...screenSlots];
-  const emptyMat = new THREE.MeshStandardMaterial({ color: "#e9e4dc", emissive: "#f6efe4", emissiveIntensity: 0.55, roughness: 0.9 });
-  slots.forEach((s, i) => {
-    const h = s.w * 1.25;
-    const g = new THREE.Group();
-    g.position.set(s.x, s.y, s.z);
-    g.rotation.y = s.ry;
-    const bezel = s.kind === "screen" || s.kind === "pants" ? 0.035 : 0.025;
-    const fr = box(s.w + bezel * 2, h + bezel * 2, 0.03, mats.matteBlack, 0, 0, -0.02);
-    g.add(fr);
-    const pic = new THREE.Mesh(new THREE.PlaneGeometry(s.w, h), emptyMat);
-    g.add(pic);
-    if (s.kind === "table") g.add(box(0.03, 0.26, 0.03, mats.black, 0, -h / 2 - 0.13, -0.03));
-    g.visible = false;
-    root.add(g);
-    reg.panels.push({ slot: s, group: g, pic, frame: fr, index: i, product: null, hover: 0 });
-  });
+  /* ---------------------------------------------------- where pieces come from */
+  // No frames on the walls. When you stop at a section, its pieces come out
+  // of that shelf or rail and line up in front of you (KanaanStore
+  // setShowcase). These are the spots they leave from — the front of the
+  // stock — and the way that wall faces, so a piece starts flat against
+  // its own shelf before it turns to you.
+  reg.showcase = {
+    knit: { face: [1, 0, 0], spots: [[-1.94, 2.3, -3.1], [-1.94, 1.7, -3.8], [-1.94, 2.0, -4.5], [-1.94, 1.45, -5.2]] },
+    hoodies: { face: [1, 0, 0], spots: [[-1.74, 0.8, -2.7], [-1.74, 0.75, -3.2], [-1.74, 0.8, -3.7], [-1.74, 0.75, -4.2]] },
+    jackets: { face: [-1, 0, 0], spots: [[1.66, 1.75, -5.0], [1.66, 1.5, -5.6], [1.66, 1.75, -6.2], [1.66, 1.5, -6.8]] },
+    pants: { face: [1, 0, 0], spots: [[-1.93, 1.5, -8.5], [-1.93, 1.1, -9.1], [-1.93, 1.9, -9.7], [-1.93, 1.3, -10.3]] },
+    shoes: { face: [-1, 0, 0], spots: [[1.99, 0.9, -8.9], [1.99, 1.25, -9.3], [1.99, 1.6, -9.7], [1.99, 1.0, -10.1]] },
+  };
 
   // daylight shadow on the street side of the glass
   root.traverse((o) => {

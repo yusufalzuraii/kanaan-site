@@ -9,6 +9,7 @@ import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { buildStore } from "./buildStore.js";
 import { buildStoreV2 } from "./buildStoreV2.js";
 import { neonTexture, scriptNeonTexture } from "./textures.js";
+import { Showcase } from "./showcase.js";
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const smooth = (a, b, v) => {
@@ -269,6 +270,9 @@ export class KanaanStore {
     });
 
     if (this.reg.neonFont) this.loadNeonFont(this.reg.neonFont);
+    // the second drawing has no frames: a section's pieces come out of its
+    // shelf when the walk stops there (showcase.js)
+    if (this.reg.showcase && mode === "walk") this.showcase = new Showcase(this, this.reg.showcase);
 
     this.raycaster = new THREE.Raycaster();
     this.textureLoader = new THREE.TextureLoader();
@@ -377,6 +381,14 @@ export class KanaanStore {
     }
   }
 
+  /* The sections' pieces, for the showcase: [{ id, from, to, side, items }]
+     (see showcase.js). */
+  setShowcase(list) {
+    if (!this.showcase) return;
+    this.showcase.setData(list);
+    this.wake();
+  }
+
   /* Live stock into the lightboxes: window first, then the new-in wall,
      then the two frames on the table. */
   setProducts(list) {
@@ -469,10 +481,12 @@ export class KanaanStore {
     const r = this.canvas.getBoundingClientRect();
     const v = new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -(((clientY - r.top) / r.height) * 2 - 1));
     this.raycaster.setFromCamera(v, this.camera);
-    const pics = this.reg.panels.map((p) => p.pic);
-    const hits = this.raycaster.intersectObjects(pics, false);
+    const targets = this.reg.panels.map((p) => [p.pic, p]);
+    if (this.showcase) for (const c of this.showcase.pickables()) targets.push([c.mesh, c]);
+    const hits = this.raycaster.intersectObjects(targets.map((t) => t[0]), false);
     if (!hits.length || hits[0].distance > 9) return null;
-    return this.reg.panels.find((p) => p.pic === hits[0].object) || null;
+    const hit = targets.find((t) => t[0] === hits[0].object);
+    return hit ? hit[1] : null;
   }
 
   /* Where the page's words are, as shares of the screen, so the opening
@@ -500,6 +514,7 @@ export class KanaanStore {
     this.posCurve = new THREE.CatmullRomCurve3(this.path.keys.map((k) => new THREE.Vector3(...k.p)), false, "centripetal");
     this.lookCurve = new THREE.CatmullRomCurve3(this.path.keys.map((k) => new THREE.Vector3(...k.l)), false, "centripetal");
     this.updateCamera(1);
+    if (this.showcase) this.showcase.layout();
     this.wake();
   }
 
@@ -677,6 +692,7 @@ export class KanaanStore {
       }
     }
 
+    if (this.showcase && this.showcase.update(dt, this.progress, this.hoverPanel)) active = true;
     this.applyLook(false);
     if (this.reg.mirror && this._introDone && this.night === this.nightTarget && this._mirrorAt !== this.night) this.captureMirror();
     this.renderer.render(this.scene, this.camera);
@@ -726,6 +742,7 @@ export class KanaanStore {
     });
     if (this.scene.environment) this.scene.environment.dispose();
     if (this._mirrorRT) this._mirrorRT.dispose();
+    if (this.showcase) this.showcase.dispose();
     this.renderer.dispose();
   }
 }

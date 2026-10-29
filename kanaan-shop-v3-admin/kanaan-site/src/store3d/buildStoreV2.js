@@ -287,7 +287,6 @@ export function buildStoreV2({ tier = "high" } = {}) {
     glass: new THREE.MeshStandardMaterial({ color: "#d8e6e8", roughness: 0.04, metalness: 0.2, transparent: true, opacity: 0.16, depthWrite: false }),
     floor: new THREE.MeshStandardMaterial({ color: "#ffffff", map: floorTexture(), roughness: 0.16, metalness: 0.05, envMapIntensity: 1.2 }),
     pavement: new THREE.MeshStandardMaterial({ color: "#ffffff", map: pavementTexture(), roughness: 0.85, metalness: 0 }),
-    road: new THREE.MeshStandardMaterial({ color: "#4c4e53", roughness: 0.92, metalness: 0 }),
     fold: new THREE.MeshStandardMaterial({ color: "#ffffff", map: foldTexture(), roughness: 0.92, metalness: 0 }),
     jeans: new THREE.MeshStandardMaterial({ color: "#ffffff", map: denimMap, roughness: 0.95, metalness: 0 }),
     fabric: new THREE.MeshStandardMaterial({ color: "#ffffff", map: clothTexture(), roughness: 0.95, metalness: 0, vertexColors: true, envMapIntensity: 0.6 }),
@@ -321,16 +320,18 @@ export function buildStoreV2({ tier = "high" } = {}) {
   const cast = (o) => { shadowed.push(o); return o; };
 
   /* ---------------------------------------------------- street & facade */
-  const pave = new THREE.Mesh(new THREE.PlaneGeometry(16, 8.5), mats.pavement);
+  // The pavement runs on past the camera: on a phone the opening shot
+  // stands well back and looks down, and the ground under the words at the
+  // bottom of the screen must still be this street — a kerb or a dark road
+  // there read as the picture ending in a band under the buttons.
+  const PAVE_W = 32, PAVE_D = 34;
+  const pave = new THREE.Mesh(new THREE.PlaneGeometry(PAVE_W, PAVE_D), mats.pavement);
   pave.rotation.x = -Math.PI / 2;
-  pave.position.set(0, 0, 4.25);
+  pave.position.set(0, 0, PAVE_D / 2);
   pave.receiveShadow = true;
+  // the same 80 cm slabs as before, whatever the size of the plane
+  mats.pavement.map.repeat.set(PAVE_W / 3.2, PAVE_D / 2.83);
   root.add(pave);
-  root.add(box(16, 0.16, 0.32, mats.concrete, 0, -0.04, 8.6));
-  const road = new THREE.Mesh(new THREE.PlaneGeometry(40, 22), mats.road);
-  road.rotation.x = -Math.PI / 2;
-  road.position.set(0, -0.12, 8.76 + 11);
-  root.add(road);
 
   root.add(box(4, 11.6, 1.2, mats.facadeDark, -5.3, 5.8, -0.4));
   root.add(box(4, 11.6, 1.2, mats.facadeDark, 5.3, 5.8, -0.4));
@@ -763,7 +764,7 @@ export function buildStoreV2({ tier = "high" } = {}) {
       coats.push([x0 + d + 0.09, y0 + 3.6 * rowH, z, Math.PI / 2, 0.74, color, "display"]);
     }
     // the live-stock screen at the end of the wall, by the window
-    wallSlots.push({ x: x0 + 0.03, y: 1.72, z: -7.75, ry: Math.PI / 2, w: 0.5, kind: "screen" });
+    wallSlots.push({ x: x0 + 0.03, y: 1.72, z: -7.75, ry: Math.PI / 2, w: 0.5, kind: "screen", group: "knit" });
   }
 
   /* ---------------------------------------------------- the racks, right */
@@ -847,7 +848,7 @@ export function buildStoreV2({ tier = "high" } = {}) {
       }
     }
     // a framed card on the table showing a live piece
-    tableSlots.push({ x: cx, y: H + 0.3, z: cz, ry: 0.0, w: 0.34, kind: "table" });
+    tableSlots.push({ x: cx, y: H + 0.3, z: cz, ry: 0.0, w: 0.34, kind: "table", group: "hoodies" });
   }
 
   /* ---------------------------------------------------- the jeans wall */
@@ -885,7 +886,7 @@ export function buildStoreV2({ tier = "high" } = {}) {
       }
     }
     addShadow(root, shadowTex, x0 + 0.3, (z0 + z1) / 2, 0.9, z0 - z1 + 0.5, 0.45);
-    pantsSlots.push({ x: x0 + 0.03, y: 1.6, z: -11.62, ry: Math.PI / 2, w: 0.48, kind: "pants" });
+    pantsSlots.push({ x: x0 + 0.03, y: 1.6, z: -11.62, ry: Math.PI / 2, w: 0.48, kind: "pants", group: "pants" });
   }
 
   /* ---------------------------------------------------- mirror & counter */
@@ -1042,7 +1043,7 @@ export function buildStoreV2({ tier = "high" } = {}) {
       coats.push([x, railY - 0.02, face + 0.22, Math.PI / 2 + (r() - 0.5) * 0.15, 0.6 + r() * 0.06, TROUSERS[Math.floor(r() * TROUSERS.length)], "trousers"]);
     }
     // a slim screen on the partition showing a live piece
-    screenSlots.push({ x: 1.95, y: 1.45, z: face + 0.01, ry: 0, w: 0.4, kind: "screen" });
+    screenSlots.push({ x: 1.95, y: 1.45, z: face + 0.01, ry: 0, w: 0.4, kind: "screen", group: "shoes" });
   }
 
   // the plant by the door: a tall snake plant in a white pot

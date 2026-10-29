@@ -124,20 +124,37 @@ function pathFor(aspect, mode, { left: safeLeft = 0, bottom: safeBottom = 0 } = 
     K(0.21, [1.45, 1.6, 0.75], [0.95, 1.55, -5], [1.45, 1.6, 0.9], [1.0, 1.55, -5]),
   ];
   if (look === "v2") {
-    // the second pass follows the real shop: the cubby wall on the left,
-    // the racks on the right, the jeans wall at the back left, the neon
-    // partition at the back right, the counter in front of the curtain
+    // The second drawing walks by section, the way the real shop is laid
+    // out: knitwear (the cubby wall, left), hoodies (the rail under it),
+    // jackets & coats (the racks, right), pants & jeans (the jeans wall,
+    // back left), shoes (the shoe wall, back right, the neon beyond), then
+    // the counter. Each section has two keys — arrive, then a slow drift —
+    // so the view settles while its words show (HomeLab SECTION_STATIONS).
     return {
       vfov,
       keys: [
         front,
         ...door,
-        K(0.32, [0.95, 1.6, -1.6], [-2.3, 1.72, -3.7], [0.8, 1.63, -1.0], [-2.3, 1.62, -4.5]),
-        K(0.45, [0.85, 1.6, -3.9], [-2.3, 1.68, -6.4], [0.65, 1.66, -2.5], [-2.3, 1.6, -6.7]),
-        K(0.565, [0.45, 1.62, -5.6], [2.3, 1.6, -6.7], [0.38, 1.62, -4.8], [2.3, 1.55, -7.7]),
-        K(0.705, [0.75, 1.6, -7.5], [-2.3, 1.35, -10.0], [0.6, 1.62, -7.0], [-2.3, 1.3, -10.6]),
-        K(0.84, [-0.8, 1.62, -7.9], [1.1, 1.75, -10.6], [-0.7, 1.62, -7.6], [1.0, 1.7, -10.6]),
-        K(1, [-0.2, 1.62, -8.7], [-1.35, 1.2, -12.6], [-0.35, 1.62, -8.6], [-1.15, 1.15, -12.6]),
+        // knitwear
+        K(0.28, [0.92, 1.62, -2.2], [-2.3, 1.9, -4.3], [0.8, 1.66, -1.1], [-2.3, 1.85, -4.4]),
+        K(0.35, [0.86, 1.62, -3.0], [-2.3, 1.88, -5.1], [0.72, 1.66, -1.7], [-2.3, 1.85, -5.0]),
+        // hoodies: down the aisle between the rail and the table
+        K(0.42, [-1.15, 1.46, -2.15], [-2.12, 0.86, -4.6], [-1.0, 1.5, -1.9], [-2.2, 0.8, -4.1]),
+        K(0.48, [-1.28, 1.45, -2.45], [-2.15, 0.84, -5.0], [-1.1, 1.48, -2.15], [-2.22, 0.78, -4.5]),
+        // round the front of the table to the racks
+        K(0.515, [0.3, 1.58, -3.05], [1.6, 1.5, -5.4], [0.3, 1.6, -2.9], [1.6, 1.5, -5.6]),
+        // jackets & coats
+        K(0.55, [0.4, 1.62, -4.7], [2.3, 1.6, -5.9], [0.36, 1.62, -4.1], [2.3, 1.5, -7.0]),
+        K(0.61, [0.45, 1.62, -5.4], [2.3, 1.58, -6.6], [0.38, 1.62, -4.7], [2.3, 1.5, -7.6]),
+        // pants & jeans
+        K(0.68, [0.78, 1.6, -7.3], [-2.3, 1.35, -9.8], [0.62, 1.62, -6.9], [-2.3, 1.3, -10.4]),
+        K(0.74, [0.68, 1.6, -7.8], [-2.3, 1.3, -10.3], [0.55, 1.62, -7.3], [-2.3, 1.28, -10.8]),
+        // shoes, side-on along the wall
+        K(0.81, [-0.4, 1.52, -7.7], [2.3, 1.12, -8.75], [-0.6, 1.55, -7.5], [2.3, 1.12, -9.2]),
+        K(0.87, [-0.3, 1.5, -8.0], [2.3, 1.1, -8.95], [-0.5, 1.54, -7.8], [2.3, 1.1, -9.45]),
+        // the counter
+        K(0.95, [-0.15, 1.62, -8.5], [-1.3, 1.22, -12.6], [-0.3, 1.7, -8.3], [-1.05, 0.62, -12.6]),
+        K(1, [-0.2, 1.62, -8.7], [-1.35, 1.2, -12.6], [-0.35, 1.7, -8.5], [-1.08, 0.6, -12.6]),
       ],
     };
   }
@@ -365,15 +382,24 @@ export class KanaanStore {
   setProducts(list) {
     const items = (list || []).filter((p) => p && p.image);
     if (!items.length) return;
-    // the denim corner shows jeans and pants (pieces marked group "pants");
-    // every other frame takes the rest, in order
-    const pants = items.filter((p) => p.group === "pants");
-    const general = items.filter((p) => p.group !== "pants");
-    let gi = 0, pi = 0;
+    // a frame that belongs to a section (slot.group — "pants", "shoes"…)
+    // shows pieces marked with that group; every other frame takes the
+    // rest, in order
+    const groupOf = (panel) => panel.slot.group || (panel.slot.kind === "pants" ? "pants" : null);
+    const general = items.filter((p) => !p.group);
+    const used = {};
+    let gi = 0;
     this.reg.panels.forEach((panel) => {
-      const fromPants = panel.slot.kind === "pants" && pants.length > 0;
-      const pool = fromPants ? pants : general.length ? general : items;
-      const product = pool[(fromPants ? pi++ : gi++) % pool.length];
+      const g = groupOf(panel);
+      const own = g ? items.filter((p) => p.group === g) : [];
+      let product;
+      if (own.length) {
+        used[g] = (used[g] || 0) + 1;
+        product = own[(used[g] - 1) % own.length];
+      } else {
+        const pool = general.length ? general : items;
+        product = pool[gi++ % pool.length];
+      }
       if (panel.product && panel.product.id === product.id) return;
       panel.product = product;
       this.textureLoader.load(

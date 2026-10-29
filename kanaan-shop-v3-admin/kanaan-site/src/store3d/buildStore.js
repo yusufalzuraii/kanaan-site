@@ -293,7 +293,6 @@ export function buildStore({ tier = "high" } = {}) {
     glass: new THREE.MeshStandardMaterial({ color: "#d8e6e8", roughness: 0.04, metalness: 0.2, transparent: true, opacity: 0.16, depthWrite: false }),
     floor: new THREE.MeshStandardMaterial({ color: "#ffffff", map: floorTexture(), roughness: 0.2, metalness: 0.05 }),
     pavement: new THREE.MeshStandardMaterial({ color: "#ffffff", map: pavementTexture(), roughness: 0.85, metalness: 0 }),
-    road: new THREE.MeshStandardMaterial({ color: "#4c4e53", roughness: 0.92, metalness: 0 }),
     fold: new THREE.MeshStandardMaterial({ color: "#ffffff", map: foldTexture(), roughness: 0.92, metalness: 0 }),
     fabric: new THREE.MeshStandardMaterial({ color: "#ffffff", map: fabricTexture(), roughness: 0.9, metalness: 0, vertexColors: true }),
     slat: new THREE.MeshStandardMaterial({ color: "#ffffff", map: slatTexture(), roughness: 0.6, metalness: 0.15 }),
@@ -312,18 +311,18 @@ export function buildStore({ tier = "high" } = {}) {
     new THREE.MeshStandardMaterial({ color: "#111", emissive: color, emissiveIntensity: base, roughness: 0.4 });
 
   /* ---------------------------------------------------- street & facade */
-  const pave = new THREE.Mesh(new THREE.PlaneGeometry(16, 8.5), mats.pavement);
+  // The pavement runs on past the camera: on a phone the opening shot
+  // stands well back and looks down, and the ground under the words at the
+  // bottom of the screen must still be this street — a kerb or a dark road
+  // there read as the picture ending in a band under the buttons.
+  const PAVE_W = 32, PAVE_D = 34;
+  const pave = new THREE.Mesh(new THREE.PlaneGeometry(PAVE_W, PAVE_D), mats.pavement);
   pave.rotation.x = -Math.PI / 2;
-  pave.position.set(0, 0, 4.25);
+  pave.position.set(0, 0, PAVE_D / 2);
   pave.receiveShadow = true;
+  // the same 80 cm slabs as before, whatever the size of the plane
+  mats.pavement.map.repeat.set(PAVE_W / 3.2, PAVE_D / 2.83);
   root.add(pave);
-  // kerb, and the road beyond it — on a phone the camera stands out in the
-  // street and looks down, so the ground has to reach that far
-  root.add(box(16, 0.16, 0.32, mats.concrete, 0, -0.04, 8.6));
-  const road = new THREE.Mesh(new THREE.PlaneGeometry(40, 22), mats.road);
-  road.rotation.x = -Math.PI / 2;
-  road.position.set(0, -0.12, 8.76 + 11);
-  root.add(road);
 
   // neighbouring shopfronts: dark masses either side, fog does the rest
   // tall enough that a phone, which starts out in the street, never sees

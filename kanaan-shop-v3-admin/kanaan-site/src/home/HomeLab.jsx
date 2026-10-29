@@ -58,6 +58,61 @@ const STATIONS = [
 const FADE = 0.035;
 const PANTS = ["jeans", "pants"];
 
+/* The second drawing (/lab, look v2) walks by the shop's own sections, in
+   the order you meet them in the real shop. Each has a name the site can
+   adopt as a category, the words for its stop, where along the walk it is
+   (at: where the section bar jumps to) and which side its words sit
+   (the side the camera isn't looking at).
+   A section collects the site's categories whose id or name matches it
+   (the owner adds categories in Kanaan POS); pieces in no matching
+   category are placed by their name. A section with nothing online yet
+   still shows — it's on the rails in Saida — with a WhatsApp question. */
+const SECTIONS = [
+  { id: "knit", label: "Knitwear", title: "Knitwear", ask: "knitwear", at: 0.315, side: "end", re: /knit|sweater|pullover|jumper|cardigan|turtle ?neck|كنز/i },
+  { id: "hoodies", label: "Hoodies", title: "Hoodies", ask: "hoodies", at: 0.45, side: "end", re: /hood|sweatshirt|هود/i },
+  { id: "jackets", label: "Jackets", title: "Jackets & coats", ask: "jackets and coats", at: 0.58, side: "start", re: /jacket|coat|puffer|parka|bomber|blazer|gilet|overshirt|جاك/i },
+  { id: "pants", label: "Pants", title: "Pants & jeans", ask: "pants and jeans", at: 0.71, side: "end", re: /jean|pant|trouser|chino|cargo|jogger|denim|بنطل|بناطل/i },
+  { id: "shoes", label: "Shoes", title: "Shoes", ask: "shoes", at: 0.84, side: "end", re: /shoe|sneaker|boot|loafer|slipper|sandal|صباب|حذ/i },
+];
+// which section claims a category or a name first: the most specific
+// words first ("denim jacket" is a jacket, not pants)
+const CLAIM_ORDER = ["jackets", "hoodies", "knit", "shoes", "pants"];
+const SECTION_STATIONS = [
+  { id: "hero", from: 0, to: 0.06 },
+  { id: "knit", from: 0.27, to: 0.35 },
+  { id: "hoodies", from: 0.42, to: 0.48 },
+  { id: "jackets", from: 0.55, to: 0.61 },
+  { id: "pants", from: 0.68, to: 0.74 },
+  { id: "shoes", from: 0.81, to: 0.87 },
+  { id: "desk", from: 0.94, to: 1.2 },
+];
+
+function claim(text) {
+  for (const id of CLAIM_ORDER) {
+    const sec = SECTIONS.find((x) => x.id === id);
+    if (sec.re.test(text)) return id;
+  }
+  return null;
+}
+
+/* products → { [section id]: { cats: [category], items: [product] } } */
+function sortIntoSections(products, counts) {
+  const out = Object.fromEntries(SECTIONS.map((x) => [x.id, { cats: [], items: [] }]));
+  const catSection = {};
+  for (const c of CATEGORIES) {
+    const id = claim(`${c.id} ${c.label}`);
+    if (id) {
+      catSection[c.id] = id;
+      if (counts[c.id]) out[id].cats.push(c);
+    }
+  }
+  for (const p of products) {
+    const id = catSection[p.category] || claim(p.name || "");
+    if (id) out[id].items.push(p);
+  }
+  return out;
+}
+
 function stationLevel(st, p) {
   if (st.from === 0) return p <= st.to ? 1 : clamp(1 - (p - st.to) / FADE, 0, 1);
   if (p < st.from) return clamp(1 - (st.from - p) / FADE, 0, 1);
@@ -187,6 +242,18 @@ export default function HomeLab({ home = false, products, loading, goCatalog, go
     for (const p of products) m[p.category] = (m[p.category] || 0) + 1;
     return m;
   }, [products]);
+  const sections = useMemo(() => sortIntoSections(products, counts), [products, counts]);
+  // the second drawing's frames belong to sections: give each section a
+  // couple of its own pieces (the rest of the frames take the general list)
+  const sectionPieces = useMemo(() => {
+    const list = stagePieces.filter((x) => !x.group);
+    for (const sec of SECTIONS) {
+      for (const p of sections[sec.id].items.filter((x) => firstImage(x)).slice(0, 2)) {
+        list.push({ id: `${p.id}-${sec.id}`, name: p.name, image: firstImage(p), product: p, group: sec.id });
+      }
+    }
+    return list;
+  }, [stagePieces, sections]);
 
   return (
     // lab-is-*, not lab-walk etc.: those name the tall scroll sections, and
@@ -195,7 +262,22 @@ export default function HomeLab({ home = false, products, loading, goCatalog, go
     <div className={`lab lab-is-${mode}`}>
       <LabStyles />
       {home && <ScrollProgress />}
-      {mode === "walk" && (
+      {mode === "walk" && look === "v2" && (
+        <SectionWalk
+          theme={theme}
+          tall={tall}
+          tier={tier}
+          stagePieces={sectionPieces}
+          sections={sections}
+          counts={counts}
+          saleCount={saleCount}
+          maxDiscount={maxDiscount}
+          goCatalog={goCatalog}
+          goSale={goSale}
+          openProduct={openProduct}
+        />
+      )}
+      {mode === "walk" && look !== "v2" && (
         <WalkHero
           theme={theme}
           tall={tall}
@@ -515,6 +597,167 @@ function WalkHero({ theme, tall, tier, look, stagePieces, featured, pantsPicks, 
   );
 }
 
+/* The walk by section (the second drawing). Same machinery as WalkHero —
+   the scroll drives the camera, one stop's words at a time — plus a bar of
+   the shop's sections at the top: tap one and the walk carries you there,
+   so nobody has to scroll through the whole shop to reach the shoes. */
+function SectionWalk({ theme, tall, tier, stagePieces, sections, counts, saleCount, maxDiscount, goCatalog, goSale, openProduct }) {
+  const sectionRef = useRef(null);
+  const storeRef = useRef(null);
+  const stationRefs = useRef({});
+  const barRef = useRef(null);
+  const heroCardRef = useRef(null);
+  const safe = useSafeArea(heroCardRef);
+  const lastP = useRef(0);
+  const activeRef = useRef(null);
+
+  const apply = useCallback((p) => {
+    lastP.current = p;
+    if (storeRef.current) storeRef.current.setProgress(p);
+    let active = null;
+    for (const st of SECTION_STATIONS) {
+      const el = stationRefs.current[st.id];
+      if (!el) continue;
+      const v = stationLevel(st, p);
+      el.style.opacity = String(v);
+      el.style.transform = `translate3d(0, ${(1 - v) * 18}px, 0)`;
+      el.style.visibility = v < 0.05 ? "hidden" : "visible";
+      el.toggleAttribute("inert", v < 0.6);
+    }
+    // the section you're in (or walking towards) lights up in the bar
+    for (const st of SECTION_STATIONS) {
+      if (SECTIONS.some((x) => x.id === st.id) && p >= st.from - 0.06 && p <= st.to + 0.03) active = st.id;
+    }
+    const bar = barRef.current;
+    if (bar && active !== activeRef.current) {
+      activeRef.current = active;
+      for (const b of bar.querySelectorAll("button")) {
+        const on = b.dataset.id === active;
+        b.classList.toggle("is-on", on);
+        if (on) b.setAttribute("aria-current", "location");
+        else b.removeAttribute("aria-current");
+        // keep the lit name in view on a narrow phone
+        if (on && bar.scrollWidth > bar.clientWidth) {
+          bar.scrollTo({ left: b.offsetLeft - (bar.clientWidth - b.offsetWidth) / 2, behavior: "smooth" });
+        }
+      }
+    }
+  }, []);
+  useSectionProgress(sectionRef, apply);
+
+  const onStore = useCallback((s) => {
+    storeRef.current = s;
+    if (s) s.setProgress(lastP.current);
+  }, []);
+
+  const jumpTo = (p) => {
+    const el = sectionRef.current;
+    if (!el) return;
+    const top = el.getBoundingClientRect().top + window.scrollY;
+    const stage = el.querySelector(".lab-sticky");
+    const total = el.offsetHeight - (stage ? stage.offsetHeight : window.innerHeight);
+    window.scrollTo({ top: top + total * p, behavior: "smooth" });
+  };
+
+  const picks = (list) => (
+    <ul className="lab-picks">
+      {list.map((p) => (
+        <li key={p.id}>
+          <button onClick={() => openProduct(p)} className="lab-pick tap-scale" aria-label={p.name}>
+            {firstImage(p) ? <img src={firstImage(p)} alt="" loading="lazy" decoding="async" /> : <span className="lab-pick-ph" />}
+            <span className="lab-pick-name">{p.name}</span>
+            <span className="lab-pick-price font-num">{money(effectivePrice(p))}</span>
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+  const chips = (cats) => (
+    <div className="lab-chips">
+      {cats.map((c) => (
+        <button key={c.id} onClick={() => goCatalog(c.id)} className="glass rounded-full font-body text-sm px-4 py-2 tap-scale">
+          {c.label} <span className="text-muted font-num">{counts[c.id]}</span>
+        </button>
+      ))}
+    </div>
+  );
+  const ask = (sec) => `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(`Hi Kanaan! What ${sec.ask} do you have in my size?`)}`;
+  const reg = (id) => (el) => { stationRefs.current[id] = el; };
+
+  return (
+    <section ref={sectionRef} className="lab-walk" aria-label="Kanaan Shop">
+      <div className="lab-sticky">
+        <Stage mode="walk" theme={theme} tall={tall} tier={tier} look="v2" stagePieces={stagePieces} safe={safe} onStore={onStore} openProduct={openProduct} />
+
+        <nav ref={barRef} className="lab-aisles glass" aria-label="Sections of the shop">
+          {SECTIONS.map((sec) => (
+            <button key={sec.id} data-id={sec.id} onClick={() => jumpTo(sec.at)}>{sec.label}</button>
+          ))}
+        </nav>
+
+        <div ref={reg("hero")} className="lab-station lab-side-start lab-hero-station">
+          <div className="lab-scrim" />
+          <div ref={heroCardRef} className="lab-card">
+            <h1 className="lab-display">Everyday wear, refined.</h1>
+            <p className="lab-lede lab-sub">Our shop in Saida, in 3D. Scroll to walk in, or pick a section.</p>
+            <div className="lab-actions">
+              <button onClick={() => goCatalog("all")} className="glass glass-btn rounded-full font-body font-medium px-6 py-3 tap-scale lab-primary">Shop the collection</button>
+              <button onClick={() => jumpTo(SECTIONS[0].at)} className="glass rounded-full font-body px-5 py-3 tap-scale inline-flex items-center gap-2">
+                <ArrowDown className="w-4 h-4" /> Walk in
+              </button>
+            </div>
+            <a href="#lab-shop" className="lab-skip">Skip to new arrivals</a>
+          </div>
+        </div>
+
+        {SECTIONS.map((sec) => {
+          const { cats, items } = sections[sec.id];
+          const shown = items.filter((p) => firstImage(p)).slice(0, 4);
+          return (
+            <div key={sec.id} ref={reg(sec.id)} className={`lab-station lab-side-${sec.side}`} data-section={sec.id}>
+              <div className="lab-scrim" />
+              <div className="lab-card">
+                <h2 className="lab-title">{sec.title}</h2>
+                {shown.length > 0 && picks(shown)}
+                {cats.length > 0 && chips(cats)}
+                {items.length === 0 && (
+                  <>
+                    <p className="lab-lede">On the rails in Saida now. Ask us what's in your size.</p>
+                    <div className="lab-actions">
+                      <a href={ask(sec)} target="_blank" rel="noopener noreferrer" className="glass rounded-full font-body px-5 py-3 tap-scale inline-flex items-center gap-2">
+                        <MessageCircle className="w-4 h-4" /> Ask on WhatsApp
+                      </a>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          );
+        })}
+
+        <div ref={reg("desk")} className="lab-station lab-side-end">
+          <div className="lab-scrim" />
+          <div className="lab-card">
+            <h2 className="lab-title">Order here, pay at your door</h2>
+            <ul className="lab-promises">
+              <li><Truck className="w-4 h-4" /> All of Lebanon</li>
+              <li><ShieldCheck className="w-4 h-4" /> Cash on delivery</li>
+              <li><RotateCcw className="w-4 h-4" /> 3-day returns</li>
+            </ul>
+            <div className="lab-actions">
+              <button onClick={() => goCatalog("all")} className="glass glass-btn rounded-full font-body font-medium px-6 py-3 tap-scale lab-primary">Start shopping</button>
+              <a href={`https://wa.me/${WHATSAPP_NUMBER}`} target="_blank" rel="noopener noreferrer" className="glass rounded-full font-body px-5 py-3 tap-scale inline-flex items-center gap-2">
+                <MessageCircle className="w-4 h-4" /> WhatsApp
+              </a>
+            </div>
+            {saleCount > 0 && <button onClick={goSale} className="lab-link">Up to {maxDiscount}% off in the sale</button>}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function FacadeHero({ theme, tall, tier, look, stagePieces, goCatalog, openProduct }) {
   const sectionRef = useRef(null);
   const storeRef = useRef(null);
@@ -813,6 +1056,16 @@ const LAB_CSS = String.raw`
   .lab-rail::before { content: ""; position: absolute; right: 4px; top: 4px; bottom: 4px; width: 1.5px; background: var(--border); }
   .lab-rail::after { content: ""; position: absolute; right: 4px; top: 4px; width: 1.5px; height: calc((100% - 8px) * var(--p, 0)); background: var(--coral); }
 }
+
+/* The shop's sections, at the top of the walk: tap one to walk there.
+   Glass (it floats over the 3D, like the header). One line; on a narrow
+   phone it scrolls sideways and keeps the lit section in view. */
+.lab-aisles { position: absolute; z-index: 3; top: calc(var(--header-h) + 10px); left: 50%; transform: translateX(-50%); max-width: calc(100% - 32px); display: flex; gap: 2px; padding: 4px; border-radius: 999px; overflow-x: auto; scrollbar-width: none; }
+.lab-aisles::-webkit-scrollbar { display: none; }
+.lab-aisles button { flex: 0 0 auto; font-family: Inter, system-ui, sans-serif; font-size: 0.84rem; padding: 8px 14px; border-radius: 999px; color: var(--fg); white-space: nowrap; transition: background 0.3s, color 0.3s; }
+.lab-aisles button.is-on { background: var(--fg); color: var(--bg); }
+.lab-aisles button:focus-visible { outline: 2px solid var(--coral); outline-offset: 1px; }
+@media (max-width: 420px) { .lab-aisles button { padding: 7px 11px; font-size: 0.8rem; } }
 
 /* Lite hero */
 .lab-lite { margin-top: calc(-1 * var(--header-h)); }

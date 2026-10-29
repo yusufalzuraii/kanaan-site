@@ -8,7 +8,7 @@
 import React, { useEffect, useRef } from "react";
 import { KanaanStore } from "./KanaanStore.js";
 
-export default function StoreStage({ mode = "walk", theme = "light", tier = "high", products, neon, safeLeft = 0, onSelect, onStore, onReady, className = "", style }) {
+export default function StoreStage({ mode = "walk", theme = "light", tier = "high", products, neon, safeLeft = 0, safeBottom = 0, onSelect, onStore, onReady, className = "", style }) {
   const canvasRef = useRef(null);
   const storeRef = useRef(null);
   const onSelectRef = useRef(onSelect);
@@ -23,7 +23,7 @@ export default function StoreStage({ mode = "walk", theme = "light", tier = "hig
         mode,
         theme,
         tier,
-        safeLeft,
+        safe: { left: safeLeft, bottom: safeBottom },
         onSelect: (p) => onSelectRef.current && onSelectRef.current(p),
         onReady: () => onReady && onReady(),
       });
@@ -51,7 +51,7 @@ export default function StoreStage({ mode = "walk", theme = "light", tier = "hig
   useEffect(() => { if (storeRef.current) storeRef.current.setTheme(theme); }, [theme]);
   useEffect(() => { if (storeRef.current && products) storeRef.current.setProducts(products); }, [products]);
   useEffect(() => { if (storeRef.current && neon) storeRef.current.setNeon(neon); }, [neon]);
-  useEffect(() => { if (storeRef.current) storeRef.current.setSafeLeft(safeLeft); }, [safeLeft]);
+  useEffect(() => { if (storeRef.current) storeRef.current.setSafe({ left: safeLeft, bottom: safeBottom }); }, [safeLeft, safeBottom]);
 
   return <canvas ref={canvasRef} className={className} style={style} aria-hidden="true" />;
 }

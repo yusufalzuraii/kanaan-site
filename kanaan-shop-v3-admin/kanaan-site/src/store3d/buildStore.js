@@ -32,6 +32,7 @@ import {
   slatTexture,
   plasterTexture,
   shutterTexture,
+  plaqueTexture,
 } from "./textures.js";
 
 export const SHOP = {
@@ -47,6 +48,13 @@ const WINTER = [
   "#1b1b1e", "#1b1b1e", "#2c2d31", "#3f4045", "#5f6066", "#8d8e93",
   "#e6e2d8", "#d4ccbb", "#b9a88b", "#8b6b4e", "#5a3a29", "#3e2a21",
   "#3c4637", "#556049", "#27303d", "#3a4658", "#5e2a30", "#7a2f33",
+];
+
+// Folded jeans and trousers in the denim corner: rinse, mid and light
+// washes, black denim, and a few chinos.
+const DENIM = [
+  "#22314b", "#2c3f5f", "#2c3f5f", "#3b5276", "#557092", "#7790b0",
+  "#1b1c21", "#2b2c31", "#857659", "#6a6252", "#4a5041",
 ];
 
 const warm = new THREE.Color("#ffcf9e");
@@ -178,6 +186,46 @@ function coatGeometry(length = 0.78, depth = 0.026) {
   return geo;
 }
 
+/* A coat on a hanger, with some body to it: a soft slab with sloping
+   shoulders and a little flare at the hem, and two sleeves hanging at its
+   sides. Seen close up on a phone, a flat cut-out read as cardboard; this
+   reads as cloth. Width across x, thickness along z, like coatGeometry. */
+function hangingCoatGeometry(length = 0.8) {
+  const L = length;
+  const body = new RoundedBoxGeometry(0.4, L, 0.075, 3, 0.032);
+  body.translate(0, -L / 2 - 0.02, 0);
+  const sleeves = [-1, 1].map((sx) => {
+    const g = new THREE.CapsuleGeometry(0.04, 0.42, 3, 8);
+    g.scale(1, 1, 0.8);
+    g.rotateZ(sx * 0.05);
+    g.translate(sx * 0.222, -0.36, 0.004);
+    return g;
+  });
+  // RoundedBoxGeometry comes unindexed and the capsules indexed; merging
+  // needs them alike
+  const parts = [body, ...sleeves].map((g) => (g.index ? g.toNonIndexed() : g));
+  const geo = mergeGeometries(parts, false);
+  [body, ...sleeves, ...parts].forEach((g) => g.dispose());
+  const pos = geo.attributes.position;
+  const col = new Float32Array(pos.count * 3);
+  for (let i = 0; i < pos.count; i++) {
+    let x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    const t = Math.min(1, Math.max(0, -y / L)); // 0 at the collar, 1 at the hem
+    if (Math.abs(x) < 0.205) x *= 0.95 + 0.09 * t; // the body flares a touch
+    // shoulders slope away from the collar
+    const top = Math.min(1, Math.max(0, (y + 0.16) / 0.14));
+    y -= 0.075 * Math.pow(Math.min(1, Math.abs(x) / 0.21), 2) * top;
+    // soft vertical folds below the chest
+    z += Math.max(0, t - 0.25) * 0.016 * Math.sin(x * 32 + y * 5);
+    pos.setXYZ(i, x, y, z);
+    const v = (0.82 + 0.18 * (1 - t)) * (Math.abs(x) > 0.2 ? 0.8 : 1);
+    col[i * 3] = col[i * 3 + 1] = col[i * 3 + 2] = v;
+  }
+  geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+  geo.computeVertexNormals();
+  return geo;
+}
+
 /* A window mannequin like the dark ones in the shop's window, dressed in a
    winter coat. Not product photos on purpose: the window should read as a
    menswear shop from across the street, whatever is in stock that day. */
@@ -278,8 +326,10 @@ export function buildStore({ tier = "high" } = {}) {
   root.add(road);
 
   // neighbouring shopfronts: dark masses either side, fog does the rest
-  root.add(box(4, 8, 1.2, mats.facadeDark, -5.3, 4, -0.4));
-  root.add(box(4, 8, 1.2, mats.facadeDark, 5.3, 4, -0.4));
+  // tall enough that a phone, which starts out in the street, never sees
+  // past the top of the block
+  root.add(box(4, 11.6, 1.2, mats.facadeDark, -5.3, 5.8, -0.4));
+  root.add(box(4, 11.6, 1.2, mats.facadeDark, 5.3, 5.8, -0.4));
   {
     const sh = new THREE.Mesh(new THREE.PlaneGeometry(3.3, 2.85), mats.shutter);
     sh.position.set(-5.25, 1.45, 0.205);
@@ -293,9 +343,9 @@ export function buildStore({ tier = "high" } = {}) {
     // upstairs windows; after dark a couple of the flats have a lamp on
     const lampMat = new THREE.MeshStandardMaterial({ color: "#2a2117", emissive: "#ffc98f", emissiveIntensity: 0, roughness: 0.6 });
     addEm(lampMat, 0, 0.9);
-    const lit = new Set(["-5.25:6.3:0.9", "5.25:4.4:-0.9"]);
+    const lit = new Set(["-5.25:6.3:0.9", "5.25:4.4:-0.9", "5.25:8.2:0.9", "-5.25:10.1:-0.9"]);
     for (const nx of [-5.25, 5.25]) {
-      for (const wy of [4.4, 6.3]) {
+      for (const wy of [4.4, 6.3, 8.2, 10.1]) {
         for (const off of [-0.9, 0.9]) {
           const w = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 1.3), lit.has(`${nx}:${wy}:${off}`) ? lampMat : mats.darkGlass);
           w.position.set(nx + off, wy, 0.205);
@@ -310,10 +360,14 @@ export function buildStore({ tier = "high" } = {}) {
     { mat: mats.shutter, day: new THREE.Color("#b4b6ba"), night: new THREE.Color("#3b3d41") },
     { mat: mats.darkGlass, day: new THREE.Color("#55606f"), night: new THREE.Color("#0c0d10") },
   ];
-  // the building above the sign: dark glazing like the photo
-  root.add(box(6.6, 3.2, 0.6, mats.facadeDark, 0, 6.95, -0.1));
+  // the building above the sign: dark glazing like the photo, two floors
+  root.add(box(6.6, 6.2, 0.6, mats.facadeDark, 0, 8.45, -0.1));
   const upperWin = new THREE.MeshStandardMaterial({ color: "#0e1013", roughness: 0.08, metalness: 0.6 });
-  for (let i = 0; i < 3; i++) root.add(box(1.7, 1.9, 0.05, upperWin, -2.1 + i * 2.1, 6.9, 0.21));
+  const upperLamp = new THREE.MeshStandardMaterial({ color: "#2a2117", emissive: "#ffc98f", emissiveIntensity: 0, roughness: 0.6 });
+  addEm(upperLamp, 0, 0.75);
+  for (const wy of [6.9, 9.05]) {
+    for (let i = 0; i < 3; i++) root.add(box(1.7, 1.9, 0.05, wy > 8 && i === 2 ? upperLamp : upperWin, -2.1 + i * 2.1, wy, 0.21));
+  }
 
   // the fascia: white panel carrying the 3D sign
   const fascia = box(6.5, 1.9, 0.14, mats.white, 0, 4.42, 0.32);
@@ -692,31 +746,108 @@ export function buildStore({ tier = "high" } = {}) {
     root.add(box(1.7, 0.98, 0.62, mats.matteBlack, 1.25, 0.49, -11.4));
     root.add(box(1.76, 0.05, 0.68, mats.whiteGloss, 1.25, 1.0, -11.4));
     addShadow(root, shadowTex, 1.25, -11.4, 2.4, 1.3, 0.5);
-    // mirror on the left — a dark glossy panel
-    const mirror = box(0.03, 2.1, 0.9, new THREE.MeshStandardMaterial({ color: "#3a3d42", roughness: 0.04, metalness: 0.9 }), SHOP.xL + 0.02, 1.2, -10.6);
+    // on the counter: the till's screen (its back to the shop), the card
+    // machine, and two Kanaan carrier bags waiting to be filled
+    const top = 1.025;
+    root.add(box(0.06, 0.16, 0.06, mats.black, 1.62, top + 0.08, -11.56));
+    const screen = box(0.52, 0.33, 0.03, mats.matteBlack, 1.62, top + 0.31, -11.56);
+    screen.rotation.y = -0.25;
+    root.add(screen);
+    root.add(box(0.09, 0.035, 0.17, mats.matteBlack, 1.08, top + 0.018, -11.3));
+    const bagLogo = logoCanvasTexture({ width: 512, color: "#151517", pad: 0.04, parts: ["letters", "shop"] });
+    const bagLogoMat = new THREE.MeshBasicMaterial({ map: bagLogo, transparent: true, depthWrite: false });
+    const handle = new THREE.MeshStandardMaterial({ color: "#151517", roughness: 0.7 });
+    for (const [bx, bz, sc, ry] of [[0.62, -11.36, 1, 0.18], [0.86, -11.22, 0.82, -0.12]]) {
+      const bag = new THREE.Group();
+      bag.add(box(0.32, 0.38, 0.12, mats.white, 0, 0.19, 0));
+      const decal = new THREE.Mesh(new THREE.PlaneGeometry(0.25, 0.25 / bagLogo.userData.aspect), bagLogoMat);
+      decal.position.set(0, 0.22, 0.061);
+      bag.add(decal);
+      for (const hx of [-0.07, 0.07]) {
+        const h = new THREE.Mesh(new THREE.TorusGeometry(0.045, 0.004, 4, 12, Math.PI), handle);
+        h.position.set(hx, 0.38, 0);
+        h.rotation.y = Math.PI / 2;
+        bag.add(h);
+      }
+      bag.position.set(bx, top, bz);
+      bag.rotation.y = ry;
+      bag.scale.setScalar(sc);
+      root.add(bag);
+    }
+    // mirror on the left: polished, so it catches the shop's light
+    const mirror = box(0.03, 2.1, 0.9, new THREE.MeshStandardMaterial({ color: "#c9cdd2", roughness: 0.12, metalness: 0.25 }), SHOP.xL + 0.02, 1.2, -10.6);
     root.add(mirror);
     root.add(box(0.05, 2.2, 0.98, mats.black, SHOP.xL + 0.01, 1.2, -10.6));
   }
 
-  // neon on the back wall (texture swapped at runtime: "new in" / "sale")
+  /* ---------------------------------------------------- the denim corner */
+  // Back left, where the real shop keeps its jeans and trousers: black
+  // steel shelving on the back wall and round the corner on the left wall,
+  // folded denim stacked one colour per pile, and three lightboxes that
+  // show the jeans and pants live on the site.
+  const pantsSlots = [];
+  {
+    const steel = [];
+    const darkBack = new THREE.MeshStandardMaterial({ color: "#232327", roughness: 0.75 });
+    const shelvesY = [0.1, 0.5, 0.9, 2.08, 2.5];
+    // on the back wall
+    const xA = SHOP.xL + 0.02, xB = -0.62, xM = (xA + xB) / 2, zB = -SHOP.depth + 0.22;
+    for (const x of [xA, xM, xB]) steel.push(boxGeo(0.035, 2.75, 0.4, x, 1.375, zB));
+    for (const y of shelvesY) steel.push(boxGeo(xB - xA, 0.025, 0.4, xM, y, zB));
+    root.add(box(xB - xA, 1.06, 0.01, darkBack, xM, 1.49, -SHOP.depth + 0.03));
+    // round the corner, on the left wall
+    const xW = SHOP.xL + 0.22, zA = -11.3, zC = -12.58, zM = (zA + zC) / 2;
+    for (const z of [zA, zC]) steel.push(boxGeo(0.4, 2.75, 0.035, xW, 1.375, z));
+    for (const y of shelvesY) steel.push(boxGeo(0.4, 0.025, zA - zC, xW, y, zM));
+    root.add(box(0.01, 1.06, zA - zC, darkBack, SHOP.xL + 0.015, 1.49, zM));
+    root.add(merged(steel, mats.black));
+    addShadow(root, shadowTex, xM, zB + 0.1, 2.0, 0.8, 0.5);
+    addShadow(root, shadowTex, xW + 0.05, zM, 0.8, 1.6, 0.5);
+
+    // folded jeans: one colour per pile, like a shop sorts them
+    const pile = (x, y, z, ry, n) => {
+      const color = DENIM[Math.floor(r() * DENIM.length)];
+      for (let k = 0; k < n; k++) stacks.push([x + (r() - 0.5) * 0.012, y + 0.03 + k * 0.058, z, ry + (r() - 0.5) * 0.05, color]);
+    };
+    for (const y of shelvesY) {
+      const n = y > 2.4 ? 3 : y > 2 ? 4 : 5;
+      for (const bx of [(xA + xM) / 2, (xM + xB) / 2]) {
+        for (const off of [-0.19, 0.19]) pile(bx + off, y, zB, 0, n + Math.floor(r() * 3));
+      }
+      for (const off of [-0.32, 0.32]) pile(xW, y, zM + off, Math.PI / 2, n + Math.floor(r() * 3));
+    }
+
+    // the lightboxes in the band between the low and high shelves
+    for (const bx of [(xA + xM) / 2, (xM + xB) / 2]) pantsSlots.push({ x: bx, y: 1.5, z: -SHOP.depth + 0.06, ry: 0, w: 0.56, kind: "pants" });
+    pantsSlots.push({ x: SHOP.xL + 0.05, y: 1.5, z: zM, ry: Math.PI / 2, w: 0.56, kind: "pants" });
+
+    // and a white plaque over the back unit
+    const plaque = plaqueTexture("Jeans & pants", { bg: "#f3f2ef", fg: "#151518" });
+    const pm = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 1.1 / plaque.userData.aspect), new THREE.MeshStandardMaterial({ map: plaque, roughness: 0.6 }));
+    pm.position.set(xM, 2.79, -SHOP.depth + 0.04);
+    root.add(pm);
+  }
+
+  // neon on the back wall, right, over the counter (texture swapped at
+  // runtime: "new in" / "sale")
   {
     const neonMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, fog: false });
     neonMat.color.setScalar(1.9); // hot enough to read as light, not paint
     const neon = new THREE.Mesh(new THREE.PlaneGeometry(2.1, 0.66), neonMat);
-    neon.position.set(-0.45, 1.95, -SHOP.depth + 0.07);
+    neon.position.set(0.95, 1.95, -SHOP.depth + 0.07);
     root.add(neon);
     reg.neon = neon;
     const neonGlowMat = new THREE.MeshBasicMaterial({ map: poolTex, color: "#ff5a36", transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
     const ng = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 2.4), neonGlowMat);
-    ng.position.set(-0.45, 1.85, -SHOP.depth + 0.05);
+    ng.position.set(0.95, 1.85, -SHOP.depth + 0.05);
     root.add(ng);
     reg.neonGlow = neonGlowMat;
   }
 
-  // the plant by the entrance
+  // the plant at the back, between the denim corner and the counter
   {
     const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.15, 0.46, 24), mats.whiteGloss);
-    pot.position.set(-1.88, 0.23, -12.25);
+    pot.position.set(-0.3, 0.23, -12.5);
     root.add(pot);
     const green = new THREE.MeshStandardMaterial({ color: "#4f6b3c", roughness: 0.7 });
     const stems = [];
@@ -725,11 +856,11 @@ export function buildStore({ tier = "high" } = {}) {
       const c = new THREE.CapsuleGeometry(0.035 + r() * 0.015, h, 4, 8);
       c.rotateZ((r() - 0.5) * 0.25);
       c.rotateX((r() - 0.5) * 0.25);
-      c.translate(-1.88 + (r() - 0.5) * 0.16, 0.46 + h / 2, -12.25 + (r() - 0.5) * 0.16);
+      c.translate(-0.3 + (r() - 0.5) * 0.16, 0.46 + h / 2, -12.5 + (r() - 0.5) * 0.16);
       stems.push(c);
     }
     root.add(merged(stems, green));
-    addShadow(root, shadowTex, -1.88, -12.25, 0.7, 0.7, 0.5);
+    addShadow(root, shadowTex, -0.3, -12.5, 0.7, 0.7, 0.5);
   }
 
   /* ---------------------------------------------------- instanced stock */
@@ -739,12 +870,12 @@ export function buildStore({ tier = "high" } = {}) {
     const m4 = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const c = new THREE.Color();
-    stacks.forEach(([x, y, z, ry], i) => {
+    stacks.forEach(([x, y, z, ry, color], i) => {
       q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), ry);
       const s = 0.97 + r() * 0.06;
       m4.compose(new THREE.Vector3(x, y, z), q, new THREE.Vector3(s, 1, s));
       im.setMatrixAt(i, m4);
-      c.set(WINTER[Math.floor(r() * WINTER.length)]);
+      c.set(color || WINTER[Math.floor(r() * WINTER.length)]);
       im.setColorAt(i, c);
     });
     root.add(im);
@@ -752,7 +883,7 @@ export function buildStore({ tier = "high" } = {}) {
   {
     // the coat's width already runs across x (out from the wall) and its
     // thickness along z (the rail), which is how clothes hang on a wall rail
-    const geo = coatGeometry();
+    const geo = hangingCoatGeometry();
     const im = new THREE.InstancedMesh(geo, mats.fabric, coats.length);
     const m4 = new THREE.Matrix4();
     const q = new THREE.Quaternion();
@@ -778,7 +909,7 @@ export function buildStore({ tier = "high" } = {}) {
   addShadow(root, shadowTex, SHOP.xR - 0.3, -5.3, 1.0, 7.4, 0.45);
 
   /* ---------------------------------------------------- lightbox slots */
-  const slots = [...windowSlots, ...wallSlots, ...tableSlots];
+  const slots = [...windowSlots, ...wallSlots, ...tableSlots, ...pantsSlots];
   const frameMat = mats.black;
   // until a photo arrives, a frame glows like an empty lightbox
   const emptyMat = new THREE.MeshStandardMaterial({ color: "#e9e4dc", emissive: "#f6efe4", emissiveIntensity: 0.55, roughness: 0.9 });

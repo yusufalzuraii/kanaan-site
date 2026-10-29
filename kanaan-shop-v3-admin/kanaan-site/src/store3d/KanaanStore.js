@@ -33,11 +33,36 @@ const LOOK = {
   },
 };
 
+/* A phone's opening shot, worked out from the screen's shape so it holds on
+   every phone: zoomed out, the whole shopfront with a strip of the
+   neighbours either side, sitting in the band between the header and the
+   words at the bottom — then the walk carries you across the street and
+   in through the door. */
+function phoneFront(aspect, vfov, safeBottom = 0) {
+  const tanV = Math.tan(THREE.MathUtils.degToRad(vfov / 2));
+  const tanH = tanV * aspect;
+  // the band, as shares of the screen height from the top: under the
+  // header, and ending just above where the page says its words begin
+  // (safeBottom), so on a short phone the shop moves up instead of under them
+  const TOP = 0.2;
+  const BOTTOM = safeBottom > 0 ? clamp(safeBottom - 0.035, 0.44, 0.6) : 0.58;
+  const FILL = 0.78;               // share of the width the canopy takes
+  const HALF = 3.25, NEAR = 1.05;  // the canopy: half its width, and its front edge
+  const TALL = 5.45, EYE = 2.1;    // pavement to the top of the sign; camera height
+  const byWidth = HALF / (FILL * tanH) + NEAR;
+  const byHeight = TALL / ((BOTTOM - TOP) * 2 * tanV) + 0.32;
+  const D = Math.max(byWidth, byHeight);
+  // aim so the middle of the shopfront lands in the middle of the band
+  const above = Math.atan((0.5 - (TOP + BOTTOM) / 2) * 2 * tanV);
+  const pitch = Math.atan((2.7 - EYE) / (D - 0.32)) - above;
+  return { p: [0, EYE, D], l: [0, EYE + Math.tan(pitch) * D, 0] };
+}
+
 /* Where the camera stands, and what it looks at, along the scroll.
    t is the share of the walk-through; the facade framing is computed from
    the screen shape so the whole sign always fits — on a narrow phone the
    camera simply steps back across the street. */
-function pathFor(aspect, mode, safeLeft = 0) {
+function pathFor(aspect, mode, { left: safeLeft = 0, bottom: safeBottom = 0 } = {}) {
   // desktop wants a wide side shot of each wall; a phone, with its narrow
   // view, looks along the walls instead so several pieces stay in frame
   const tall = clamp((1.25 - aspect) / 0.7, 0, 1);
@@ -73,9 +98,13 @@ function pathFor(aspect, mode, safeLeft = 0) {
       shift = Math.min(0, -3.3 + 0.2 * D0 * tanH);
     }
   }
-  // On a phone the text sits on the lower half of the screen, so the camera
-  // tips down a little and the whole shopfront rides in the top half.
-  const front = { t: 0, p: [shift, lerp(1.75, 2.05, tall), D0], l: [shift, lerp(2.6, -0.55, tall), 0] };
+  // a phone (and, part way, a tablet) opens on its own zoomed-out shot
+  const phone = phoneFront(aspect, vfov, safeBottom);
+  const front = {
+    t: 0,
+    p: [lerp(shift, phone.p[0], tall), lerp(1.75, phone.p[1], tall), lerp(D0, phone.p[2], tall)],
+    l: [lerp(shift, phone.l[0], tall), lerp(2.6, phone.l[1], tall), 0],
+  };
   if (mode === "facade") {
     // A slow push towards the window. A phone has no room for the shop to
     // grow (the sign would slide under the header, the window into the
@@ -92,22 +121,29 @@ function pathFor(aspect, mode, safeLeft = 0) {
     vfov,
     keys: [
       front,
-      K(0.13, [1.15, 1.64, 3.8], [1.35, 1.6, -2], [1.15, 1.64, 4.2], [1.4, 1.6, -2]),
-      K(0.23, [1.45, 1.6, 0.75], [0.95, 1.55, -5], [1.45, 1.6, 0.9], [1.0, 1.55, -5]),
-      K(0.35, [0.95, 1.6, -1.5], [-2.3, 1.5, -3.4], [0.78, 1.63, -0.85], [-2.3, 1.45, -4.3]),
-      K(0.5, [0.78, 1.6, -3.7], [-2.3, 1.5, -6.3], [0.62, 1.66, -2.25], [-2.3, 1.45, -6.4]),
-      K(0.65, [0.45, 1.62, -5.6], [2.3, 1.55, -6.7], [0.38, 1.62, -4.8], [2.3, 1.5, -7.7]),
-      K(0.81, [0.3, 1.62, -8.3], [-0.45, 1.9, -13], [0.15, 1.62, -7.6], [-0.45, 1.9, -13]),
-      K(1, [0.15, 1.62, -8.95], [0.55, 1.45, -12.6], [0.1, 1.62, -8.4], [0.45, 1.45, -12.6]),
+      // up to the door, and in
+      K(0.12, [1.15, 1.64, 3.8], [1.35, 1.6, -2], [1.15, 1.64, 4.2], [1.4, 1.6, -2]),
+      K(0.21, [1.45, 1.6, 0.75], [0.95, 1.55, -5], [1.45, 1.6, 0.9], [1.0, 1.55, -5]),
+      // the new-in wall, on the left
+      K(0.32, [0.95, 1.6, -1.5], [-2.3, 1.5, -3.4], [0.78, 1.63, -0.85], [-2.3, 1.45, -4.3]),
+      K(0.45, [0.78, 1.6, -3.7], [-2.3, 1.5, -6.3], [0.62, 1.66, -2.25], [-2.3, 1.45, -6.4]),
+      // the racks, on the right
+      K(0.565, [0.45, 1.62, -5.6], [2.3, 1.55, -6.7], [0.38, 1.62, -4.8], [2.3, 1.5, -7.7]),
+      // the denim corner, back left
+      K(0.705, [0.75, 1.6, -8.1], [-1.55, 1.35, -12.7], [0.55, 1.62, -8.3], [-1.5, 1.3, -12.7]),
+      // the sale neon, back right
+      K(0.84, [-0.35, 1.62, -8.9], [0.95, 1.9, -13], [-0.3, 1.62, -8.5], [0.95, 1.85, -13]),
+      // the counter
+      K(1, [-0.1, 1.6, -9.5], [1.1, 1.25, -11.6], [-0.15, 1.6, -9.0], [1.05, 1.2, -11.6]),
     ],
   };
 }
 
 export class KanaanStore {
-  constructor(canvas, { mode = "walk", theme = "light", tier = "high", safeLeft = 0, onSelect, onReady } = {}) {
+  constructor(canvas, { mode = "walk", theme = "light", tier = "high", safe = {}, onSelect, onReady } = {}) {
     this.canvas = canvas;
     this.mode = mode;
-    this.safeLeft = safeLeft;
+    this.safe = { left: safe.left || 0, bottom: safe.bottom || 0 };
     this.tier = tier;
     this.onSelect = onSelect;
     this.onReady = onReady;
@@ -237,8 +273,15 @@ export class KanaanStore {
   setProducts(list) {
     const items = (list || []).filter((p) => p && p.image);
     if (!items.length) return;
-    this.reg.panels.forEach((panel, i) => {
-      const product = items[i % items.length];
+    // the denim corner shows jeans and pants (pieces marked group "pants");
+    // every other frame takes the rest, in order
+    const pants = items.filter((p) => p.group === "pants");
+    const general = items.filter((p) => p.group !== "pants");
+    let gi = 0, pi = 0;
+    this.reg.panels.forEach((panel) => {
+      const fromPants = panel.slot.kind === "pants" && pants.length > 0;
+      const pool = fromPants ? pants : general.length ? general : items;
+      const product = pool[(fromPants ? pi++ : gi++) % pool.length];
       if (panel.product && panel.product.id === product.id) return;
       panel.product = product;
       this.textureLoader.load(
@@ -314,12 +357,13 @@ export class KanaanStore {
     return this.reg.panels.find((p) => p.pic === hits[0].object) || null;
   }
 
-  /* Where the page's headline ends, as a fraction of the screen width, so
-     the opening shot can keep the sign clear of it (wide screens only). */
-  setSafeLeft(f) {
-    const v = clamp(Number(f) || 0, 0, 0.6);
-    if (Math.abs(v - this.safeLeft) < 0.004) return;
-    this.safeLeft = v;
+  /* Where the page's words are, as shares of the screen, so the opening
+     shot keeps the sign clear of them: on a wide screen where the headline
+     ends (left), on a phone where the words begin (bottom). */
+  setSafe({ left = 0, bottom = 0 } = {}) {
+    const l = clamp(Number(left) || 0, 0, 0.6), b = clamp(Number(bottom) || 0, 0, 1);
+    if (Math.abs(l - this.safe.left) < 0.004 && Math.abs(b - this.safe.bottom) < 0.004) return;
+    this.safe = { left: l, bottom: b };
     if (this.w && this.h) this.resize(this.w, this.h);
   }
 
@@ -329,7 +373,10 @@ export class KanaanStore {
     this.h = h;
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
-    this.path = pathFor(w / h, this.mode, this.safeLeft);
+    this.path = pathFor(w / h, this.mode, this.safe);
+    // a phone starts further out across the street: thinner haze, so the
+    // shop doesn't look washed out from there
+    this.fogScale = lerp(1, 0.6, clamp((1.25 - w / h) / 0.7, 0, 1));
     this.camera.fov = this.path.vfov;
     this.camera.updateProjectionMatrix();
     this.posCurve = new THREE.CatmullRomCurve3(this.path.keys.map((k) => new THREE.Vector3(...k.p)), false, "centripetal");
@@ -374,7 +421,7 @@ export class KanaanStore {
     const scene = this.scene;
     scene.background.copy(a.bg).lerp(b.bg, n);
     scene.fog.color.copy(a.fog).lerp(b.fog, n);
-    scene.fog.density = lerp(a.fogDensity, b.fogDensity, n);
+    scene.fog.density = lerp(a.fogDensity, b.fogDensity, n) * (this.fogScale || 1);
     this.hemi.intensity = lerp(a.hemi, b.hemi, n);
     this.hemi.color.copy(a.hemiSky).lerp(b.hemiSky, n);
     this.hemi.groundColor.copy(a.hemiGround).lerp(b.hemiGround, n);
@@ -476,7 +523,7 @@ export class KanaanStore {
     }
 
     // neon flickers on as you approach the back of the shop
-    const neonTarget = this.mode === "walk" ? smooth(0.62, 0.74, this.progress) : 0;
+    const neonTarget = this.mode === "walk" ? smooth(0.72, 0.8, this.progress) : 0;
     if (Math.abs(this.neonOn - neonTarget) > 1e-3) {
       const flicker = neonTarget > this.neonOn && Math.sin(now * 0.05) > 0.4 ? 0.5 : 1;
       this.neonOn += (neonTarget - this.neonOn) * (1 - Math.exp(-dt * 5)) * flicker;

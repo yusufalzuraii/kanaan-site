@@ -1,9 +1,9 @@
 /* ============================================================
-   HOME LAB — the new homepage, in three strengths, side by side
+   THE HOMEPAGE — the Kanaan shop in Saida, in 3D
    ------------------------------------------------------------
-   Lives at /lab only (not indexed, not linked), so the owner can try each
-   direction on his own phone with the real stock before anything replaces
-   the live homepage.
+   The website's homepage ("/", chosen by the owner on 29 Oct 2026: walk).
+   /lab still shows all three directions with a switch, for comparing
+   (not indexed, not linked).
 
      walk      Scroll walks you into the shop: storefront, through the
                door, past the new-in wall, the racks, the sale neon, to
@@ -23,6 +23,8 @@ import {
   useApp,
   ProductCard,
   StoryRail,
+  ScrollProgress,
+  AppTeaser,
   CATEGORIES,
   getImages,
   thumbUrlFor,
@@ -42,14 +44,19 @@ const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 /* Where along the walk each block of text belongs (0 = on the pavement,
    1 = at the counter) and which side of the screen it sits on — always the
    side the camera ISN'T looking at, so text never covers the products. */
+// Each window sits around its camera stop (KanaanStore's walk keys), with
+// a gap of at least two fades between neighbours, so on a phone — where
+// every block sits at the bottom — two never show at once.
 const STATIONS = [
-  { id: "hero", from: 0, to: 0.075, side: "start" },
-  { id: "new", from: 0.31, to: 0.53, side: "end" },
-  { id: "shelves", from: 0.59, to: 0.71, side: "start" },
-  { id: "sale", from: 0.76, to: 0.88, side: "end" },
-  { id: "desk", from: 0.93, to: 1.2, side: "end" },
+  { id: "hero", from: 0, to: 0.06 },
+  { id: "new", from: 0.26, to: 0.45 },
+  { id: "shelves", from: 0.52, to: 0.6 },
+  { id: "pants", from: 0.67, to: 0.74 },
+  { id: "sale", from: 0.81, to: 0.87 },
+  { id: "desk", from: 0.94, to: 1.2 },
 ];
-const FADE = 0.045;
+const FADE = 0.035;
+const PANTS = ["jeans", "pants"];
 
 function stationLevel(st, p) {
   if (st.from === 0) return p <= st.to ? 1 : clamp(1 - (p - st.to) / FADE, 0, 1);
@@ -110,7 +117,7 @@ function useIsTall() {
   return tall;
 }
 
-export default function HomeLab({ products, loading, goCatalog, goSale, openProduct, likes, toggleLike, storyRings, openStory }) {
+export default function HomeLab({ home = false, products, loading, goCatalog, goSale, openProduct, likes, toggleLike, storyRings, openStory, appExclusiveCount = 0 }) {
   const { theme } = useApp();
   const tall = useIsTall();
   // ?tier=high|mid|static lets the owner (and our tests) see a given
@@ -125,12 +132,14 @@ export default function HomeLab({ products, loading, goCatalog, goSale, openProd
   const forced = useMemo(() => {
     try { return new URLSearchParams(window.location.search).get("v"); } catch { return null; }
   }, []);
-  const [variant, setVariant] = useState(() => (forced === "facade" || forced === "lite" ? forced : "walk"));
+  // the homepage is always the walk; only /lab can switch
+  const [variant, setVariant] = useState(() => (!home && (forced === "facade" || forced === "lite") ? forced : "walk"));
   const canDo3D = tier === "high" || tier === "mid";
   const mode = canDo3D ? variant : "lite";
 
   useEffect(() => {
     document.title = `${STORE_NAME} — Menswear from Saida, Lebanon`;
+    if (home) return;
     // keep the chosen variant in the address bar, so a refresh or a shared
     // link opens the same one
     try {
@@ -138,9 +147,10 @@ export default function HomeLab({ products, loading, goCatalog, goSale, openProd
       u.searchParams.set("v", variant);
       window.history.replaceState(window.history.state, "", u.pathname + u.search);
     } catch { /* fine */ }
-  }, [variant]);
+  }, [variant, home]);
 
   const featured = useMemo(() => pickFeatured(products), [products]);
+  const pantsPicks = useMemo(() => products.filter((p) => PANTS.includes(p.category) && firstImage(p)).slice(0, 4), [products]);
   const onSale = useMemo(() => products.filter(isOnSale), [products]);
   const saleCount = onSale.length;
   const maxDiscount = saleCount ? Math.max(...onSale.map((p) => p.discount)) : 0;
@@ -158,8 +168,12 @@ export default function HomeLab({ products, loading, goCatalog, goSale, openProd
       list.push({ id: p.id, name: p.name, image, product: p });
       if (list.length >= 13) break;
     }
+    // and the denim corner gets jeans and pants of its own
+    for (const p of pantsPicks.slice(0, 3)) {
+      list.push({ id: `${p.id}-denim`, name: p.name, image: firstImage(p), product: p, group: "pants" });
+    }
     return list;
-  }, [featured, products]);
+  }, [featured, products, pantsPicks]);
 
   const counts = useMemo(() => {
     const m = {};
@@ -170,6 +184,7 @@ export default function HomeLab({ products, loading, goCatalog, goSale, openProd
   return (
     <div className={`lab lab-${mode}`}>
       <LabStyles />
+      {home && <ScrollProgress />}
       {mode === "walk" && (
         <WalkHero
           theme={theme}
@@ -177,6 +192,7 @@ export default function HomeLab({ products, loading, goCatalog, goSale, openProd
           tier={tier}
           stagePieces={stagePieces}
           featured={featured}
+          pantsPicks={pantsPicks}
           counts={counts}
           saleCount={saleCount}
           maxDiscount={maxDiscount}
@@ -195,9 +211,10 @@ export default function HomeLab({ products, loading, goCatalog, goSale, openProd
         {saleCount > 0 && <SaleBand count={saleCount} maxDiscount={maxDiscount} goSale={goSale} />}
         <VisitStore />
         <Promises />
+        <AppTeaser appExclusiveCount={appExclusiveCount} />
       </div>
 
-      <LabSwitcher variant={variant} setVariant={setVariant} canDo3D={canDo3D} />
+      {!home && <LabSwitcher variant={variant} setVariant={setVariant} canDo3D={canDo3D} />}
     </div>
   );
 }
@@ -206,7 +223,7 @@ export default function HomeLab({ products, loading, goCatalog, goSale, openProd
    The 3D stage plus the still behind it. The still is shown first; when the
    live scene has drawn its first frame it fades in on top.
    ------------------------------------------------------------------ */
-function Stage({ mode, theme, tall, tier, stagePieces, neon, safeLeft = 0, onStore, openProduct }) {
+function Stage({ mode, theme, tall, tier, stagePieces, neon, safe, onStore, openProduct }) {
   const [ready, setReady] = useState(false);
   const pieces = stagePieces;
   const onSelect = useCallback((piece) => piece && piece.product && openProduct(piece.product), [openProduct]);
@@ -220,7 +237,8 @@ function Stage({ mode, theme, tall, tier, stagePieces, neon, safeLeft = 0, onSto
           tier={tier}
           products={pieces}
           neon={neon}
-          safeLeft={safeLeft}
+          safeLeft={safe ? safe.left : 0}
+          safeBottom={safe ? safe.bottom : 0}
           onSelect={onSelect}
           onStore={onStore}
           onReady={() => setReady(true)}
@@ -231,28 +249,38 @@ function Stage({ mode, theme, tall, tier, stagePieces, neon, safeLeft = 0, onSto
   );
 }
 
-/* Where the opening text ends on a wide screen, as a fraction of the width,
-   so the 3D camera can keep the sign clear of it. Measured on the words
-   themselves (a heading's box spans the whole card), and again once the web
-   fonts have loaded, since they change how wide the headline is. */
-function useSafeLeft(cardRef) {
-  const [safe, setSafe] = useState(0);
+/* Where the opening words sit, as shares of the screen, so the 3D camera
+   can keep the sign clear of them: on a wide screen where the headline ends
+   (left), on a phone where the words begin (bottom). Measured on the words
+   themselves (a heading's box spans the whole card), and again once the
+   web fonts have loaded, since they change how wide the headline is. */
+function useSafeArea(cardRef) {
+  const [safe, setSafe] = useState({ left: 0, bottom: 0 });
   useEffect(() => {
     let raf = 0;
     let alive = true;
     const measure = () => {
       raf = 0;
       const card = cardRef.current;
+      const station = card && card.closest(".lab-station");
+      if (!card || !station) return;
       const vw = document.documentElement.clientWidth || window.innerWidth;
-      if (!card || vw < 1024) { setSafe(0); return; }
-      let right = 0;
-      const range = document.createRange();
-      for (const el of card.querySelectorAll(".lab-display, .lab-lede")) {
-        range.selectNodeContents(el);
-        for (const r of range.getClientRects()) right = Math.max(right, r.right);
+      let left = 0, bottom = 0;
+      if (vw >= 1024) {
+        let right = 0;
+        const range = document.createRange();
+        for (const el of card.querySelectorAll(".lab-display, .lab-lede")) {
+          range.selectNodeContents(el);
+          for (const r of range.getClientRects()) right = Math.max(right, r.right);
+        }
+        for (const el of card.querySelectorAll(".lab-actions > *")) right = Math.max(right, el.getBoundingClientRect().right);
+        left = Math.round((right / vw) * 100) / 100;
+      } else {
+        const first = card.firstElementChild;
+        const st = station.getBoundingClientRect();
+        if (first && st.height > 0) bottom = Math.round(((first.getBoundingClientRect().top - st.top) / st.height) * 100) / 100;
       }
-      for (const el of card.querySelectorAll(".lab-actions > *")) right = Math.max(right, el.getBoundingClientRect().right);
-      setSafe(Math.round((right / vw) * 100) / 100);
+      setSafe((s) => (s.left === left && s.bottom === bottom ? s : { left, bottom }));
     };
     const on = () => { if (alive && !raf) raf = requestAnimationFrame(measure); };
     measure();
@@ -293,13 +321,13 @@ function useSectionProgress(ref, onProgress) {
   }, [ref, onProgress]);
 }
 
-function WalkHero({ theme, tall, tier, stagePieces, featured, counts, saleCount, maxDiscount, goCatalog, goSale, openProduct }) {
+function WalkHero({ theme, tall, tier, stagePieces, featured, pantsPicks, counts, saleCount, maxDiscount, goCatalog, goSale, openProduct }) {
   const sectionRef = useRef(null);
   const storeRef = useRef(null);
   const stationRefs = useRef({});
   const railRef = useRef(null);
   const heroCardRef = useRef(null);
-  const safeLeft = useSafeLeft(heroCardRef);
+  const safe = useSafeArea(heroCardRef);
   const lastP = useRef(0);
 
   const apply = useCallback((p) => {
@@ -333,23 +361,45 @@ function WalkHero({ theme, tall, tier, stagePieces, featured, counts, saleCount,
   };
 
   const newList = featured.slice(0, 4);
-  const shelfCats = CATEGORIES.filter((c) => counts[c.id]).slice(0, 8);
+  const shelfCats = CATEGORIES.filter((c) => counts[c.id] && !PANTS.includes(c.id)).slice(0, 8);
+  const pantsCats = CATEGORIES.filter((c) => counts[c.id] && PANTS.includes(c.id));
+  const picks = (list) => (
+    <ul className="lab-picks">
+      {list.map((p) => (
+        <li key={p.id}>
+          <button onClick={() => openProduct(p)} className="lab-pick tap-scale" aria-label={p.name}>
+            {firstImage(p) ? <img src={firstImage(p)} alt="" loading="lazy" decoding="async" /> : <span className="lab-pick-ph" />}
+            <span className="lab-pick-name">{p.name}</span>
+            <span className="lab-pick-price font-num">{money(effectivePrice(p))}</span>
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+  const chips = (cats) => (
+    <div className="lab-chips">
+      {cats.map((c) => (
+        <button key={c.id} onClick={() => goCatalog(c.id)} className="glass rounded-full font-body text-sm px-4 py-2 tap-scale">
+          {c.label} <span className="text-muted font-num">{counts[c.id]}</span>
+        </button>
+      ))}
+    </div>
+  );
   const reg = (id) => (el) => { stationRefs.current[id] = el; };
 
   return (
     <section ref={sectionRef} className="lab-walk" aria-label="Kanaan Shop">
       <div className="lab-sticky">
-        <Stage mode="walk" theme={theme} tall={tall} tier={tier} stagePieces={stagePieces} neon={saleCount > 0 ? "sale" : "new in"} safeLeft={safeLeft} onStore={onStore} openProduct={openProduct} />
+        <Stage mode="walk" theme={theme} tall={tall} tier={tier} stagePieces={stagePieces} neon={saleCount > 0 ? "sale" : "new in"} safe={safe} onStore={onStore} openProduct={openProduct} />
 
         <div ref={reg("hero")} className="lab-station lab-side-start lab-hero-station">
           <div className="lab-scrim" />
           <div ref={heroCardRef} className="lab-card">
-            <p className="lab-place"><MapPin className="w-4 h-4" /> Eastern Boulevard, Saida</p>
             <h1 className="lab-display">Everyday wear, refined.</h1>
-            <p className="lab-lede">This is our shop in Saida, built in 3D. Scroll to walk in — everything on the shelves is in stock and ships anywhere in Lebanon, cash on delivery.</p>
+            <p className="lab-lede lab-sub">Our shop in Saida, in 3D. Scroll to walk in.</p>
             <div className="lab-actions">
               <button onClick={() => goCatalog("all")} className="glass glass-btn rounded-full font-body font-medium px-6 py-3 tap-scale lab-primary">Shop the collection</button>
-              <button onClick={() => jumpTo(0.34)} className="glass rounded-full font-body px-5 py-3 tap-scale inline-flex items-center gap-2">
+              <button onClick={() => jumpTo(0.33)} className="glass rounded-full font-body px-5 py-3 tap-scale inline-flex items-center gap-2">
                 <ArrowDown className="w-4 h-4" /> Walk in
               </button>
             </div>
@@ -361,18 +411,7 @@ function WalkHero({ theme, tall, tier, stagePieces, featured, counts, saleCount,
           <div className="lab-scrim" />
           <div className="lab-card">
             <h2 className="lab-title">New this winter</h2>
-            <p className="lab-lede">{featured.length ? "The newest pieces are on this wall. Tap a frame, or pick from the list." : "New pieces are on their way to the wall."}</p>
-            <ul className="lab-picks">
-              {newList.map((p) => (
-                <li key={p.id}>
-                  <button onClick={() => openProduct(p)} className="lab-pick tap-scale">
-                    {firstImage(p) ? <img src={firstImage(p)} alt="" loading="lazy" decoding="async" /> : <span className="lab-pick-ph" />}
-                    <span className="lab-pick-name">{p.name}</span>
-                    <span className="lab-pick-price font-num">{money(effectivePrice(p))}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
+            {newList.length > 0 ? picks(newList) : <p className="lab-lede">New pieces are on their way to the wall.</p>}
             <button onClick={() => goCatalog("all")} className="lab-link">See everything new</button>
           </div>
         </div>
@@ -381,49 +420,53 @@ function WalkHero({ theme, tall, tier, stagePieces, featured, counts, saleCount,
           <div className="lab-scrim" />
           <div className="lab-card">
             <h2 className="lab-title">Find your rack</h2>
-            <p className="lab-lede">Coats and jackets hang on the right, folded pieces on the left. Or go straight to what you came for.</p>
-            <div className="lab-chips">
-              {shelfCats.map((c) => (
-                <button key={c.id} onClick={() => goCatalog(c.id)} className="glass rounded-full font-body text-sm px-4 py-2 tap-scale">
-                  {c.label} <span className="text-muted font-num">{counts[c.id]}</span>
-                </button>
-              ))}
-            </div>
+            {chips(shelfCats)}
           </div>
         </div>
 
-        <div ref={reg("sale")} className="lab-station lab-side-end">
+        <div ref={reg("pants")} className="lab-station lab-side-end">
+          <div className="lab-scrim" />
+          <div className="lab-card">
+            <h2 className="lab-title">Jeans & pants</h2>
+            {pantsPicks.length > 0 && picks(pantsPicks)}
+            {pantsCats.length > 0 ? chips(pantsCats) : <p className="lab-lede">New jeans and pants are on their way.</p>}
+          </div>
+        </div>
+
+        <div ref={reg("sale")} className="lab-station lab-side-start">
           <div className="lab-scrim" />
           <div className="lab-card">
             {saleCount > 0 ? (
               <>
                 <h2 className="lab-title">Up to {maxDiscount}% off</h2>
-                <p className="lab-lede">{saleCount} {saleCount === 1 ? "piece is" : "pieces are"} marked down at the back of the shop.</p>
-                <button onClick={goSale} className="glass glass-btn rounded-full font-body font-medium px-6 py-3 tap-scale lab-primary">Shop the sale</button>
+                <div className="lab-actions">
+                  <button onClick={goSale} className="glass glass-btn rounded-full font-body font-medium px-6 py-3 tap-scale lab-primary">Shop the sale</button>
+                </div>
               </>
             ) : (
               <>
                 <h2 className="lab-title">Fresh every week</h2>
-                <p className="lab-lede">New stock lands in the shop and on this site on the same day.</p>
-                <button onClick={() => goCatalog("all")} className="glass glass-btn rounded-full font-body font-medium px-6 py-3 tap-scale lab-primary">Shop new in</button>
+                <div className="lab-actions">
+                  <button onClick={() => goCatalog("all")} className="glass glass-btn rounded-full font-body font-medium px-6 py-3 tap-scale lab-primary">Shop new in</button>
+                </div>
               </>
             )}
           </div>
         </div>
 
-        <div ref={reg("desk")} className="lab-station lab-side-end">
+        <div ref={reg("desk")} className="lab-station lab-side-start">
           <div className="lab-scrim" />
           <div className="lab-card">
             <h2 className="lab-title">Order here, pay at your door</h2>
             <ul className="lab-promises">
-              <li><Truck className="w-4 h-4" /> Delivery to all of Lebanon</li>
+              <li><Truck className="w-4 h-4" /> All of Lebanon</li>
               <li><ShieldCheck className="w-4 h-4" /> Cash on delivery</li>
-              <li><RotateCcw className="w-4 h-4" /> Easy 3-day returns</li>
+              <li><RotateCcw className="w-4 h-4" /> 3-day returns</li>
             </ul>
             <div className="lab-actions">
               <button onClick={() => goCatalog("all")} className="glass glass-btn rounded-full font-body font-medium px-6 py-3 tap-scale lab-primary">Start shopping</button>
               <a href={`https://wa.me/${WHATSAPP_NUMBER}`} target="_blank" rel="noopener noreferrer" className="glass rounded-full font-body px-5 py-3 tap-scale inline-flex items-center gap-2">
-                <MessageCircle className="w-4 h-4" /> Ask on WhatsApp
+                <MessageCircle className="w-4 h-4" /> WhatsApp
               </a>
             </div>
           </div>
@@ -432,9 +475,10 @@ function WalkHero({ theme, tall, tier, stagePieces, featured, counts, saleCount,
         <nav ref={railRef} className="lab-rail" aria-label="Walk through the shop">
           {[
             ["Outside", 0],
-            ["New in", 0.4],
-            ["Racks", 0.65],
-            ["Sale", 0.82],
+            ["New in", 0.36],
+            ["Racks", 0.565],
+            ["Jeans", 0.705],
+            ["Sale", 0.84],
             ["Counter", 1],
           ].map(([label, p]) => (
             <button key={label} onClick={() => jumpTo(p)} style={{ "--at": p }}>
@@ -452,7 +496,7 @@ function FacadeHero({ theme, tall, tier, stagePieces, goCatalog, openProduct }) 
   const storeRef = useRef(null);
   const textRef = useRef(null);
   const cardRef = useRef(null);
-  const safeLeft = useSafeLeft(cardRef);
+  const safe = useSafeArea(cardRef);
   const apply = useCallback((p) => {
     if (storeRef.current) storeRef.current.setProgress(p);
     const el = textRef.current;
@@ -471,13 +515,12 @@ function FacadeHero({ theme, tall, tier, stagePieces, goCatalog, openProduct }) 
   return (
     <section ref={sectionRef} className="lab-facade" aria-label="Kanaan Shop">
       <div className="lab-sticky">
-        <Stage mode="facade" theme={theme} tall={tall} tier={tier} stagePieces={stagePieces} safeLeft={safeLeft} onStore={onStore} openProduct={openProduct} />
+        <Stage mode="facade" theme={theme} tall={tall} tier={tier} stagePieces={stagePieces} safe={safe} onStore={onStore} openProduct={openProduct} />
         <div ref={textRef} className="lab-station lab-side-start lab-hero-station" style={{ opacity: 1, visibility: "visible" }}>
           <div className="lab-scrim" />
           <div ref={cardRef} className="lab-card">
-            <p className="lab-place"><MapPin className="w-4 h-4" /> Eastern Boulevard, Saida</p>
             <h1 className="lab-display">Everyday wear, refined.</h1>
-            <p className="lab-lede">Menswear from our shop in Saida, delivered anywhere in Lebanon. Pay cash when it arrives.</p>
+            <p className="lab-lede lab-sub">From our shop in Saida to all of Lebanon.</p>
             <div className="lab-actions">
               <button onClick={() => goCatalog("all")} className="glass glass-btn rounded-full font-body font-medium px-6 py-3 tap-scale lab-primary">Shop the collection</button>
               <a href="#lab-shop" className="glass rounded-full font-body px-5 py-3 tap-scale inline-flex items-center gap-2"><ArrowDown className="w-4 h-4" /> New in</a>
@@ -513,9 +556,8 @@ function LiteHero({ theme, tall, goCatalog }) {
         <div className="lab-station lab-side-start lab-hero-station" style={{ opacity: 1, visibility: "visible" }}>
           <div className="lab-scrim" />
           <div className="lab-card">
-            <p className="lab-place"><MapPin className="w-4 h-4" /> Eastern Boulevard, Saida</p>
             <h1 className="lab-display">Everyday wear, refined.</h1>
-            <p className="lab-lede">Menswear from our shop in Saida, delivered anywhere in Lebanon. Pay cash when it arrives.</p>
+            <p className="lab-lede lab-sub">From our shop in Saida to all of Lebanon.</p>
             <div className="lab-actions">
               <button onClick={() => goCatalog("all")} className="glass glass-btn rounded-full font-body font-medium px-6 py-3 tap-scale lab-primary">Shop the collection</button>
               <a href="#lab-shop" className="glass rounded-full font-body px-5 py-3 tap-scale inline-flex items-center gap-2"><ArrowDown className="w-4 h-4" /> New in</a>
@@ -662,9 +704,9 @@ const LAB_CSS = String.raw`
 .lab { --lab-scrim: 242,242,244; }
 [data-theme="dark"] .lab { --lab-scrim: 11,11,14; }
 
-.lab-walk { position: relative; height: 560vh; margin-top: calc(-1 * var(--header-h)); }
+.lab-walk { position: relative; height: 720vh; margin-top: calc(-1 * var(--header-h)); }
 .lab-facade { position: relative; height: 150vh; margin-top: calc(-1 * var(--header-h)); }
-@supports (height: 100svh) { .lab-walk { height: 560svh; } .lab-facade { height: 150svh; } }
+@supports (height: 100svh) { .lab-walk { height: 720svh; } .lab-facade { height: 150svh; } }
 .lab-sticky { position: sticky; top: 0; height: 100vh; overflow: hidden; }
 @supports (height: 100svh) { .lab-sticky { height: 100svh; } }
 
@@ -676,7 +718,9 @@ const LAB_CSS = String.raw`
 
 .lab-station { position: absolute; inset: 0; pointer-events: none; display: flex; align-items: flex-end; will-change: opacity, transform; }
 .lab-station .lab-card { pointer-events: auto; position: relative; width: 100%; padding: 0 20px calc(28px + env(safe-area-inset-bottom)); }
-.lab-scrim { position: absolute; inset: 0; background: linear-gradient(to top, rgba(var(--lab-scrim), 0.97) 0%, rgba(var(--lab-scrim), 0.9) 34%, rgba(var(--lab-scrim), 0.55) 52%, rgba(var(--lab-scrim), 0) 70%); }
+/* on a phone the words sit at the bottom on a short, soft fade: the shop
+   above stays in full view */
+.lab-scrim { position: absolute; inset: 0; background: linear-gradient(to top, rgba(var(--lab-scrim), 0.95) 0%, rgba(var(--lab-scrim), 0.82) 20%, rgba(var(--lab-scrim), 0.38) 34%, rgba(var(--lab-scrim), 0) 46%); }
 .lab-hero-station .lab-card { padding-bottom: calc(36px + env(safe-area-inset-bottom)); }
 /* room for the preview switch and the WhatsApp button on phones */
 @media (max-width: 1023px) { .lab-station .lab-card, .lab-hero-station .lab-card { padding-bottom: calc(86px + env(safe-area-inset-bottom)); } }
@@ -694,14 +738,15 @@ const LAB_CSS = String.raw`
   .lab-hero-station .lab-lede { max-width: 38ch; }
 }
 
-.lab-place { display: inline-flex; align-items: center; gap: 6px; font-family: Inter, system-ui, sans-serif; font-size: 0.86rem; color: var(--fg-muted); margin-bottom: 14px; }
-.lab-place svg { color: var(--coral); }
-.lab-display { font-family: "Space Grotesk", system-ui, sans-serif; font-weight: 700; font-size: clamp(2.35rem, 4.2vw, 3.6rem); line-height: 1.02; letter-spacing: -0.028em; color: var(--fg); }
-.lab-title { font-family: "Space Grotesk", system-ui, sans-serif; font-weight: 700; font-size: clamp(1.75rem, 3vw, 2.5rem); line-height: 1.06; letter-spacing: -0.022em; color: var(--fg); }
+.lab-display { font-family: "Space Grotesk", system-ui, sans-serif; font-weight: 700; font-size: clamp(2rem, 4.2vw, 3.6rem); line-height: 1.02; letter-spacing: -0.028em; color: var(--fg); }
+.lab-title { font-family: "Space Grotesk", system-ui, sans-serif; font-weight: 700; font-size: clamp(1.5rem, 3vw, 2.5rem); line-height: 1.06; letter-spacing: -0.022em; color: var(--fg); }
+.lab-sub { margin-top: 8px; font-size: 0.95rem; }
 .lab-lede { font-family: Inter, system-ui, sans-serif; font-size: 1rem; line-height: 1.55; color: var(--fg-muted); margin-top: 12px; max-width: 44ch; }
-.lab-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px; }
+.lab-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
 .lab-primary { background: var(--coral) !important; color: #fff !important; border-color: var(--coral) !important; }
-.lab-skip { display: inline-block; margin-top: 14px; font-family: Inter, system-ui, sans-serif; font-size: 0.85rem; color: var(--fg-muted); text-decoration: underline; text-underline-offset: 3px; }
+/* for keyboards and screen readers: out of sight until it has focus */
+.lab-skip { position: absolute; left: -9999px; font-family: Inter, system-ui, sans-serif; font-size: 0.85rem; color: var(--fg-muted); text-decoration: underline; text-underline-offset: 3px; }
+.lab-skip:focus-visible { position: static; display: inline-block; margin-top: 12px; }
 .lab-link { font-family: Inter, system-ui, sans-serif; font-size: 0.92rem; color: var(--coral); margin-top: 16px; text-underline-offset: 3px; }
 .lab-link:hover { text-decoration: underline; }
 
@@ -710,11 +755,21 @@ const LAB_CSS = String.raw`
 .lab-pick img, .lab-pick-ph { width: 44px; height: 55px; border-radius: 10px; object-fit: cover; background: var(--field-bg); }
 .lab-pick-name { font-family: Inter, system-ui, sans-serif; font-size: 0.92rem; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lab-pick-price { font-size: 0.95rem; color: var(--fg); padding-right: 8px; }
-@media (max-width: 1023px) { .lab-picks { grid-template-columns: 1fr 1fr; } .lab-pick { grid-template-columns: 40px 1fr; } .lab-pick img, .lab-pick-ph { width: 40px; height: 50px; } .lab-pick-price { display: none; } }
 
-.lab-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
-.lab-promises { list-style: none; padding: 0; margin: 16px 0 0; display: grid; gap: 10px; font-family: Inter, system-ui, sans-serif; color: var(--fg); }
-.lab-promises li { display: flex; align-items: center; gap: 10px; }
+.lab-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.lab-promises { list-style: none; padding: 0; margin: 12px 0 0; display: flex; flex-wrap: wrap; gap: 6px 16px; font-family: Inter, system-ui, sans-serif; font-size: 0.92rem; color: var(--fg); }
+.lab-promises li { display: flex; align-items: center; gap: 6px; }
+/* on a phone the picks are a row of photos — the names are on the
+   product page a tap away */
+@media (max-width: 1023px) {
+  .lab-picks { display: flex; gap: 8px; margin-top: 14px; }
+  .lab-pick { display: block; width: 62px; padding: 0; border: 0; border-radius: 14px; background: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .lab-pick img, .lab-pick-ph { display: block; width: 62px; height: 78px; border-radius: 14px; }
+  .lab-pick-name, .lab-pick-price { display: none; }
+  .lab-chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 14px -20px 0; padding: 2px 20px; }
+  .lab-chips::-webkit-scrollbar { display: none; }
+  .lab-chips > * { flex: 0 0 auto; }
+}
 .lab-promises svg { color: var(--teal); }
 
 /* where you are in the shop — desktop only */

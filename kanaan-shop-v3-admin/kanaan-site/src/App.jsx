@@ -48,10 +48,14 @@ import {
    that only downloads when someone actually visits /admin, so every
    visitor stops paying to carry it around. */
 const Admin = React.lazy(() => import("./Admin.jsx"));
-/* The new homepage directions under trial at /lab (3D shop walk-through,
-   3D storefront, or light). Its own file, loaded only on that page — the
-   live homepage below doesn't carry any of it. */
-const HomeLab = React.lazy(() => import("./home/HomeLab.jsx"));
+/* The website's homepage: the Kanaan shop in 3D, walked into as you
+   scroll (and /lab, the same page with a switch between the three
+   directions that were tried). Loaded with the app itself, not on demand,
+   because it IS the front door; the 3D engine inside it is still its own
+   chunk, fetched only when a device can show it. */
+import HomeLab from "./home/HomeLab.jsx";
+/* false brings back the previous homepage (HomeView) in one line */
+const HOME_3D = true;
 import { COLORS as PALETTE, swatchBackground } from "./palette.js";
 import {
   isNativeApp,
@@ -2377,13 +2381,13 @@ function KanaanShop() {
         {route.type === "home" && isNativeApp && (
           <NativeHomeView products={products} loading={catalogLoading} error={productsError} onRetry={refreshProducts} goCatalog={goCatalog} goSale={goSale} goExclusives={goExclusives} openProduct={openProduct} likes={likes} toggleLike={toggleLike} storyRings={storyRings} openStory={openStory} goFavorites={goFavorites} onCart={() => setCartOpen(true)} cartCount={cartCount} />
         )}
-        {route.type === "home" && !isNativeApp && (
+        {route.type === "home" && !isNativeApp && (HOME_3D ? (
+          <HomeLab home products={products} loading={catalogLoading} goCatalog={goCatalog} goSale={goSale} openProduct={openProduct} likes={likes} toggleLike={toggleLike} storyRings={storyRings} openStory={openStory} appExclusiveCount={appExclusiveCount} />
+        ) : (
           <HomeView products={products} loading={catalogLoading} goCatalog={goCatalog} goSale={goSale} openProduct={openProduct} likes={likes} toggleLike={toggleLike} storyRings={storyRings} openStory={openStory} appExclusiveCount={appExclusiveCount} />
-        )}
+        ))}
         {route.type === "lab" && (
-          <React.Suspense fallback={<div style={{ minHeight: "100vh" }} />}>
-            <HomeLab products={products} loading={catalogLoading} goCatalog={goCatalog} goSale={goSale} openProduct={openProduct} likes={likes} toggleLike={toggleLike} storyRings={storyRings} openStory={openStory} />
-          </React.Suspense>
+          <HomeLab products={products} loading={catalogLoading} goCatalog={goCatalog} goSale={goSale} openProduct={openProduct} likes={likes} toggleLike={toggleLike} storyRings={storyRings} openStory={openStory} appExclusiveCount={appExclusiveCount} />
         )}
         {route.type === "sale" && (
           <SaleView products={products} loading={catalogLoading} goCatalog={goCatalog} openProduct={openProduct} likes={likes} toggleLike={toggleLike} />
@@ -3921,6 +3925,41 @@ function useHeroParallax() {
   return y;
 }
 
+/* The app teaser: app-only prices when there are some, "coming soon"
+   otherwise. Shared by the homepage and the previous HomeView. */
+function AppTeaser({ appExclusiveCount = 0 }) {
+  return (
+    <section className="max-w-6xl mx-auto px-4 sm:px-6 pb-20 section-lazy">
+      <Reveal>
+        <div className="glass glass-sheen rounded-3xl p-8 sm:p-10 relative overflow-hidden text-center sm:text-left">
+          <MeshBackground variant="card" />
+          <div className="relative flex flex-col sm:flex-row items-center sm:items-center gap-5 justify-between">
+            <div className="flex flex-col sm:flex-row items-center gap-4">
+              <div className="glass rounded-2xl p-3">
+                <Smartphone className="w-7 h-7 text-coral" />
+              </div>
+              <div>
+                <p className="font-display font-bold text-xl">
+                  {appExclusiveCount > 0 ? "🔥 App-only prices, waiting" : "Coming soon"}
+                </p>
+                <p className="font-body text-sm text-muted mt-1 max-w-sm">
+                  {appExclusiveCount > 0
+                    ? `${appExclusiveCount} piece${appExclusiveCount === 1 ? "" : "s"} are priced lower right now — visible only in the Kanaan Shop app.`
+                    : "The Kanaan Shop app is on its way — a faster, native way to shop from your phone."}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <GlassChip>Android</GlassChip>
+              <GlassChip>iPhone</GlassChip>
+            </div>
+          </div>
+        </div>
+      </Reveal>
+    </section>
+  );
+}
+
 function HomeView({ products, loading, goCatalog, goSale, openProduct, likes, toggleLike, storyRings, openStory, appExclusiveCount }) {
   useEffect(() => {
     document.title = `${STORE_NAME} — Menswear from Saida, Lebanon`;
@@ -4203,34 +4242,7 @@ function HomeView({ products, loading, goCatalog, goSale, openProduct, likes, to
       </section>
 
       {/* Mobile app teaser — bento-style, moved here from the footer */}
-      <section className="max-w-6xl mx-auto px-4 sm:px-6 pb-20 section-lazy">
-        <Reveal>
-          <div className="glass glass-sheen rounded-3xl p-8 sm:p-10 relative overflow-hidden text-center sm:text-left">
-            <MeshBackground variant="card" />
-            <div className="relative flex flex-col sm:flex-row items-center sm:items-center gap-5 justify-between">
-              <div className="flex flex-col sm:flex-row items-center gap-4">
-                <div className="glass rounded-2xl p-3">
-                  <Smartphone className="w-7 h-7 text-coral" />
-                </div>
-                <div>
-                  <p className="font-display font-bold text-xl">
-                    {appExclusiveCount > 0 ? "🔥 App-only prices, waiting" : "Coming soon"}
-                  </p>
-                  <p className="font-body text-sm text-muted mt-1 max-w-sm">
-                    {appExclusiveCount > 0
-                      ? `${appExclusiveCount} piece${appExclusiveCount === 1 ? "" : "s"} are priced lower right now — visible only in the Kanaan Shop app.`
-                      : "The Kanaan Shop app is on its way — a faster, native way to shop from your phone."}
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <GlassChip>Android</GlassChip>
-                <GlassChip>iPhone</GlassChip>
-              </div>
-            </div>
-          </div>
-        </Reveal>
-      </section>
+      <AppTeaser appExclusiveCount={appExclusiveCount} />
     </div>
   );
 }
@@ -5924,6 +5936,8 @@ export {
   useApp,
   ProductCard,
   StoryRail,
+  ScrollProgress,
+  AppTeaser,
   CATEGORIES,
   getImages,
   thumbUrlFor,

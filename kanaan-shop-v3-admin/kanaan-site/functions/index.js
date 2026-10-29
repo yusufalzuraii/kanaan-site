@@ -107,9 +107,18 @@ export async function onRequestGet(context) {
     html = injectContent(html, content);
   } catch { /* meta and structured data below still apply */ }
 
+  /* The homepage opens on a still of the shop (the 3D scene fades in over
+     it). Fetching it alongside the HTML, instead of only once the app has
+     started, puts the shop on screen sooner. The light theme is the
+     default, so these are the day stills; the shape decides which. */
+  const preload =
+    `<link rel="preload" as="image" href="/home/store-day-tall.webp" media="(max-aspect-ratio: 21/20)" fetchpriority="high">\n` +
+    `<link rel="preload" as="image" href="/home/store-day-wide.webp" media="(min-aspect-ratio: 21/20)" fetchpriority="high">\n`;
+
   html = html.replace(
     /<\/head>/i,
-    `<script type="application/ld+json">${listLd}</script>\n` +
+    preload +
+      `<script type="application/ld+json">${listLd}</script>\n` +
       `<script type="application/ld+json">${searchLd}</script>\n  </head>`
   );
 

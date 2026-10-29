@@ -188,7 +188,9 @@ export class KanaanStore {
     scene.fog = new THREE.FogExp2(LOOK.day.fog.clone(), LOOK.day.fogDensity);
     scene.background = LOOK.day.bg.clone();
 
-    this.camera = new THREE.PerspectiveCamera(50, 1, 0.05, 60);
+    // near plane at 10 cm: the camera never comes closer to anything, and a
+    // further near plane keeps surfaces a few mm apart from flickering
+    this.camera = new THREE.PerspectiveCamera(50, 1, 0.1, 60);
 
     this.hemi = new THREE.HemisphereLight("#ffffff", "#999999", 1);
     scene.add(this.hemi);
@@ -217,6 +219,14 @@ export class KanaanStore {
     this.built = built;
     scene.add(built.root);
     renderer.shadowMap.needsUpdate = true;
+    // the floor's tile joints, the slatted back wall and the pavement are
+    // fine repeating lines; seen at a slant while walking they shimmer
+    // unless the GPU filters them more carefully
+    const aniso = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+    built.root.traverse((o) => {
+      const m = o.material;
+      if (m && m.map && m.map.wrapS === THREE.RepeatWrapping) m.map.anisotropy = aniso;
+    });
 
     this.raycaster = new THREE.Raycaster();
     this.textureLoader = new THREE.TextureLoader();

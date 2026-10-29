@@ -775,7 +775,7 @@ export function buildStore({ tier = "high" } = {}) {
       root.add(bag);
     }
     // mirror on the left: polished, so it catches the shop's light
-    const mirror = box(0.03, 2.1, 0.9, new THREE.MeshStandardMaterial({ color: "#c9cdd2", roughness: 0.12, metalness: 0.25 }), SHOP.xL + 0.02, 1.2, -10.6);
+    const mirror = box(0.03, 2.1, 0.9, new THREE.MeshStandardMaterial({ color: "#c9cdd2", roughness: 0.12, metalness: 0.25 }), SHOP.xL + 0.035, 1.2, -10.6);
     root.add(mirror);
     root.add(box(0.05, 2.2, 0.98, mats.black, SHOP.xL + 0.01, 1.2, -10.6));
   }
@@ -798,7 +798,9 @@ export function buildStore({ tier = "high" } = {}) {
     // round the corner, on the left wall
     const xW = SHOP.xL + 0.22, zA = -11.3, zC = -12.58, zM = (zA + zC) / 2;
     for (const z of [zA, zC]) steel.push(boxGeo(0.4, 2.75, 0.035, xW, 1.375, z));
-    for (const y of shelvesY) steel.push(boxGeo(0.4, 0.025, zA - zC, xW, y, zM));
+    // (stopping 5 mm short of the back unit: two faces in the same plane
+    // flicker against each other as the camera moves)
+    for (const y of shelvesY) steel.push(boxGeo(0.4, 0.025, zA - zC - 0.01, xW, y, zM + 0.005));
     root.add(box(0.01, 1.06, zA - zC, darkBack, SHOP.xL + 0.015, 1.49, zM));
     root.add(merged(steel, mats.black));
     addShadow(root, shadowTex, xM, zB + 0.1, 2.0, 0.8, 0.5);

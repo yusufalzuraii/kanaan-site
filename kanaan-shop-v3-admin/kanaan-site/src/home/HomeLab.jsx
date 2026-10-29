@@ -262,8 +262,8 @@ function useSafeArea(cardRef) {
     const measure = () => {
       raf = 0;
       const card = cardRef.current;
-      const station = card && card.closest(".lab-station");
-      if (!card || !station) return;
+      const stage = card && card.closest(".lab-sticky");
+      if (!card || !stage) return;
       const vw = document.documentElement.clientWidth || window.innerWidth;
       let left = 0, bottom = 0;
       if (vw >= 1024) {
@@ -277,18 +277,26 @@ function useSafeArea(cardRef) {
         left = Math.round((right / vw) * 100) / 100;
       } else {
         const first = card.firstElementChild;
-        const st = station.getBoundingClientRect();
+        const st = stage.getBoundingClientRect();
         if (first && st.height > 0) bottom = Math.round(((first.getBoundingClientRect().top - st.top) / st.height) * 100) / 100;
       }
       setSafe((s) => (s.left === left && s.bottom === bottom ? s : { left, bottom }));
     };
     const on = () => { if (alive && !raf) raf = requestAnimationFrame(measure); };
+    // a phone fires resize every time its browser bars slide in or out;
+    // only a real change of width (rotating, resizing a window) re-measures
+    let lastW = window.innerWidth;
+    const onResize = () => {
+      if (window.innerWidth === lastW) return;
+      lastW = window.innerWidth;
+      on();
+    };
     measure();
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(on).catch(() => {});
-    window.addEventListener("resize", on, { passive: true });
+    window.addEventListener("resize", onResize, { passive: true });
     return () => {
       alive = false;
-      window.removeEventListener("resize", on);
+      window.removeEventListener("resize", onResize);
       cancelAnimationFrame(raf);
     };
   }, [cardRef]);
@@ -305,7 +313,10 @@ function useSectionProgress(ref, onProgress) {
       const el = ref.current;
       if (!el) return;
       const r = el.getBoundingClientRect();
-      const total = r.height - window.innerHeight;
+      // the stretch the stage stays pinned for (its own height, not the
+      // window's, which changes as a phone's browser bars come and go)
+      const stage = el.querySelector(".lab-sticky");
+      const total = r.height - (stage ? stage.offsetHeight : window.innerHeight);
       const p = total > 0 ? clamp(-r.top / total, 0, 1) : 0;
       onProgress(p);
     };
@@ -356,7 +367,8 @@ function WalkHero({ theme, tall, tier, stagePieces, featured, pantsPicks, counts
     const el = sectionRef.current;
     if (!el) return;
     const top = el.getBoundingClientRect().top + window.scrollY;
-    const total = el.offsetHeight - window.innerHeight;
+    const stage = el.querySelector(".lab-sticky");
+    const total = el.offsetHeight - (stage ? stage.offsetHeight : window.innerHeight);
     window.scrollTo({ top: top + total * p, behavior: "smooth" });
   };
 
@@ -707,8 +719,13 @@ const LAB_CSS = String.raw`
 .lab-walk { position: relative; height: 720vh; margin-top: calc(-1 * var(--header-h)); }
 .lab-facade { position: relative; height: 150vh; margin-top: calc(-1 * var(--header-h)); }
 @supports (height: 100svh) { .lab-walk { height: 720svh; } .lab-facade { height: 150svh; } }
+/* The 3D fills the whole screen, also once a phone's browser bars slide
+   away while scrolling (100lvh: the screen with the bars hidden, so the
+   picture runs on underneath them while they show). The words above it
+   follow the part that's actually visible (100dvh), so they always sit just
+   above the bottom edge. */
 .lab-sticky { position: sticky; top: 0; height: 100vh; overflow: hidden; }
-@supports (height: 100svh) { .lab-sticky { height: 100svh; } }
+@supports (height: 100lvh) { .lab-sticky { height: 100lvh; } }
 
 .lab-stage { position: absolute; inset: 0; }
 .lab-poster, .lab-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
@@ -716,7 +733,8 @@ const LAB_CSS = String.raw`
 .lab-canvas { opacity: 0; transition: opacity 0.6s ease; touch-action: pan-y; }
 .lab-canvas.is-ready { opacity: 1; }
 
-.lab-station { position: absolute; inset: 0; pointer-events: none; display: flex; align-items: flex-end; will-change: opacity, transform; }
+.lab-station { position: absolute; top: 0; left: 0; right: 0; height: 100%; pointer-events: none; display: flex; align-items: flex-end; will-change: opacity, transform; }
+@supports (height: 100dvh) { .lab-station { height: 100dvh; } }
 .lab-station .lab-card { pointer-events: auto; position: relative; width: 100%; padding: 0 20px calc(28px + env(safe-area-inset-bottom)); }
 /* on a phone the words sit at the bottom on a short, soft fade: the shop
    above stays in full view */

@@ -48,6 +48,10 @@ import {
    that only downloads when someone actually visits /admin, so every
    visitor stops paying to carry it around. */
 const Admin = React.lazy(() => import("./Admin.jsx"));
+/* The new homepage directions under trial at /lab (3D shop walk-through,
+   3D storefront, or light). Its own file, loaded only on that page — the
+   live homepage below doesn't carry any of it. */
+const HomeLab = React.lazy(() => import("./home/HomeLab.jsx"));
 import { COLORS as PALETTE, swatchBackground } from "./palette.js";
 import {
   isNativeApp,
@@ -273,7 +277,10 @@ function useRouter() {
     // هاد بالضبط الأساس يلي زر الرجوع الفيزيائي بأندرويد بيعتمد عليه
     // ليقرر "ارجع جوا التطبيق" أو "اطلع من التطبيق".
     if (!window.history.state || typeof window.history.state.depth !== "number") {
-      try { window.history.replaceState({ depth: 0 }, "", window.location.pathname); } catch (e) { /* ignore */ }
+      // keep the query string: it carries the visit's source (utm_source,
+      // ref) that the visit counter reads right after this, and the /lab
+      // preview's options
+      try { window.history.replaceState({ depth: 0 }, "", window.location.pathname + window.location.search + window.location.hash); } catch (e) { /* ignore */ }
     }
 
     const onPop = () => {
@@ -308,6 +315,7 @@ function useRouter() {
 function parseRoute(path) {
   if (path === "/") return { type: "home" };
   if (path.startsWith("/admin")) return { type: "admin" };
+  if (path === "/lab") return { type: "lab" };
   if (path === "/sale") return { type: "sale" };
   if (path === "/favorites") return { type: "favorites" };
   if (path === "/exclusives") return { type: "exclusives" };
@@ -326,6 +334,25 @@ function parseRoute(path) {
    HELPERS
    ============================================================ */
 const money = (n) => `$${n.toFixed(0)}`;
+
+/* For listeners that hand back their "stop listening" function inside a
+   Promise (the native.js register* helpers). An effect must return a plain
+   function: returning the Promise itself made React throw "destroy is not a
+   function" whenever the component unmounted (every page load in
+   development, where React mounts twice on purpose). */
+function untilUnmount(promise) {
+  let stop = null;
+  let gone = false;
+  Promise.resolve(promise).then((fn) => {
+    if (typeof fn !== "function") return;
+    if (gone) fn();
+    else stop = fn;
+  }).catch(() => {});
+  return () => {
+    gone = true;
+    if (stop) stop();
+  };
+}
 
 /* طلب شبكة بمهلة زمنية. بدونها، لو الاتصال ضعيف أو الطلب "علق" (شائع
    على شبكات الموبايل هون)، الطلب بيضل معلّق بلا نهاية والمستخدم بيضل
@@ -1977,9 +2004,7 @@ function KanaanShop() {
   // حالة الاتصال — بانر بسيط بدل ما نسكت أو نخلي المستخدم يشوف
   // شاشة خطأ المتصفح المزعجة
   const [isOffline, setIsOffline] = useState(false);
-  useEffect(() => {
-    return registerNetworkListener((connected) => setIsOffline(!connected));
-  }, []);
+  useEffect(() => untilUnmount(registerNetworkListener((connected) => setIsOffline(!connected))), []);
 
   // إشعار داخلي بسيط لما يوصل إشعار والتطبيق مفتوح قدام المستخدم
   const [inAppNotification, setInAppNotification] = useState(null);
@@ -2235,8 +2260,7 @@ function KanaanShop() {
   const cartCountRef = useRef(cartCount);
   useEffect(() => { cartCountRef.current = cartCount; }, [cartCount]);
 
-  useEffect(() => {
-    return registerAppStateListener((isActive) => {
+  useEffect(() => untilUnmount(registerAppStateListener((isActive) => {
       if (isActive) {
         // رجع فتح التطبيق — ما في داعي للتذكير
         cancelCartReminder();
@@ -2244,8 +2268,7 @@ function KanaanShop() {
         // طلع من التطبيق وسلتو مش فاضية — منجدول تذكير لطيف
         scheduleCartReminder(cartCountRef.current);
       }
-    });
-  }, []);
+    })), []);
 
   // فضّى سلتو أو خلص طلبو — منلغي أي تذكير مجدول
   useEffect(() => {
@@ -2356,6 +2379,11 @@ function KanaanShop() {
         )}
         {route.type === "home" && !isNativeApp && (
           <HomeView products={products} loading={catalogLoading} goCatalog={goCatalog} goSale={goSale} openProduct={openProduct} likes={likes} toggleLike={toggleLike} storyRings={storyRings} openStory={openStory} appExclusiveCount={appExclusiveCount} />
+        )}
+        {route.type === "lab" && (
+          <React.Suspense fallback={<div style={{ minHeight: "100vh" }} />}>
+            <HomeLab products={products} loading={catalogLoading} goCatalog={goCatalog} goSale={goSale} openProduct={openProduct} likes={likes} toggleLike={toggleLike} storyRings={storyRings} openStory={openStory} />
+          </React.Suspense>
         )}
         {route.type === "sale" && (
           <SaleView products={products} loading={catalogLoading} goCatalog={goCatalog} openProduct={openProduct} likes={likes} toggleLike={toggleLike} />
@@ -5889,3 +5917,20 @@ function Footer({ goCatalog, goSale }) {
     </footer>
   );
 }
+
+/* Shared with the homepage lab (src/home/HomeLab.jsx), so it reuses the
+   shop's own product card, story rail and data helpers instead of copies. */
+export {
+  useApp,
+  ProductCard,
+  StoryRail,
+  CATEGORIES,
+  getImages,
+  thumbUrlFor,
+  isOnSale,
+  money,
+  effectivePrice,
+  STORE_NAME,
+  WHATSAPP_NUMBER,
+  MAPS_URL,
+};

@@ -8,7 +8,7 @@
 import React, { useEffect, useRef } from "react";
 import { KanaanStore } from "./KanaanStore.js";
 
-export default function StoreStage({ mode = "walk", theme = "light", tier = "high", products, neon, safeLeft = 0, safeBottom = 0, onSelect, onStore, onReady, className = "", style }) {
+export default function StoreStage({ mode = "walk", theme = "light", tier = "high", look = "v1", products, neon, safeLeft = 0, safeBottom = 0, onSelect, onStore, onReady, className = "", style }) {
   const canvasRef = useRef(null);
   const storeRef = useRef(null);
   const onSelectRef = useRef(onSelect);
@@ -23,6 +23,7 @@ export default function StoreStage({ mode = "walk", theme = "light", tier = "hig
         mode,
         theme,
         tier,
+        look,
         safe: { left: safeLeft, bottom: safeBottom },
         onSelect: (p) => onSelectRef.current && onSelectRef.current(p),
         onReady: () => onReady && onReady(),
@@ -46,7 +47,7 @@ export default function StoreStage({ mode = "walk", theme = "light", tier = "hig
       storeRef.current = null;
     };
     // the scene is rebuilt only when the kind of store changes
-  }, [mode, tier]);
+  }, [mode, tier, look]);
 
   useEffect(() => { if (storeRef.current) storeRef.current.setTheme(theme); }, [theme]);
   useEffect(() => { if (storeRef.current && products) storeRef.current.setProducts(products); }, [products]);

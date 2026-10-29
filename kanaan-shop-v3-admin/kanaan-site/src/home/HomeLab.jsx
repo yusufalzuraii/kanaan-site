@@ -132,10 +132,17 @@ export default function HomeLab({ home = false, products, loading, goCatalog, go
   const forced = useMemo(() => {
     try { return new URLSearchParams(window.location.search).get("v"); } catch { return null; }
   }, []);
+  const forcedLook = useMemo(() => {
+    try { return new URLSearchParams(window.location.search).get("look"); } catch { return null; }
+  }, []);
   // the homepage is always the walk; only /lab can switch
   const [variant, setVariant] = useState(() => (!home && (forced === "facade" || forced === "lite") ? forced : "walk"));
   const canDo3D = tier === "high" || tier === "mid";
   const mode = canDo3D ? variant : "lite";
+  // which drawing of the shop: the homepage keeps the first one until the
+  // owner approves the second, which /lab shows (?look=v1 brings the first
+  // back there, to compare)
+  const look = home ? "v1" : forcedLook === "v1" ? "v1" : "v2";
 
   useEffect(() => {
     document.title = `${STORE_NAME} — Menswear from Saida, Lebanon`;
@@ -193,6 +200,7 @@ export default function HomeLab({ home = false, products, loading, goCatalog, go
           theme={theme}
           tall={tall}
           tier={tier}
+          look={look}
           stagePieces={stagePieces}
           featured={featured}
           pantsPicks={pantsPicks}
@@ -204,7 +212,7 @@ export default function HomeLab({ home = false, products, loading, goCatalog, go
           openProduct={openProduct}
         />
       )}
-      {mode === "facade" && <FacadeHero theme={theme} tall={tall} tier={tier} stagePieces={stagePieces} goCatalog={goCatalog} openProduct={openProduct} />}
+      {mode === "facade" && <FacadeHero theme={theme} tall={tall} tier={tier} look={look} stagePieces={stagePieces} goCatalog={goCatalog} openProduct={openProduct} />}
       {mode === "lite" && <LiteHero theme={theme} tall={tall} goCatalog={goCatalog} />}
 
       <div id="lab-shop" className="lab-page">
@@ -226,7 +234,7 @@ export default function HomeLab({ home = false, products, loading, goCatalog, go
    The 3D stage plus the still behind it. The still is shown first; when the
    live scene has drawn its first frame it fades in on top.
    ------------------------------------------------------------------ */
-function Stage({ mode, theme, tall, tier, stagePieces, neon, safe, onStore, openProduct }) {
+function Stage({ mode, theme, tall, tier, look = "v1", stagePieces, neon, safe, onStore, openProduct }) {
   const [ready, setReady] = useState(false);
   const pieces = stagePieces;
   const onSelect = useCallback((piece) => piece && piece.product && openProduct(piece.product), [openProduct]);
@@ -238,6 +246,7 @@ function Stage({ mode, theme, tall, tier, stagePieces, neon, safe, onStore, open
           mode={mode}
           theme={theme}
           tier={tier}
+          look={look}
           products={pieces}
           neon={neon}
           safeLeft={safe ? safe.left : 0}
@@ -335,7 +344,7 @@ function useSectionProgress(ref, onProgress) {
   }, [ref, onProgress]);
 }
 
-function WalkHero({ theme, tall, tier, stagePieces, featured, pantsPicks, counts, saleCount, maxDiscount, goCatalog, goSale, openProduct }) {
+function WalkHero({ theme, tall, tier, look, stagePieces, featured, pantsPicks, counts, saleCount, maxDiscount, goCatalog, goSale, openProduct }) {
   const sectionRef = useRef(null);
   const storeRef = useRef(null);
   const stationRefs = useRef({});
@@ -405,7 +414,7 @@ function WalkHero({ theme, tall, tier, stagePieces, featured, pantsPicks, counts
   return (
     <section ref={sectionRef} className="lab-walk" aria-label="Kanaan Shop">
       <div className="lab-sticky">
-        <Stage mode="walk" theme={theme} tall={tall} tier={tier} stagePieces={stagePieces} neon={saleCount > 0 ? "sale" : "new in"} safe={safe} onStore={onStore} openProduct={openProduct} />
+        <Stage mode="walk" theme={theme} tall={tall} tier={tier} look={look} stagePieces={stagePieces} neon={saleCount > 0 ? "sale" : "new in"} safe={safe} onStore={onStore} openProduct={openProduct} />
 
         <div ref={reg("hero")} className="lab-station lab-side-start lab-hero-station">
           <div className="lab-scrim" />
@@ -469,7 +478,7 @@ function WalkHero({ theme, tall, tier, stagePieces, featured, pantsPicks, counts
           </div>
         </div>
 
-        <div ref={reg("desk")} className="lab-station lab-side-start">
+        <div ref={reg("desk")} className={`lab-station ${look === "v2" ? "lab-side-end" : "lab-side-start"}`}>
           <div className="lab-scrim" />
           <div className="lab-card">
             <h2 className="lab-title">Order here, pay at your door</h2>
@@ -506,7 +515,7 @@ function WalkHero({ theme, tall, tier, stagePieces, featured, pantsPicks, counts
   );
 }
 
-function FacadeHero({ theme, tall, tier, stagePieces, goCatalog, openProduct }) {
+function FacadeHero({ theme, tall, tier, look, stagePieces, goCatalog, openProduct }) {
   const sectionRef = useRef(null);
   const storeRef = useRef(null);
   const textRef = useRef(null);
@@ -530,7 +539,7 @@ function FacadeHero({ theme, tall, tier, stagePieces, goCatalog, openProduct }) 
   return (
     <section ref={sectionRef} className="lab-facade" aria-label="Kanaan Shop">
       <div className="lab-sticky">
-        <Stage mode="facade" theme={theme} tall={tall} tier={tier} stagePieces={stagePieces} safe={safe} onStore={onStore} openProduct={openProduct} />
+        <Stage mode="facade" theme={theme} tall={tall} tier={tier} look={look} stagePieces={stagePieces} safe={safe} onStore={onStore} openProduct={openProduct} />
         <div ref={textRef} className="lab-station lab-side-start lab-hero-station" style={{ opacity: 1, visibility: "visible" }}>
           <div className="lab-scrim" />
           <div ref={cardRef} className="lab-card">

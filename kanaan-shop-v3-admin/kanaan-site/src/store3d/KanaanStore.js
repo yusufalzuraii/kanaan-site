@@ -7,7 +7,8 @@
 import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { buildStore } from "./buildStore.js";
-import { neonTexture } from "./textures.js";
+import { buildStoreV2 } from "./buildStoreV2.js";
+import { neonTexture, scriptNeonTexture } from "./textures.js";
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const smooth = (a, b, v) => {
@@ -62,7 +63,7 @@ function phoneFront(aspect, vfov, safeBottom = 0) {
    t is the share of the walk-through; the facade framing is computed from
    the screen shape so the whole sign always fits — on a narrow phone the
    camera simply steps back across the street. */
-function pathFor(aspect, mode, { left: safeLeft = 0, bottom: safeBottom = 0 } = {}) {
+function pathFor(aspect, mode, { left: safeLeft = 0, bottom: safeBottom = 0 } = {}, look = "v1") {
   // desktop wants a wide side shot of each wall; a phone, with its narrow
   // view, looks along the walls instead so several pieces stay in frame
   const tall = clamp((1.25 - aspect) / 0.7, 0, 1);
@@ -117,13 +118,34 @@ function pathFor(aspect, mode, { left: safeLeft = 0, bottom: safeBottom = 0 } = 
     return { vfov, keys: [front, end] };
   }
   const K = (t, pW, lW, pT, lT) => ({ t, p: mix(pW, pT), l: mix(lW, lT) });
+  const door = [
+    // up to the door, and in
+    K(0.12, [1.15, 1.64, 3.8], [1.35, 1.6, -2], [1.15, 1.64, 4.2], [1.4, 1.6, -2]),
+    K(0.21, [1.45, 1.6, 0.75], [0.95, 1.55, -5], [1.45, 1.6, 0.9], [1.0, 1.55, -5]),
+  ];
+  if (look === "v2") {
+    // the second pass follows the real shop: the cubby wall on the left,
+    // the racks on the right, the jeans wall at the back left, the neon
+    // partition at the back right, the counter in front of the curtain
+    return {
+      vfov,
+      keys: [
+        front,
+        ...door,
+        K(0.32, [0.95, 1.6, -1.6], [-2.3, 1.72, -3.7], [0.8, 1.63, -1.0], [-2.3, 1.62, -4.5]),
+        K(0.45, [0.85, 1.6, -3.9], [-2.3, 1.68, -6.4], [0.65, 1.66, -2.5], [-2.3, 1.6, -6.7]),
+        K(0.565, [0.45, 1.62, -5.6], [2.3, 1.6, -6.7], [0.38, 1.62, -4.8], [2.3, 1.55, -7.7]),
+        K(0.705, [0.75, 1.6, -7.5], [-2.3, 1.35, -10.0], [0.6, 1.62, -7.0], [-2.3, 1.3, -10.6]),
+        K(0.84, [-0.8, 1.62, -7.9], [1.1, 1.75, -10.6], [-0.7, 1.62, -7.6], [1.0, 1.7, -10.6]),
+        K(1, [-0.2, 1.62, -8.7], [-1.35, 1.2, -12.6], [-0.35, 1.62, -8.6], [-1.15, 1.15, -12.6]),
+      ],
+    };
+  }
   return {
     vfov,
     keys: [
       front,
-      // up to the door, and in
-      K(0.12, [1.15, 1.64, 3.8], [1.35, 1.6, -2], [1.15, 1.64, 4.2], [1.4, 1.6, -2]),
-      K(0.21, [1.45, 1.6, 0.75], [0.95, 1.55, -5], [1.45, 1.6, 0.9], [1.0, 1.55, -5]),
+      ...door,
       // the new-in wall, on the left
       K(0.32, [0.95, 1.6, -1.5], [-2.3, 1.5, -3.4], [0.78, 1.63, -0.85], [-2.3, 1.45, -4.3]),
       K(0.45, [0.78, 1.6, -3.7], [-2.3, 1.5, -6.3], [0.62, 1.66, -2.25], [-2.3, 1.45, -6.4]),
@@ -140,9 +162,10 @@ function pathFor(aspect, mode, { left: safeLeft = 0, bottom: safeBottom = 0 } = 
 }
 
 export class KanaanStore {
-  constructor(canvas, { mode = "walk", theme = "light", tier = "high", safe = {}, onSelect, onReady } = {}) {
+  constructor(canvas, { mode = "walk", theme = "light", tier = "high", look = "v1", safe = {}, onSelect, onReady } = {}) {
     this.canvas = canvas;
     this.mode = mode;
+    this.look = look === "v2" ? "v2" : "v1";
     this.safe = { left: safe.left || 0, bottom: safe.bottom || 0 };
     this.tier = tier;
     this.onSelect = onSelect;
@@ -214,7 +237,7 @@ export class KanaanStore {
     this.warmB.position.set(0, 2.6, -8.6);
     scene.add(this.warmA, this.warmB);
 
-    const built = buildStore({ tier });
+    const built = this.look === "v2" ? buildStoreV2({ tier }) : buildStore({ tier });
     this.reg = built.reg;
     this.built = built;
     scene.add(built.root);
@@ -227,6 +250,8 @@ export class KanaanStore {
       const m = o.material;
       if (m && m.map && m.map.wrapS === THREE.RepeatWrapping) m.map.anisotropy = aniso;
     });
+
+    if (this.reg.neonFont) this.loadNeonFont(this.reg.neonFont);
 
     this.raycaster = new THREE.Raycaster();
     this.textureLoader = new THREE.TextureLoader();
@@ -268,6 +293,8 @@ export class KanaanStore {
   }
 
   setNeon(text) {
+    // the second pass has the shop's own neon, always the same words
+    if (this.reg.neonFixed) return;
     if (!text || text === this.neonText) return;
     this.neonText = text;
     const t = neonTexture(text);
@@ -276,6 +303,61 @@ export class KanaanStore {
     m.map = t;
     m.needsUpdate = true;
     this.wake();
+  }
+
+  /* The mirror by the counter: the shop never moves, so instead of drawing
+     the room twice on every frame, the store takes one snapshot of it from
+     in front of the mirror (six small views, a cube) and the mirror reflects
+     that. Taken again when day has turned to night, never while scrolling. */
+  captureMirror() {
+    const m = this.reg.mirror;
+    if (!m) return;
+    try {
+      if (!this._mirrorCam) {
+        const rt = new THREE.WebGLCubeRenderTarget(this.tier === "high" ? 256 : 128);
+        this._mirrorRT = rt;
+        this._mirrorCam = new THREE.CubeCamera(0.1, 16, rt);
+        this._mirrorCam.position.copy(m.capture);
+        this.scene.add(this._mirrorCam);
+      }
+      m.mesh.visible = false;
+      this._mirrorCam.update(this.renderer, this.scene);
+      m.mesh.visible = true;
+      const mat = m.mesh.material;
+      if (mat.envMap !== this._mirrorRT.texture) {
+        mat.envMap = this._mirrorRT.texture;
+        mat.envMapIntensity = 1;
+        mat.needsUpdate = true;
+      }
+      this._mirrorAt = this.night;
+    } catch {
+      /* the mirror simply keeps the plain studio reflection */
+    }
+  }
+
+  /* The second pass's neon is drawn in its own script face; the sign stays
+     off until the face has arrived, then flickers on. */
+  loadNeonFont(f) {
+    const draw = (family) => {
+      if (this.disposed) return;
+      const t = scriptNeonTexture(f.lines, f.color, family);
+      const m = this.reg.neon.material;
+      if (m.map) m.map.dispose();
+      m.map = t;
+      m.needsUpdate = true;
+      f.ready = true;
+      this.neonOn = 0;
+      this.wake();
+    };
+    try {
+      const face = new FontFace(f.family, `url(${f.url})`);
+      face.load().then((ff) => {
+        document.fonts.add(ff);
+        draw(`"${f.family}"`);
+      }).catch(() => draw(`"Snell Roundhand", "Segoe Script", cursive`));
+    } catch {
+      draw("cursive");
+    }
   }
 
   /* Live stock into the lightboxes: window first, then the new-in wall,
@@ -383,7 +465,7 @@ export class KanaanStore {
     this.h = h;
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
-    this.path = pathFor(w / h, this.mode, this.safe);
+    this.path = pathFor(w / h, this.mode, this.safe, this.look);
     // a phone starts further out across the street: thinner haze, so the
     // shop doesn't look washed out from there
     this.fogScale = lerp(1, 0.6, clamp((1.25 - w / h) / 0.7, 0, 1));
@@ -435,11 +517,16 @@ export class KanaanStore {
     this.hemi.intensity = lerp(a.hemi, b.hemi, n);
     this.hemi.color.copy(a.hemiSky).lerp(b.hemiSky, n);
     this.hemi.groundColor.copy(a.hemiGround).lerp(b.hemiGround, n);
-    this.sun.intensity = lerp(a.sun, b.sun, n);
-    this.street.intensity = lerp(a.street, b.street, n);
-    const inside = lerp(a.warm, b.warm, n) * (0.25 + 0.75 * intro.inside);
+    // stepping in from the street, the eye leaves the daylight behind:
+    // the shop is lit by its own lights from the door on
+    const indoors = this.mode === "walk" && this.reg.spots && this.reg.spots.length ? smooth(0.14, 0.24, this.progress) : 0;
+    this.sun.intensity = lerp(a.sun, b.sun, n) * (1 - 0.85 * indoors);
+    this.street.intensity = lerp(a.street, b.street, n) * (1 - indoors);
+    const lightsUp = 0.25 + 0.75 * intro.inside;
+    const inside = lerp(a.warm, b.warm, n) * lightsUp * (this.reg.fill ?? 1);
     this.warmA.intensity = inside;
     this.warmB.intensity = inside;
+    for (const s of this.reg.spots || []) s.light.intensity = lerp(s.day, s.night, n) * lightsUp;
     // after dark the whole interior waits for its lights to come on
     const dim = lerp(1, 0.3 + 0.7 * intro.inside, n);
     scene.environmentIntensity = lerp(a.env, b.env, n) * dim;
@@ -461,7 +548,8 @@ export class KanaanStore {
     this.reg.bulbMat.emissiveIntensity = bulbLevel * (glowSum / this.reg.bulbs.length);
     this.reg.glowPoints.material.opacity = lerp(0.12, 0.85, n) * (glowSum / this.reg.bulbs.length);
     // neon glow on the back wall
-    const neon = this.neonOn * (this.neonText ? 1 : 0);
+    const lit = this.reg.neonFont ? (this.reg.neonFont.ready ? 1 : 0) : this.neonText ? 1 : 0;
+    const neon = this.neonOn * lit;
     this.reg.neon.material.opacity = neon * lerp(0.85, 1, n);
     this.reg.neonGlow.opacity = neon * lerp(0.06, 0.34, n);
     // lightboxes read a touch brighter after dark
@@ -533,7 +621,8 @@ export class KanaanStore {
     }
 
     // neon flickers on as you approach the back of the shop
-    const neonTarget = this.mode === "walk" ? smooth(0.72, 0.8, this.progress) : 0;
+    // (the shop's own neon in the second pass is simply on, like the real one)
+    const neonTarget = this.reg.neonFixed ? 1 : this.mode === "walk" ? smooth(0.72, 0.8, this.progress) : 0;
     if (Math.abs(this.neonOn - neonTarget) > 1e-3) {
       const flicker = neonTarget > this.neonOn && Math.sin(now * 0.05) > 0.4 ? 0.5 : 1;
       this.neonOn += (neonTarget - this.neonOn) * (1 - Math.exp(-dt * 5)) * flicker;
@@ -563,6 +652,7 @@ export class KanaanStore {
     }
 
     this.applyLook(false);
+    if (this.reg.mirror && this._introDone && this.night === this.nightTarget && this._mirrorAt !== this.night) this.captureMirror();
     this.renderer.render(this.scene, this.camera);
     this.measure(dt);
 
@@ -609,6 +699,7 @@ export class KanaanStore {
       }
     });
     if (this.scene.environment) this.scene.environment.dispose();
+    if (this._mirrorRT) this._mirrorRT.dispose();
     this.renderer.dispose();
   }
 }

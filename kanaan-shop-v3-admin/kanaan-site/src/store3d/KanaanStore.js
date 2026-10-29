@@ -267,19 +267,6 @@ export class KanaanStore {
     if (v) this.wake();
   }
 
-  /* While the scanned shop is drawn over this one, this one rests. When it
-     shows again its camera jumps straight to where the scroll is, rather
-     than flying there in front of the visitor. */
-  setCovered(c) {
-    const was = this.covered;
-    this.covered = !!c;
-    if (was && !this.covered) {
-      this.progress = this.progressTarget;
-      this.updateCamera(1);
-      this.wake();
-    }
-  }
-
   setNeon(text) {
     if (!text || text === this.neonText) return;
     this.neonText = text;
@@ -512,7 +499,7 @@ export class KanaanStore {
   /* ------------------------------------------------------------ loop */
   wake() {
     this.idleSince = performance.now();
-    if (!this.raf && !this.disposed && this.visible && !this.covered) {
+    if (!this.raf && !this.disposed && this.visible) {
       this.last = performance.now();
       this.raf = requestAnimationFrame(this._tick);
     }
@@ -520,7 +507,7 @@ export class KanaanStore {
 
   _tick = (now) => {
     this.raf = 0;
-    if (this.disposed || !this.visible || this.covered) return;
+    if (this.disposed || !this.visible) return;
     const dt = Math.min(0.05, (now - this.last) / 1000);
     this.last = now;
     let active = false;

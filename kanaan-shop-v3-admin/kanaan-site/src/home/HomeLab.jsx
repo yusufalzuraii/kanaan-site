@@ -2,14 +2,9 @@
    THE HOMEPAGE — the Kanaan shop in Saida, in 3D
    ------------------------------------------------------------
    The website's homepage ("/", chosen by the owner on 29 Oct 2026: walk).
-   /lab shows the directions with a switch, for comparing (not indexed,
-   not linked), and opens on the newest one:
+   /lab still shows all three directions with a switch, for comparing
+   (not indexed, not linked).
 
-     real      The walk, but past the door it is the real shop: the
-               owner's own phone scans of the shop in Saida (Gaussian
-               splats, drawn by Spark), gathering themselves from the
-               doorway as you step in. The storefront stays the drawn 3D
-               sign. Waiting for the owner's verdict before it goes on "/".
      walk      Scroll walks you into the shop: storefront, through the
                door, past the new-in wall, the racks, the sale neon, to
                the counter. The 3D store is the spine of the page.
@@ -43,43 +38,8 @@ import {
 import { detectTier } from "../store3d/tier.js";
 
 const StoreStage = React.lazy(() => import("../store3d/StoreStage.jsx"));
-// the real shop (the owner's scans) and Spark come in their own chunk, only
-// when the real walk is shown
-const RealStage = React.lazy(() => import("../store3d/RealStage.jsx"));
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
-const smooth = (a, b, v) => {
-  const t = clamp((v - a) / (b - a), 0, 1);
-  return t * t * (3 - 2 * t);
-};
-
-/* The scanned shop, front to back, so the doorway view arrives first.
-   A computer gets the fuller version; a phone, whose screen can't show the
-   difference, a lighter one (about 6 MB instead of 10). Versioned names:
-   the files are cached for a year. */
-const REAL_PARTS = {
-  high: ["/home/scan/shop-1.v4.sog", "/home/scan/shop-2.v4.sog", "/home/scan/shop-3.v4.sog"],
-  mid: ["/home/scan/shop-1.v4m.sog", "/home/scan/shop-2.v4m.sog", "/home/scan/shop-3.v4m.sog"],
-};
-// where the scanned shop takes over from the drawn one (the camera is at
-// the door); RealShop's REAL_FADE_IN, kept here so this file doesn't pull
-// that module (and three.js) into the page's first download
-const REAL_FADE = [0.125, 0.175];
-
-/* The scan is several megabytes: only on a connection that can take it.
-   ?real=1 / ?real=0 overrides, for the owner and the tests. */
-function wantsReal(tier) {
-  try {
-    const q = new URLSearchParams(window.location.search).get("real");
-    if (q === "1") return true;
-    if (q === "0") return false;
-  } catch { /* fall through */ }
-  if (tier !== "high" && tier !== "mid") return false;
-  const c = (typeof navigator !== "undefined" && navigator.connection) || {};
-  if (c.saveData) return false;
-  if (/2g|3g/.test(c.effectiveType || "")) return false;
-  return true;
-}
 
 /* Where along the walk each block of text belongs (0 = on the pavement,
    1 = at the counter) and which side of the screen it sits on — always the
@@ -97,9 +57,6 @@ const STATIONS = [
 ];
 const FADE = 0.035;
 const PANTS = ["jeans", "pants"];
-// which side of a wide screen each stop's words sit on: the side the camera
-// isn't looking at (the real shop's stops were framed to match)
-const SIDES = { new: "end", shelves: "start", pants: "end", sale: "start", desk: "start" };
 
 function stationLevel(st, p) {
   if (st.from === 0) return p <= st.to ? 1 : clamp(1 - (p - st.to) / FADE, 0, 1);
@@ -161,7 +118,7 @@ function useIsTall() {
 }
 
 export default function HomeLab({ home = false, products, loading, goCatalog, goSale, openProduct, likes, toggleLike, storyRings, openStory, appExclusiveCount = 0 }) {
-  const { theme, reducedMotion } = useApp();
+  const { theme } = useApp();
   const tall = useIsTall();
   // ?tier=high|mid|static lets the owner (and our tests) see a given
   // version on any device; normally the device decides
@@ -175,16 +132,10 @@ export default function HomeLab({ home = false, products, loading, goCatalog, go
   const forced = useMemo(() => {
     try { return new URLSearchParams(window.location.search).get("v"); } catch { return null; }
   }, []);
-  // the homepage is always the walk; only /lab can switch, and opens on the
-  // walk through the real, scanned shop
-  const [variant, setVariant] = useState(() => {
-    if (home) return "walk";
-    if (forced === "walk" || forced === "facade" || forced === "lite" || forced === "real") return forced;
-    return "real";
-  });
+  // the homepage is always the walk; only /lab can switch
+  const [variant, setVariant] = useState(() => (!home && (forced === "facade" || forced === "lite") ? forced : "walk"));
   const canDo3D = tier === "high" || tier === "mid";
   const mode = canDo3D ? variant : "lite";
-  const [real] = useState(() => wantsReal(tier));
 
   useEffect(() => {
     document.title = `${STORE_NAME} — Menswear from Saida, Lebanon`;
@@ -237,11 +188,8 @@ export default function HomeLab({ home = false, products, loading, goCatalog, go
     <div className={`lab lab-is-${mode}`}>
       <LabStyles />
       {home && <ScrollProgress />}
-      {(mode === "walk" || mode === "real") && (
+      {mode === "walk" && (
         <WalkHero
-          key={mode}
-          real={mode === "real" && real}
-          reducedMotion={reducedMotion}
           theme={theme}
           tall={tall}
           tier={tier}
@@ -387,7 +335,7 @@ function useSectionProgress(ref, onProgress) {
   }, [ref, onProgress]);
 }
 
-function WalkHero({ real = false, reducedMotion = false, theme, tall, tier, stagePieces, featured, pantsPicks, counts, saleCount, maxDiscount, goCatalog, goSale, openProduct }) {
+function WalkHero({ theme, tall, tier, stagePieces, featured, pantsPicks, counts, saleCount, maxDiscount, goCatalog, goSale, openProduct }) {
   const sectionRef = useRef(null);
   const storeRef = useRef(null);
   const stationRefs = useRef({});
@@ -395,39 +343,10 @@ function WalkHero({ real = false, reducedMotion = false, theme, tall, tier, stag
   const heroCardRef = useRef(null);
   const safe = useSafeArea(heroCardRef);
   const lastP = useRef(0);
-  // the real shop: its canvas layer, the RealShop behind it, whether it has
-  // arrived, and whether we've started fetching it
-  const realLayerRef = useRef(null);
-  const realRef = useRef(null);
-  const realReady = useRef(false);
-  const [loadReal, setLoadReal] = useState(false);
-  const loadRealRef = useRef(false);
-  const startReal = useCallback(() => {
-    if (loadRealRef.current) return;
-    loadRealRef.current = true;
-    setLoadReal(true);
-  }, []);
 
   const apply = useCallback((p) => {
     lastP.current = p;
     if (storeRef.current) storeRef.current.setProgress(p);
-    if (real) {
-      // anyone who starts walking gets the scan fetched straight away
-      if (p > 0.02) startReal();
-      // at the door the scanned shop takes over: its canvas fades in over
-      // the drawn one, which then rests underneath
-      const mix = realReady.current ? smooth(REAL_FADE[0], REAL_FADE[1], p) : 0;
-      const layer = realLayerRef.current;
-      if (layer) {
-        layer.style.opacity = String(mix);
-        layer.style.visibility = mix > 0.001 ? "visible" : "hidden";
-      }
-      if (realRef.current) {
-        realRef.current.setProgress(p);
-        realRef.current.setActive(mix > 0.001);
-      }
-      if (storeRef.current) storeRef.current.setCovered(mix > 0.999);
-    }
     for (const st of STATIONS) {
       const el = stationRefs.current[st.id];
       if (!el) continue;
@@ -439,52 +358,13 @@ function WalkHero({ real = false, reducedMotion = false, theme, tall, tier, stag
       el.toggleAttribute("inert", v < 0.6);
     }
     if (railRef.current) railRef.current.style.setProperty("--p", String(p));
-  }, [real, startReal]);
+  }, []);
   useSectionProgress(sectionRef, apply);
 
   const onStore = useCallback((s) => {
     storeRef.current = s;
     if (s) s.setProgress(lastP.current);
   }, []);
-
-  // fetch the scan once the page has settled: the drawn storefront is up
-  // and the browser is idle, so the first screen never waits for it
-  useEffect(() => {
-    if (!real) return undefined;
-    let idle = 0;
-    const t = setTimeout(() => {
-      if (window.requestIdleCallback) idle = window.requestIdleCallback(startReal, { timeout: 2500 });
-      else startReal();
-    }, 1200);
-    return () => {
-      clearTimeout(t);
-      if (idle && window.cancelIdleCallback) window.cancelIdleCallback(idle);
-    };
-  }, [real, startReal]);
-
-  const onRealStore = useCallback((s) => {
-    realRef.current = s;
-    if (s) s.setProgress(lastP.current);
-  }, []);
-  const onRealReady = useCallback(() => {
-    realReady.current = true;
-    // arriving while the visitor is already inside: a soft fade rather than
-    // a cut, then back to following the scroll exactly
-    const layer = realLayerRef.current;
-    if (layer) layer.dataset.ready = "1";
-    if (layer && lastP.current > REAL_FADE[0]) {
-      layer.style.transition = "opacity 0.9s ease";
-      setTimeout(() => { if (layer) layer.style.transition = ""; }, 1000);
-    }
-    apply(lastP.current);
-  }, [apply]);
-  const onRealError = useCallback(() => {
-    // the drawn shop simply carries on
-    realReady.current = false;
-    const layer = realLayerRef.current;
-    if (layer) layer.dataset.ready = "failed";
-    apply(lastP.current);
-  }, [apply]);
 
   const jumpTo = (p) => {
     const el = sectionRef.current;
@@ -521,34 +401,17 @@ function WalkHero({ real = false, reducedMotion = false, theme, tall, tier, stag
     </div>
   );
   const reg = (id) => (el) => { stationRefs.current[id] = el; };
-  const sideOf = (id) => SIDES[id];
 
   return (
     <section ref={sectionRef} className="lab-walk" aria-label="Kanaan Shop">
       <div className="lab-sticky">
         <Stage mode="walk" theme={theme} tall={tall} tier={tier} stagePieces={stagePieces} neon={saleCount > 0 ? "sale" : "new in"} safe={safe} onStore={onStore} openProduct={openProduct} />
-        {real && loadReal && (
-          <div ref={realLayerRef} className="lab-real" aria-hidden="true">
-            <React.Suspense fallback={null}>
-              <RealStage
-                parts={tier === "high" ? REAL_PARTS.high : REAL_PARTS.mid}
-                theme={theme}
-                tier={tier}
-                reducedMotion={reducedMotion}
-                onStore={onRealStore}
-                onReady={onRealReady}
-                onError={onRealError}
-                className="lab-real-canvas"
-              />
-            </React.Suspense>
-          </div>
-        )}
 
         <div ref={reg("hero")} className="lab-station lab-side-start lab-hero-station">
           <div className="lab-scrim" />
           <div ref={heroCardRef} className="lab-card">
             <h1 className="lab-display">Everyday wear, refined.</h1>
-            <p className="lab-lede lab-sub">{real ? "Our real shop in Saida, in 3D. Scroll to walk in." : "Our shop in Saida, in 3D. Scroll to walk in."}</p>
+            <p className="lab-lede lab-sub">Our shop in Saida, in 3D. Scroll to walk in.</p>
             <div className="lab-actions">
               <button onClick={() => goCatalog("all")} className="glass glass-btn rounded-full font-body font-medium px-6 py-3 tap-scale lab-primary">Shop the collection</button>
               <button onClick={() => jumpTo(0.33)} className="glass rounded-full font-body px-5 py-3 tap-scale inline-flex items-center gap-2">
@@ -559,7 +422,7 @@ function WalkHero({ real = false, reducedMotion = false, theme, tall, tier, stag
           </div>
         </div>
 
-        <div ref={reg("new")} className={`lab-station lab-side-${sideOf("new")}`}>
+        <div ref={reg("new")} className="lab-station lab-side-end">
           <div className="lab-scrim" />
           <div className="lab-card">
             <h2 className="lab-title">New this winter</h2>
@@ -568,7 +431,7 @@ function WalkHero({ real = false, reducedMotion = false, theme, tall, tier, stag
           </div>
         </div>
 
-        <div ref={reg("shelves")} className={`lab-station lab-side-${sideOf("shelves")}`}>
+        <div ref={reg("shelves")} className="lab-station lab-side-start">
           <div className="lab-scrim" />
           <div className="lab-card">
             <h2 className="lab-title">Find your rack</h2>
@@ -576,7 +439,7 @@ function WalkHero({ real = false, reducedMotion = false, theme, tall, tier, stag
           </div>
         </div>
 
-        <div ref={reg("pants")} className={`lab-station lab-side-${sideOf("pants")}`}>
+        <div ref={reg("pants")} className="lab-station lab-side-end">
           <div className="lab-scrim" />
           <div className="lab-card">
             <h2 className="lab-title">Jeans & pants</h2>
@@ -585,7 +448,7 @@ function WalkHero({ real = false, reducedMotion = false, theme, tall, tier, stag
           </div>
         </div>
 
-        <div ref={reg("sale")} className={`lab-station lab-side-${sideOf("sale")}`}>
+        <div ref={reg("sale")} className="lab-station lab-side-start">
           <div className="lab-scrim" />
           <div className="lab-card">
             {saleCount > 0 ? (
@@ -606,7 +469,7 @@ function WalkHero({ real = false, reducedMotion = false, theme, tall, tier, stag
           </div>
         </div>
 
-        <div ref={reg("desk")} className={`lab-station lab-side-${sideOf("desk")}`}>
+        <div ref={reg("desk")} className="lab-station lab-side-start">
           <div className="lab-scrim" />
           <div className="lab-card">
             <h2 className="lab-title">Order here, pay at your door</h2>
@@ -631,7 +494,7 @@ function WalkHero({ real = false, reducedMotion = false, theme, tall, tier, stag
             ["Racks", 0.565],
             ["Jeans", 0.705],
             ["Sale", 0.84],
-            [real ? "Order" : "Counter", 1],
+            ["Counter", 1],
           ].map(([label, p]) => (
             <button key={label} onClick={() => jumpTo(p)} style={{ "--at": p }}>
               <span>{label}</span>
@@ -825,8 +688,7 @@ function Promises() {
 /* The owner's switch between the three directions. Lab only. */
 function LabSwitcher({ variant, setVariant, canDo3D }) {
   const opts = [
-    ["real", "Real shop"],
-    ["walk", "Drawn"],
+    ["walk", "Walk in"],
     ["facade", "Storefront"],
     ["lite", "Light"],
   ];
@@ -873,11 +735,6 @@ const LAB_CSS = String.raw`
 .lab-poster { object-fit: cover; }
 .lab-canvas { opacity: 0; transition: opacity 0.6s ease; touch-action: pan-y; }
 .lab-canvas.is-ready { opacity: 1; }
-/* the scanned shop, over the drawn one from the door on; what's beyond the
-   scan is the page itself, and the top edge melts into it under the header */
-.lab-real { position: absolute; inset: 0; opacity: 0; visibility: hidden; background: var(--bg); }
-.lab-real-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: pan-y; }
-.lab-real::after { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 16%; pointer-events: none; background: linear-gradient(to bottom, var(--bg) 0%, rgba(var(--lab-scrim), 0) 100%); }
 
 .lab-station { position: absolute; top: 0; left: 0; right: 0; height: 100%; pointer-events: none; display: flex; align-items: flex-end; will-change: opacity, transform; }
 @supports (height: 100dvh) { .lab-station { height: 100dvh; } }

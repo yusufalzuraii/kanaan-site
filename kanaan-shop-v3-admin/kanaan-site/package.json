@@ -21,7 +21,6 @@
     "@capacitor/splash-screen": "^8.0.2",
     "@capacitor/status-bar": "^8.0.3",
     "@capawesome/capacitor-badge": "^8.0.2",
-    "@sparkjsdev/spark": "2.4.0",
     "autoprefixer": "^10.5.2",
     "lucide-react": "^1.24.0",
     "postcss": "^8.5.18",

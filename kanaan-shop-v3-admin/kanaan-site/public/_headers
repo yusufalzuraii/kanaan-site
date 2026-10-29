@@ -18,25 +18,40 @@
 /*
   Cache-Control: public, max-age=0, must-revalidate
 
+# (the "! Cache-Control" line first drops the page-shell rule above for
+# these paths: Cloudflare joins two values of the same header otherwise, and
+# a browser reading "max-age=0 ... max-age=31536000" keeps only the first)
 /assets/*
+  ! Cache-Control
+  Cache-Control: public, max-age=31536000, immutable
+
+# The real shop's scans (the homepage lab). Each version has its own file
+# name (shop-1.v4.sog, ...), so they too are safe to keep for a year.
+/home/scan/*
+  ! Cache-Control
   Cache-Control: public, max-age=31536000, immutable
 
 /logo-compact.png
+  ! Cache-Control
   Cache-Control: public, max-age=86400
 
 /logo-full.png
+  ! Cache-Control
   Cache-Control: public, max-age=86400
 
 /favicon.png
+  ! Cache-Control
   Cache-Control: public, max-age=86400
 
 # Kanaan POS on the phone (/pos, built from the kanaan-pos repo: npm run build:phone, copied here).
 # Its files carry their version in their names (safe to keep forever); the page and its service worker are
 # always checked again, so the phone gets each new version the next time it is online.
 /pos/assets/*
+  ! Cache-Control
   Cache-Control: public, max-age=31536000, immutable
 
 /pos/sw.js
+  ! Cache-Control
   Cache-Control: no-cache
   Service-Worker-Allowed: /pos/
 

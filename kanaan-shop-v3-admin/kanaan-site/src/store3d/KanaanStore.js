@@ -1,15 +1,14 @@
-/* Runtime for the 3D store: renderer, camera path, day/night, live stock,
-   taps on the lightboxes, and — most of all — not wasting the phone's
-   battery. The scene only renders while something is actually changing
+/* Runtime for the 3D store: renderer, camera path, day/night, the live
+   stock on the hang tags, taps on them, and — most of all — not wasting the
+   phone's battery. The scene only renders while something is actually changing
    (scrolling, the intro, a door swinging, day turning to night); the
    moment it settles, the loop stops and the last frame simply stays on
    screen. */
 import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { buildStore } from "./buildStore.js";
-import { buildStoreV2 } from "./buildStoreV2.js";
-import { neonTexture, scriptNeonTexture } from "./textures.js";
-import { Showcase } from "./showcase.js";
+import { scriptNeonTexture } from "./textures.js";
+import { HangTags } from "./hangtags.js";
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const smooth = (a, b, v) => {
@@ -64,7 +63,7 @@ function phoneFront(aspect, vfov, safeBottom = 0) {
    t is the share of the walk-through; the facade framing is computed from
    the screen shape so the whole sign always fits — on a narrow phone the
    camera simply steps back across the street. */
-function pathFor(aspect, mode, { left: safeLeft = 0, bottom: safeBottom = 0 } = {}, look = "v1") {
+function pathFor(aspect, mode, { left: safeLeft = 0, bottom: safeBottom = 0 } = {}) {
   // desktop wants a wide side shot of each wall; a phone, with its narrow
   // view, looks along the walls instead so several pieces stay in frame
   const tall = clamp((1.25 - aspect) / 0.7, 0, 1);
@@ -124,66 +123,45 @@ function pathFor(aspect, mode, { left: safeLeft = 0, bottom: safeBottom = 0 } = 
     K(0.12, [1.15, 1.64, 3.8], [1.35, 1.6, -2], [1.15, 1.64, 4.2], [1.4, 1.6, -2]),
     K(0.21, [1.45, 1.6, 0.75], [0.95, 1.55, -5], [1.45, 1.6, 0.9], [1.0, 1.55, -5]),
   ];
-  if (look === "v2") {
-    // The second drawing walks by section, the way the real shop is laid
-    // out: knitwear (the cubby wall, left), hoodies (the rail under it),
-    // jackets & coats (the racks, right), pants & jeans (the jeans wall,
-    // back left), shoes (the shoe wall, back right, the neon beyond), then
-    // the counter. Each section has two keys — arrive, then a slow drift —
-    // so the view settles while its words show (HomeLab SECTION_STATIONS).
-    return {
-      vfov,
-      keys: [
-        front,
-        ...door,
-        // knitwear
-        K(0.28, [0.92, 1.62, -2.2], [-2.3, 1.9, -4.3], [0.8, 1.66, -1.1], [-2.3, 1.85, -4.4]),
-        K(0.35, [0.86, 1.62, -3.0], [-2.3, 1.88, -5.1], [0.72, 1.66, -1.7], [-2.3, 1.85, -5.0]),
-        // hoodies: down the aisle between the rail and the table
-        K(0.42, [-1.15, 1.46, -2.15], [-2.12, 0.86, -4.6], [-1.0, 1.5, -1.9], [-2.2, 0.8, -4.1]),
-        K(0.48, [-1.28, 1.45, -2.45], [-2.15, 0.84, -5.0], [-1.1, 1.48, -2.15], [-2.22, 0.78, -4.5]),
-        // round the front of the table to the racks
-        K(0.515, [0.3, 1.58, -3.05], [1.6, 1.5, -5.4], [0.3, 1.6, -2.9], [1.6, 1.5, -5.6]),
-        // jackets & coats
-        K(0.55, [0.4, 1.62, -4.7], [2.3, 1.6, -5.9], [0.36, 1.62, -4.1], [2.3, 1.5, -7.0]),
-        K(0.61, [0.45, 1.62, -5.4], [2.3, 1.58, -6.6], [0.38, 1.62, -4.7], [2.3, 1.5, -7.6]),
-        // pants & jeans
-        K(0.68, [0.78, 1.6, -7.3], [-2.3, 1.35, -9.8], [0.62, 1.62, -6.9], [-2.3, 1.3, -10.4]),
-        K(0.74, [0.68, 1.6, -7.8], [-2.3, 1.3, -10.3], [0.55, 1.62, -7.3], [-2.3, 1.28, -10.8]),
-        // shoes, side-on along the wall
-        K(0.81, [-0.4, 1.52, -7.7], [2.3, 1.12, -8.75], [-0.6, 1.55, -7.5], [2.3, 1.12, -9.2]),
-        K(0.87, [-0.3, 1.5, -8.0], [2.3, 1.1, -8.95], [-0.5, 1.54, -7.8], [2.3, 1.1, -9.45]),
-        // the counter
-        K(0.95, [-0.15, 1.62, -8.5], [-1.3, 1.22, -12.6], [-0.3, 1.7, -8.3], [-1.05, 0.62, -12.6]),
-        K(1, [-0.2, 1.62, -8.7], [-1.35, 1.2, -12.6], [-0.35, 1.7, -8.5], [-1.08, 0.6, -12.6]),
-      ],
-    };
-  }
+  // The walk goes by section, the way the real shop is laid out: knitwear
+  // (the cubby wall, left), hoodies (the rail under it), jackets & coats
+  // (the racks, right), pants & jeans (the jeans wall, back left), shoes
+  // (the shoe wall, back right), then the counter. Each section has two
+  // keys — arrive, then a slow drift — so the view settles while its words
+  // show (HomeLab SECTION_STATIONS).
   return {
     vfov,
     keys: [
       front,
       ...door,
-      // the new-in wall, on the left
-      K(0.32, [0.95, 1.6, -1.5], [-2.3, 1.5, -3.4], [0.78, 1.63, -0.85], [-2.3, 1.45, -4.3]),
-      K(0.45, [0.78, 1.6, -3.7], [-2.3, 1.5, -6.3], [0.62, 1.66, -2.25], [-2.3, 1.45, -6.4]),
-      // the racks, on the right
-      K(0.565, [0.45, 1.62, -5.6], [2.3, 1.55, -6.7], [0.38, 1.62, -4.8], [2.3, 1.5, -7.7]),
-      // the denim corner, back left
-      K(0.705, [0.75, 1.6, -8.1], [-1.55, 1.35, -12.7], [0.55, 1.62, -8.3], [-1.5, 1.3, -12.7]),
-      // the sale neon, back right
-      K(0.84, [-0.35, 1.62, -8.9], [0.95, 1.9, -13], [-0.3, 1.62, -8.5], [0.95, 1.85, -13]),
+      // knitwear
+      K(0.28, [0.92, 1.62, -2.2], [-2.3, 1.9, -4.3], [0.8, 1.66, -1.1], [-2.3, 1.85, -4.4]),
+      K(0.35, [0.86, 1.62, -3.0], [-2.3, 1.88, -5.1], [0.72, 1.66, -1.7], [-2.3, 1.85, -5.0]),
+      // hoodies: down the aisle between the rail and the table
+      K(0.42, [-1.15, 1.46, -2.15], [-2.12, 0.86, -4.6], [-1.0, 1.5, -1.9], [-1.95, 0.9, -5.3]),
+      K(0.48, [-1.28, 1.45, -2.45], [-2.15, 0.84, -5.0], [-1.1, 1.48, -2.15], [-1.95, 0.88, -5.7]),
+      // round the front of the table to the racks
+      K(0.515, [0.3, 1.58, -3.05], [1.6, 1.5, -5.4], [0.3, 1.6, -2.9], [1.6, 1.5, -5.6]),
+      // jackets & coats
+      K(0.55, [0.4, 1.62, -4.7], [2.3, 1.6, -5.9], [0.36, 1.62, -4.1], [2.3, 1.5, -7.0]),
+      K(0.61, [0.43, 1.62, -5.05], [2.3, 1.59, -6.25], [0.38, 1.62, -4.7], [2.3, 1.5, -7.6]),
+      // pants & jeans
+      K(0.68, [0.78, 1.6, -7.3], [-2.3, 1.35, -9.8], [0.62, 1.62, -6.9], [-2.3, 1.3, -10.4]),
+      K(0.74, [0.68, 1.6, -7.8], [-2.3, 1.3, -10.3], [0.55, 1.62, -7.3], [-2.3, 1.28, -10.8]),
+      // shoes, side-on along the wall
+      K(0.81, [-0.4, 1.52, -7.7], [2.3, 1.12, -8.75], [-0.6, 1.55, -7.5], [2.3, 1.12, -9.2]),
+      K(0.87, [-0.3, 1.5, -8.0], [2.3, 1.1, -8.95], [-0.5, 1.54, -7.8], [2.3, 1.1, -9.45]),
       // the counter
-      K(1, [-0.1, 1.6, -9.5], [1.1, 1.25, -11.6], [-0.15, 1.6, -9.0], [1.05, 1.2, -11.6]),
+      K(0.95, [-0.15, 1.62, -8.5], [-1.3, 1.22, -12.6], [-0.3, 1.7, -8.3], [-1.05, 0.62, -12.6]),
+      K(1, [-0.2, 1.62, -8.7], [-1.35, 1.2, -12.6], [-0.35, 1.7, -8.5], [-1.08, 0.6, -12.6]),
     ],
   };
 }
 
 export class KanaanStore {
-  constructor(canvas, { mode = "walk", theme = "light", tier = "high", look = "v1", safe = {}, onSelect, onReady } = {}) {
+  constructor(canvas, { mode = "walk", theme = "light", tier = "high", safe = {}, onSelect, onReady } = {}) {
     this.canvas = canvas;
     this.mode = mode;
-    this.look = look === "v2" ? "v2" : "v1";
     this.safe = { left: safe.left || 0, bottom: safe.bottom || 0 };
     this.tier = tier;
     this.onSelect = onSelect;
@@ -201,9 +179,8 @@ export class KanaanStore {
     this.visible = true;
     this.disposed = false;
     this.frameTimes = [];
-    this.neonText = "";
     this.neonOn = 0;
-    this.hoverPanel = null;
+    this.hovered = null;
 
     const maxDpr = tier === "high" ? 2 : 1.5;
     this.dpr = Math.min(window.devicePixelRatio || 1, maxDpr);
@@ -255,7 +232,7 @@ export class KanaanStore {
     this.warmB.position.set(0, 2.6, -8.6);
     scene.add(this.warmA, this.warmB);
 
-    const built = this.look === "v2" ? buildStoreV2({ tier }) : buildStore({ tier });
+    const built = buildStore({ tier });
     this.reg = built.reg;
     this.built = built;
     scene.add(built.root);
@@ -269,14 +246,11 @@ export class KanaanStore {
       if (m && m.map && m.map.wrapS === THREE.RepeatWrapping) m.map.anisotropy = aniso;
     });
 
-    if (this.reg.neonFont) this.loadNeonFont(this.reg.neonFont);
-    // the second drawing has no frames: a section's pieces come out of its
-    // shelf when the walk stops there (showcase.js)
-    if (this.reg.showcase && mode === "walk") this.showcase = new Showcase(this, this.reg.showcase);
+    this.loadNeonFont(this.reg.neonFont);
+    // each section's pieces hang on paper swing tags in the shop (hangtags.js)
+    this.hangTags = new HangTags(this, this.reg.tagSpots);
 
     this.raycaster = new THREE.Raycaster();
-    this.textureLoader = new THREE.TextureLoader();
-    this.textureLoader.setCrossOrigin("anonymous");
 
     this.resize(canvas.clientWidth || window.innerWidth, canvas.clientHeight || window.innerHeight);
     this.applyLook(true);
@@ -313,19 +287,6 @@ export class KanaanStore {
     if (v) this.wake();
   }
 
-  setNeon(text) {
-    // the second pass has the shop's own neon, always the same words
-    if (this.reg.neonFixed) return;
-    if (!text || text === this.neonText) return;
-    this.neonText = text;
-    const t = neonTexture(text);
-    const m = this.reg.neon.material;
-    if (m.map) m.map.dispose();
-    m.map = t;
-    m.needsUpdate = true;
-    this.wake();
-  }
-
   /* The mirror by the counter: the shop never moves, so instead of drawing
      the room twice on every frame, the store takes one snapshot of it from
      in front of the mirror (six small views, a cube) and the mirror reflects
@@ -356,8 +317,8 @@ export class KanaanStore {
     }
   }
 
-  /* The second pass's neon is drawn in its own script face; the sign stays
-     off until the face has arrived, then flickers on. */
+  /* The shop's neon is drawn in its own script face; the sign stays off
+     until the face has arrived, then flickers on. */
   loadNeonFont(f) {
     const draw = (family) => {
       if (this.disposed) return;
@@ -381,67 +342,11 @@ export class KanaanStore {
     }
   }
 
-  /* The sections' pieces, for the showcase: [{ id, from, to, side, items }]
-     (see showcase.js). */
-  setShowcase(list) {
-    if (!this.showcase) return;
-    this.showcase.setData(list);
+  /* The sections' pieces, for the hang tags: [{ id, to, items }] (see
+     hangtags.js). */
+  setTags(list) {
+    this.hangTags.setData(list);
     this.wake();
-  }
-
-  /* Live stock into the lightboxes: window first, then the new-in wall,
-     then the two frames on the table. */
-  setProducts(list) {
-    const items = (list || []).filter((p) => p && p.image);
-    if (!items.length) return;
-    // a frame that belongs to a section (slot.group — "pants", "shoes"…)
-    // shows pieces marked with that group; every other frame takes the
-    // rest, in order
-    const groupOf = (panel) => panel.slot.group || (panel.slot.kind === "pants" ? "pants" : null);
-    const general = items.filter((p) => !p.group);
-    const used = {};
-    let gi = 0;
-    this.reg.panels.forEach((panel) => {
-      const g = groupOf(panel);
-      const own = g ? items.filter((p) => p.group === g) : [];
-      let product;
-      if (own.length) {
-        used[g] = (used[g] || 0) + 1;
-        product = own[(used[g] - 1) % own.length];
-      } else {
-        const pool = general.length ? general : items;
-        product = pool[gi++ % pool.length];
-      }
-      if (panel.product && panel.product.id === product.id) return;
-      panel.product = product;
-      this.textureLoader.load(
-        product.image,
-        (tex) => {
-          if (this.disposed) { tex.dispose(); return; }
-          tex.colorSpace = THREE.SRGBColorSpace;
-          tex.anisotropy = 4;
-          const img = tex.image;
-          const ia = (img.naturalWidth || img.width) / (img.naturalHeight || img.height || 1);
-          const pa = 0.8;
-          if (ia > pa) {
-            tex.repeat.set(pa / ia, 1);
-            tex.offset.set((1 - pa / ia) / 2, 0);
-          } else {
-            tex.repeat.set(1, ia / pa);
-            tex.offset.set(0, (1 - ia / pa) / 2);
-          }
-          const old = panel.pic.material;
-          panel.pic.material = new THREE.MeshBasicMaterial({ map: tex, toneMapped: false, color: new THREE.Color(1, 1, 1) });
-          if (old && old.map) old.map.dispose();
-          panel.group.visible = true;
-          panel.lit = performance.now();
-          this.applyLook(true);
-          this.wake();
-        },
-        undefined,
-        () => { /* a missing photo leaves the panel blank, never breaks the store */ }
-      );
-    });
   }
 
   bindInput() {
@@ -463,8 +368,8 @@ export class KanaanStore {
         this.setPointer(((e.clientX - r.left) / r.width) * 2 - 1, -(((e.clientY - r.top) / r.height) * 2 - 1));
         const hit = this.pick(e.clientX, e.clientY);
         const next = hit && hit.product ? hit : null;
-        if (next !== this.hoverPanel) {
-          this.hoverPanel = next;
+        if (next !== this.hovered) {
+          this.hovered = next;
           c.style.cursor = next ? "pointer" : "";
           this.wake();
         }
@@ -481,8 +386,7 @@ export class KanaanStore {
     const r = this.canvas.getBoundingClientRect();
     const v = new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -(((clientY - r.top) / r.height) * 2 - 1));
     this.raycaster.setFromCamera(v, this.camera);
-    const targets = this.reg.panels.map((p) => [p.pic, p]);
-    if (this.showcase) for (const c of this.showcase.pickables()) targets.push([c.mesh, c]);
+    const targets = this.hangTags.pickables();
     const hits = this.raycaster.intersectObjects(targets.map((t) => t[0]), false);
     if (!hits.length || hits[0].distance > 9) return null;
     const hit = targets.find((t) => t[0] === hits[0].object);
@@ -505,7 +409,7 @@ export class KanaanStore {
     this.h = h;
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
-    this.path = pathFor(w / h, this.mode, this.safe, this.look);
+    this.path = pathFor(w / h, this.mode, this.safe);
     // a phone starts further out across the street: thinner haze, so the
     // shop doesn't look washed out from there
     this.fogScale = lerp(1, 0.6, clamp((1.25 - w / h) / 0.7, 0, 1));
@@ -514,7 +418,7 @@ export class KanaanStore {
     this.posCurve = new THREE.CatmullRomCurve3(this.path.keys.map((k) => new THREE.Vector3(...k.p)), false, "centripetal");
     this.lookCurve = new THREE.CatmullRomCurve3(this.path.keys.map((k) => new THREE.Vector3(...k.l)), false, "centripetal");
     this.updateCamera(1);
-    if (this.showcase) this.showcase.layout();
+    this.hangTags.layout();
     this.wake();
   }
 
@@ -560,14 +464,14 @@ export class KanaanStore {
     this.hemi.groundColor.copy(a.hemiGround).lerp(b.hemiGround, n);
     // stepping in from the street, the eye leaves the daylight behind:
     // the shop is lit by its own lights from the door on
-    const indoors = this.mode === "walk" && this.reg.spots && this.reg.spots.length ? smooth(0.14, 0.24, this.progress) : 0;
+    const indoors = this.mode === "walk" ? smooth(0.14, 0.24, this.progress) : 0;
     this.sun.intensity = lerp(a.sun, b.sun, n) * (1 - 0.85 * indoors);
     this.street.intensity = lerp(a.street, b.street, n) * (1 - indoors);
     const lightsUp = 0.25 + 0.75 * intro.inside;
-    const inside = lerp(a.warm, b.warm, n) * lightsUp * (this.reg.fill ?? 1);
+    const inside = lerp(a.warm, b.warm, n) * lightsUp * this.reg.fill;
     this.warmA.intensity = inside;
     this.warmB.intensity = inside;
-    for (const s of this.reg.spots || []) s.light.intensity = lerp(s.day, s.night, n) * lightsUp;
+    for (const s of this.reg.spots) s.light.intensity = lerp(s.day, s.night, n) * lightsUp;
     // after dark the whole interior waits for its lights to come on
     const dim = lerp(1, 0.3 + 0.7 * intro.inside, n);
     scene.environmentIntensity = lerp(a.env, b.env, n) * dim;
@@ -588,20 +492,10 @@ export class KanaanStore {
     for (const bulb of this.reg.bulbs) glowSum += bulb.on;
     this.reg.bulbMat.emissiveIntensity = bulbLevel * (glowSum / this.reg.bulbs.length);
     this.reg.glowPoints.material.opacity = lerp(0.12, 0.85, n) * (glowSum / this.reg.bulbs.length);
-    // neon glow on the back wall
-    const lit = this.reg.neonFont ? (this.reg.neonFont.ready ? 1 : 0) : this.neonText ? 1 : 0;
-    const neon = this.neonOn * lit;
+    // the neon on the partition, once its face has arrived
+    const neon = this.neonOn * (this.reg.neonFont.ready ? 1 : 0);
     this.reg.neon.material.opacity = neon * lerp(0.85, 1, n);
     this.reg.neonGlow.opacity = neon * lerp(0.06, 0.34, n);
-    // lightboxes read a touch brighter after dark
-    for (const p of this.reg.panels) {
-      const m = p.pic.material;
-      if (m.isMeshBasicMaterial && m.map) {
-        const hv = p.hover;
-        const lv = lerp(0.94, 1.0, n) + hv * 0.08;
-        m.color.setScalar(lv);
-      }
-    }
     if (force) this.dirty = true;
   }
 
@@ -661,12 +555,10 @@ export class KanaanStore {
       active = true;
     }
 
-    // neon flickers on as you approach the back of the shop
-    // (the shop's own neon in the second pass is simply on, like the real one)
-    const neonTarget = this.reg.neonFixed ? 1 : this.mode === "walk" ? smooth(0.72, 0.8, this.progress) : 0;
-    if (Math.abs(this.neonOn - neonTarget) > 1e-3) {
-      const flicker = neonTarget > this.neonOn && Math.sin(now * 0.05) > 0.4 ? 0.5 : 1;
-      this.neonOn += (neonTarget - this.neonOn) * (1 - Math.exp(-dt * 5)) * flicker;
+    // the neon is simply on, like the real one — it flickers on once
+    if (this.reg.neonFont.ready && this.neonOn < 1 - 1e-3) {
+      const flicker = Math.sin(now * 0.05) > 0.4 ? 0.5 : 1;
+      this.neonOn += (1 - this.neonOn) * (1 - Math.exp(-dt * 5)) * flicker;
       active = true;
     }
 
@@ -681,20 +573,9 @@ export class KanaanStore {
     });
     glowAttr.needsUpdate = true;
 
-    // hover lift on the lightboxes
-    for (const p of this.reg.panels) {
-      const target = this.hoverPanel === p ? 1 : 0;
-      if (Math.abs(p.hover - target) > 1e-3) {
-        p.hover += (target - p.hover) * (1 - Math.exp(-dt * 10));
-        const s = 1 + p.hover * 0.035;
-        p.group.scale.setScalar(s);
-        active = true;
-      }
-    }
-
-    if (this.showcase && this.showcase.update(dt, this.progress, this.hoverPanel)) active = true;
+    if (this.hangTags.update(dt, this.hovered)) active = true;
     this.applyLook(false);
-    if (this.reg.mirror && this._introDone && this.night === this.nightTarget && this._mirrorAt !== this.night) this.captureMirror();
+    if (this._introDone && this.night === this.nightTarget && this._mirrorAt !== this.night) this.captureMirror();
     this.renderer.render(this.scene, this.camera);
     this.measure(dt);
 
@@ -742,7 +623,7 @@ export class KanaanStore {
     });
     if (this.scene.environment) this.scene.environment.dispose();
     if (this._mirrorRT) this._mirrorRT.dispose();
-    if (this.showcase) this.showcase.dispose();
+    this.hangTags.dispose();
     this.renderer.dispose();
   }
 }

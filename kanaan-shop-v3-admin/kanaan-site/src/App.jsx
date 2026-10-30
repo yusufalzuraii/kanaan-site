@@ -43,7 +43,7 @@ import {
   Home as HomeIcon,
 } from "lucide-react";
 /* The admin panel is a third of the front-end code — product editor,
-   stock grid, order management, story editor, image optimizer — and no
+   stock grid, order management, image optimizer — and no
    shopper will ever open it. Importing it lazily puts it in its own file
    that only downloads when someone actually visits /admin, so every
    visitor stops paying to carry it around. */
@@ -2107,7 +2107,6 @@ function KanaanShop() {
 
   const [products, setProducts] = useState([]);
   const [catalogLoading, setCatalogLoading] = useState(true);
-  const [storyRings, setStoryRings] = useState([]);
   const [appExclusiveCount, setAppExclusiveCount] = useState(0);
   const [updateInfo, setUpdateInfo] = useState({ available: false });
 
@@ -2150,18 +2149,6 @@ function KanaanShop() {
     return () => { alive = false; };
   }, []);
 
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const res = await fetchWithTimeout(`${apiBase}/api/stories`, {}, 10000);
-        const data = await res.json();
-        if (alive && Array.isArray(data.rings)) setStoryRings(data.rings);
-      } catch { /* The Edit is a bonus feature — never block the shop on it */ }
-    })();
-    return () => { alive = false; };
-  }, []);
-
   const goHome = () => navigate("/");
   const goCatalog = (cat, sub) => {
     if (!cat || cat === "all") navigate("/shop");
@@ -2188,11 +2175,6 @@ function KanaanShop() {
 
   const cartKey = (pid, size, colorKey) => `${pid}-${size}-${colorKey}`;
 
-  // Which ring "The Edit" viewer is showing, if any. Storing the ring id
-  // (not the object) means it always reflects the freshest fetched data.
-  const [openRingId, setOpenRingId] = useState(null);
-  const openStory = (ringId) => setOpenRingId(ringId);
-  const closeStory = () => setOpenRingId(null);
 
   // زر الرجوع الفيزيائي بأندرويد — عندو أولويات بالترتيب:
   // 1) لو في نافذة منبثقة مفتوحة (سلة/بحث/ستوري/قائمة)، سكّرها بس
@@ -2202,13 +2184,12 @@ function KanaanShop() {
   // من التطبيق كامل بدل ما يسكّر النافذة بس — بالظبط المشكلة يلي صارت.
   useEffect(() => {
     let cleanup = () => {};
-    const hasOpenOverlay = cartOpen || searchOpen || !!openRingId || menuOpen;
+    const hasOpenOverlay = cartOpen || searchOpen || menuOpen;
     registerBackButtonHandler({
       canGoBack: () => hasOpenOverlay || canGoBack(),
       onBackWithinApp: () => {
         if (cartOpen) { setCartOpen(false); return; }
         if (searchOpen) { setSearchOpen(false); return; }
-        if (openRingId) { closeStory(); return; }
         if (menuOpen) { setMenuOpen(false); return; }
         window.history.back();
       },
@@ -2217,7 +2198,7 @@ function KanaanShop() {
       },
     }).then((fn) => { cleanup = fn; });
     return () => cleanup();
-  }, [cartOpen, searchOpen, openRingId, menuOpen]);
+  }, [cartOpen, searchOpen, menuOpen]);
 
   // colorKey = the palette key we track stock against ("black")
   // colorLabel = what the shopper reads ("Black")
@@ -2379,15 +2360,15 @@ function KanaanShop() {
       <main>
         <PageTransition path={path} direction={navDirection}>
         {route.type === "home" && isNativeApp && (
-          <NativeHomeView products={products} loading={catalogLoading} error={productsError} onRetry={refreshProducts} goCatalog={goCatalog} goSale={goSale} goExclusives={goExclusives} openProduct={openProduct} likes={likes} toggleLike={toggleLike} storyRings={storyRings} openStory={openStory} goFavorites={goFavorites} onCart={() => setCartOpen(true)} cartCount={cartCount} />
+          <NativeHomeView products={products} loading={catalogLoading} error={productsError} onRetry={refreshProducts} goCatalog={goCatalog} goSale={goSale} goExclusives={goExclusives} openProduct={openProduct} likes={likes} toggleLike={toggleLike} goFavorites={goFavorites} onCart={() => setCartOpen(true)} cartCount={cartCount} />
         )}
         {route.type === "home" && !isNativeApp && (HOME_3D ? (
-          <HomeLab home products={products} loading={catalogLoading} goCatalog={goCatalog} goSale={goSale} openProduct={openProduct} likes={likes} toggleLike={toggleLike} storyRings={storyRings} openStory={openStory} appExclusiveCount={appExclusiveCount} />
+          <HomeLab home products={products} loading={catalogLoading} goCatalog={goCatalog} goSale={goSale} openProduct={openProduct} likes={likes} toggleLike={toggleLike} appExclusiveCount={appExclusiveCount} />
         ) : (
-          <HomeView products={products} loading={catalogLoading} goCatalog={goCatalog} goSale={goSale} openProduct={openProduct} likes={likes} toggleLike={toggleLike} storyRings={storyRings} openStory={openStory} appExclusiveCount={appExclusiveCount} />
+          <HomeView products={products} loading={catalogLoading} goCatalog={goCatalog} goSale={goSale} openProduct={openProduct} likes={likes} toggleLike={toggleLike} appExclusiveCount={appExclusiveCount} />
         ))}
         {route.type === "lab" && (
-          <HomeLab products={products} loading={catalogLoading} goCatalog={goCatalog} goSale={goSale} openProduct={openProduct} likes={likes} toggleLike={toggleLike} storyRings={storyRings} openStory={openStory} appExclusiveCount={appExclusiveCount} />
+          <HomeLab products={products} loading={catalogLoading} goCatalog={goCatalog} goSale={goSale} openProduct={openProduct} likes={likes} toggleLike={toggleLike} appExclusiveCount={appExclusiveCount} />
         )}
         {route.type === "sale" && (
           <SaleView products={products} loading={catalogLoading} goCatalog={goCatalog} openProduct={openProduct} likes={likes} toggleLike={toggleLike} />
@@ -2433,15 +2414,6 @@ function KanaanShop() {
         </PageTransition>
       </main>
 
-      <StoryViewer
-        rings={storyRings}
-        openRingId={openRingId}
-        onClose={closeStory}
-        products={products}
-        addToCart={addToCart}
-        openProduct={(p) => { closeStory(); openProduct(p); }}
-        goCatalog={(cat, sub) => { closeStory(); goCatalog(cat, sub); }}
-      />
       {isNativeApp ? <AppFootnote /> : <Footer goCatalog={goCatalog} goSale={goSale} />}
       <WhatsAppFab raised={route.type === "product"} />
       <SearchOverlay
@@ -2664,6 +2636,22 @@ function GlobalStyles() {
       @keyframes dockIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
       .dock-in { animation: dockIn 0.5s cubic-bezier(0.16,1,0.3,1) both; }
 
+      /* The size sheet on a product page: rises from the bottom, the size
+         buttons pop in one by one, the chosen one springs; "Add" without a
+         size gives the sizes a small shake and a coral ring. */
+      @keyframes sheetIn { from { transform: translateY(100%); } to { transform: translateY(0); } }
+      @keyframes sheetFade { from { opacity: 0; } to { opacity: 1; } }
+      @keyframes sizePop { 0% { opacity: 0; transform: translateY(10px) scale(0.92); } 100% { opacity: 1; transform: none; } }
+      @keyframes sizeSpring { 0% { transform: scale(1); } 40% { transform: scale(0.9); } 75% { transform: scale(1.06); } 100% { transform: scale(1); } }
+      @keyframes sizeNudge { 0%, 100% { transform: translateX(0); } 20% { transform: translateX(-7px); } 40% { transform: translateX(6px); } 60% { transform: translateX(-4px); } 80% { transform: translateX(3px); } }
+      .pick-backdrop { animation: sheetFade 0.25s ease both; background: rgba(10,10,14,0.42); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); }
+      .pick-sheet { animation: sheetIn 0.42s cubic-bezier(0.16,1,0.3,1) both; background: rgba(255,255,255,0.9); border: 1px solid var(--glass-border); border-bottom: 0; box-shadow: 0 -18px 60px rgba(20,20,26,0.18); backdrop-filter: blur(24px) saturate(160%); -webkit-backdrop-filter: blur(24px) saturate(160%); }
+      [data-theme="dark"] .pick-sheet { background: rgba(18,18,22,0.92); box-shadow: 0 -18px 60px rgba(0,0,0,0.5); }
+      .pick-size { animation: sizePop 0.4s cubic-bezier(0.16,1,0.3,1) both; transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease; }
+      .pick-size.is-on { animation: sizeSpring 0.38s cubic-bezier(0.16,1,0.3,1); }
+      .size-nudge { animation: sizeNudge 0.5s ease; box-shadow: 0 0 0 2px var(--coral); border-radius: 22px; }
+      .pick-cta { transition: background 0.25s ease, color 0.25s ease, transform 0.2s ease; }
+
       /* Search overlay */
       @keyframes searchFade { from { opacity: 0; } to { opacity: 1; } }
       @keyframes searchRise { from { opacity: 0; transform: translateY(-10px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
@@ -2698,32 +2686,6 @@ function GlobalStyles() {
         width: 18px; height: 1px; flex-shrink: 0;
         background: linear-gradient(90deg, transparent, var(--fg-muted), transparent);
         opacity: 0; animation: chipIn 0.5s ease 0.8s both;
-      }
-
-      /* The Edit — story tag dot + compare-slide chip */
-      @keyframes tagPing {
-        0% { transform: translate(-50%,-50%) scale(0.6); opacity: 0.55; }
-        70%, 100% { transform: translate(-50%,-50%) scale(2.2); opacity: 0; }
-      }
-      .tag-dot-ping {
-        position: absolute; top: 50%; left: 50%; width: 22px; height: 22px;
-        border-radius: 9999px; background: rgba(255,255,255,0.9);
-        animation: tagPing 1.8s ease-out infinite;
-      }
-      .tag-dot {
-        position: absolute; top: 50%; left: 50%; width: 22px; height: 22px;
-        border-radius: 9999px; transform: translate(-50%,-50%);
-        background: rgba(255,255,255,0.95);
-        border: 1.5px solid rgba(0,0,0,0.15);
-        box-shadow: 0 2px 10px rgba(0,0,0,0.35);
-      }
-      .tag-dot::after {
-        content: ''; position: absolute; inset: 6px; border-radius: 9999px; background: var(--coral);
-      }
-      .a-story-chip {
-        display: inline-block; padding: 4px 12px; border-radius: 9999px; font-family: 'Inter', sans-serif;
-        font-size: 0.7rem; font-weight: 500; color: #fff; background: rgba(0,0,0,0.4);
-        backdrop-filter: blur(6px); border: 1px solid rgba(255,255,255,0.25);
       }
 
       /* Anything inside a paused container stops animating.
@@ -2988,67 +2950,6 @@ function GlobalStyles() {
       }
       .card-dot.is-active { width: 14px; background: #fff; }
 
-      /* Story ring.
-         A flat 2px border said nothing beyond "there's a box here". A
-         slowly turning gradient reads as live content waiting to be
-         opened — the same signal a story ring carries anywhere else,
-         drawn in this shop's own colours rather than borrowed ones.
-
-         It's a conic gradient rotated by a CSS variable, so the whole
-         thing animates on the GPU with no repainting. */
-      /* Story ring — rebuilt for phones.
-
-         The first version animated a custom property that fed a conic
-         gradient. That looks like a cheap animation (nothing but an angle
-         changes) but it isn't: the browser has to regenerate and repaint
-         the entire gradient on every frame, for every tile on screen.
-         On a laptop that's invisible; on a phone it was the stutter.
-
-         Now the gradient is drawn once and never touched. What moves is
-         the layer holding it, rotated with the rotate property — which
-         the compositor handles on its own, exactly like a transform.
-
-         The layer is square and oversized so that spinning it never
-         swings a corner into view; the parent clips it back to the tile.  */
-      @keyframes ringSpin { to { rotate: 360deg; } }
-
-      .story-ring { position: relative; overflow: hidden; isolation: isolate; }
-      .story-ring::before {
-        content: '';
-        position: absolute;
-        left: 50%; top: 50%;
-        width: 165%; aspect-ratio: 1;
-        translate: -50% -50%;
-        z-index: -1;
-        background:
-          /* One gap per slide, punched through to the page background. */
-          repeating-conic-gradient(
-            transparent 0deg,
-            transparent calc(360deg / var(--seg, 1) - 14deg),
-            var(--bg) calc(360deg / var(--seg, 1) - 14deg),
-            var(--bg) calc(360deg / var(--seg, 1))
-          ),
-          conic-gradient(
-            var(--ring) 0deg,
-            var(--ring) 90deg,
-            color-mix(in srgb, var(--ring) 30%, transparent) 210deg,
-            var(--ring) 360deg
-          );
-        animation: ringSpin 7s linear infinite;
-        /* Inherits the paused state set on the parent by
-           usePauseOffscreen — a pseudo-element can't be observed
-           directly, but it can follow its parent. */
-        animation-play-state: inherit;
-        will-change: rotate;
-      }
-      /* Older browsers without color-mix still get a solid ring. */
-      @supports not (background: conic-gradient(red, blue)) {
-        .story-ring::before { background: var(--ring); }
-      }
-
-      .story-tile { transition: transform 0.35s cubic-bezier(0.16,1,0.3,1); }
-      .story-tile:active { transform: scale(0.96); }
-
       /* Skeleton shimmer
          ------------------------------------------------------------
          A product photo that hasn't arrived yet used to leave a flat dark
@@ -3116,7 +3017,8 @@ function GlobalStyles() {
       .sale-card:hover { transform: translateY(-3px); border-color: rgba(255,69,34,0.9); }
 
       @media (prefers-reduced-motion: reduce) {
-        .mesh-blob, .hero-fade-1, .hero-fade-2, .hero-fade-3, .hero-fade-4, .dock-in, .fab-pulse::before, .search-fade, .search-rise, .sale-glow, .promise-divider, .tag-dot-ping, .skeleton::after, .marquee-track, .photo-settle, .story-ring, .swipe-hint, .hero-float, .page-in, .count-landed { animation: none !important; }
+        .pick-backdrop, .pick-sheet, .pick-size, .pick-size.is-on, .size-nudge,
+        .mesh-blob, .hero-fade-1, .hero-fade-2, .hero-fade-3, .hero-fade-4, .dock-in, .fab-pulse::before, .search-fade, .search-rise, .sale-glow, .promise-divider, .skeleton::after, .marquee-track, .photo-settle, .swipe-hint, .hero-float, .page-in, .count-landed { animation: none !important; }
         .kinetic-line > span { animation: none !important; transform: none !important; }
         .admin-spinner { animation-duration: 2s; }
         .promise-chip, .promise-chip::after { animation: none !important; }
@@ -3335,477 +3237,6 @@ function Header({ cartCount, onHome, onCart, onSearch, onSale, menuOpen, setMenu
 /* ============================================================
    HOME
    ============================================================ */
-/* ============================================================
-   THE EDIT — story rail + full-screen viewer
-   ------------------------------------------------------------
-   Deliberately NOT an Instagram clone: tiles are 4:5 (the same ratio
-   as every product photo on the site, not circles), the ring colour
-   tells you what kind of content it is before you even tap, and the
-   viewer itself is a second storefront — every tagged garment can be
-   added to the cart without ever leaving the story.
-   ============================================================ */
-const RING_ACCENT = {
-  sale: { border: "var(--coral)", label: "coral" },
-  new: { border: "var(--teal)", label: "teal" },
-  compare: { border: "var(--teal)", label: "teal" },
-  editorial: { border: "var(--fg-muted)", label: "neutral" },
-};
-
-/* The rail used to be two small tiles floating in a lot of empty space
-   with no heading — it read as content that had failed to load rather
-   than a section, and sat awkwardly next to the big confident cards
-   below it. Giving it a title and room of its own makes the space to the
-   right read as deliberate, and the "Tap to view" line tells a first-time
-   visitor these are something to open. */
-function StoryRail({ rings, onOpen }) {
-  return (
-    <section className="px-4 sm:px-6 pt-6 pb-4">
-      <div className="max-w-6xl mx-auto">
-        {/* The sparkle used to be pushed to the far edge by justify-between,
-            which on a wide screen left it stranded a metre away from the
-            title it belongs to. It sits with the heading now. */}
-        <div className="flex items-center gap-2 mb-3.5">
-          <Sparkles className="w-4 h-4 text-coral flex-shrink-0" aria-hidden="true" />
-          <div>
-            <h2 className="font-display font-bold text-lg leading-none">The Edit</h2>
-            <p className="font-body text-xs text-muted mt-1.5">Tap to view · {rings.length} {rings.length === 1 ? "story" : "stories"}</p>
-          </div>
-        </div>
-        <div className="flex gap-3 overflow-x-auto pb-1 -mx-1 px-1" style={{ WebkitOverflowScrolling: "touch" }}>
-          {rings.map((ring, i) => (
-            <Reveal key={ring.id} delay={i * 60} className="flex-shrink-0">
-              <StoryTile ring={ring} onOpen={() => onOpen(ring.id)} />
-            </Reveal>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function StoryTile({ ring, onOpen }) {
-  const accent = RING_ACCENT[ring.kind] || RING_ACCENT.editorial;
-  const cover = ring.slides[0];
-  const [ok, setOk] = useState(true);
-  const [loaded, setLoaded] = useState(false);
-  const ringRef = usePauseOffscreen();
-
-  return (
-    <button
-      onClick={onOpen}
-      className="text-left tap-scale flex-shrink-0 story-tile"
-      style={{ width: 132 }}
-      aria-label={`${ring.title} — open story`}
-    >
-      {/* The ring is a slowly rotating gradient rather than a flat border.
-          It's the cue that says "there's something in here" — and it keeps
-          the accent colour that tells you which kind of story it is. */}
-      {/* Segmented ring: one arc per slide, the way a story tells you how
-          much there is before you commit to opening it. Built from a
-          repeating-conic-gradient, so however many slides a ring has, the
-          browser draws the divisions itself — no per-slide elements, no
-          extra cost. */}
-      <div
-        ref={ringRef}
-        className="relative rounded-2xl overflow-hidden story-ring"
-        style={{
-          aspectRatio: "4/5",
-          /* Was 3px with 5° gaps — technically a segmented ring, visually
-             indistinguishable from a plain border. Thick enough to read
-             now, with gaps you can actually count. */
-          padding: 5,
-          "--ring": accent.border,
-          "--seg": ring.slides.length,
-        }}
-      >
-        <div className="relative w-full h-full rounded-xl overflow-hidden" style={{ background: "var(--field-bg)" }}>
-          {/* These sit near the top of the page, so a dark placeholder was
-              the first thing a visitor saw. Shimmer while loading instead. */}
-          {!loaded && <span className="skeleton" aria-hidden="true" />}
-          {cover.kind === "compare" ? (
-            <div className="absolute inset-0 flex">
-              <div className="w-1/2 h-full overflow-hidden">{ok && <img src={productImageSrc(cover.image)} alt="" className="w-full h-full" style={{ objectFit: "cover" }} onError={() => setOk(false)} />}</div>
-              <div className="w-1/2 h-full overflow-hidden">{ok && <img src={productImageSrc(cover.imageB)} alt="" className="w-full h-full" style={{ objectFit: "cover" }} onError={() => setOk(false)} />}</div>
-            </div>
-          ) : ok ? (
-            <img
-              src={productImageSrc(cover.image)}
-              alt=""
-              className={`absolute inset-0 w-full h-full ph-img${loaded ? " is-loaded" : ""}`}
-              style={{ objectFit: "cover" }}
-              /* Above the fold — waiting for lazy-loading here is what made
-                 the rail look empty on first paint. */
-              fetchPriority="high"
-              decoding="async"
-              onLoad={() => setLoaded(true)}
-              onError={() => setOk(false)}
-            />
-          ) : (
-            <div className="absolute inset-0 flex items-center justify-center"><Sparkles className="w-6 h-6" style={{ color: "rgba(255,255,255,0.4)" }} /></div>
-          )}
-          {/* Scrim + label live inside the tile now. Text sitting underneath
-              made each tile feel like a loose thumbnail with a caption; this
-              reads as one object. */}
-          <div className="absolute inset-x-0 bottom-0" style={{ height: "62%", background: "linear-gradient(180deg, transparent, rgba(0,0,0,0.72))" }} />
-          <p
-            className="absolute inset-x-0 bottom-0 px-2.5 pb-2.5 font-body font-medium truncate"
-            style={{ color: "#fff", fontSize: "0.78rem", textShadow: "0 1px 3px rgba(0,0,0,0.4)" }}
-          >
-            {ring.title}
-          </p>
-        </div>
-      </div>
-    </button>
-  );
-}
-
-/* ---------- Full-screen viewer ---------- */
-const SLIDE_MS = 5000;
-
-function StoryViewer({ rings, openRingId, onClose, products, addToCart, openProduct, goCatalog }) {
-  const [ringIdx, setRingIdx] = useState(0);
-  const [slideIdx, setSlideIdx] = useState(0);
-  const [paused, setPaused] = useState(false);
-  const [activeTag, setActiveTag] = useState(null); // { productId } | null
-  const [progress, setProgress] = useState(0); // 0..1 within the current slide
-  const rafRef = useRef(null);
-  const startRef = useRef(0);
-  const pausedAtRef = useRef(0);
-  const touchStartY = useRef(null);
-  const touchStartX = useRef(null);
-
-  const openIdx = openRingId ? rings.findIndex((r) => r.id === openRingId) : -1;
-  const open = openIdx !== -1;
-
-  // Sync to whichever ring was requested.
-  useEffect(() => {
-    if (open) { setRingIdx(openIdx); setSlideIdx(0); setActiveTag(null); }
-  }, [openRingId]); // eslint-disable-line
-
-  useEffect(() => {
-    if (!open) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => { document.body.style.overflow = prev; };
-  }, [open]);
-
-  const ring = open ? rings[ringIdx] : null;
-  const slide = ring ? ring.slides[slideIdx] : null;
-
-  const goNextSlide = () => {
-    if (!ring) return;
-    if (slideIdx < ring.slides.length - 1) { setSlideIdx((i) => i + 1); setActiveTag(null); return; }
-    // last slide of this ring — roll into the next ring, or close.
-    if (ringIdx < rings.length - 1) { setRingIdx((i) => i + 1); setSlideIdx(0); setActiveTag(null); }
-    else onClose();
-  };
-  const goPrevSlide = () => {
-    if (!ring) return;
-    if (slideIdx > 0) { setSlideIdx((i) => i - 1); setActiveTag(null); return; }
-    if (ringIdx > 0) { const prevRing = rings[ringIdx - 1]; setRingIdx((i) => i - 1); setSlideIdx(prevRing.slides.length - 1); setActiveTag(null); }
-  };
-
-  // Auto-advance progress (rAF, pausable). A held tap or an open product
-  // sheet pauses it — nobody wants the story to run away while they're
-  // reading a price.
-  useEffect(() => {
-    if (!open || paused || activeTag) return;
-    setProgress(0);
-    startRef.current = performance.now();
-    const tick = (t) => {
-      const elapsed = t - startRef.current;
-      const p = Math.min(1, elapsed / SLIDE_MS);
-      setProgress(p);
-      if (p >= 1) { goNextSlide(); return; }
-      rafRef.current = requestAnimationFrame(tick);
-    };
-    rafRef.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(rafRef.current);
-  }, [open, ringIdx, slideIdx, paused, activeTag]); // eslint-disable-line
-
-  const onKeyDown = (e) => {
-    if (e.key === "Escape") onClose();
-    if (e.key === "ArrowRight") goNextSlide();
-    if (e.key === "ArrowLeft") goPrevSlide();
-  };
-
-  const onTouchStart = (e) => { touchStartY.current = e.touches[0].clientY; touchStartX.current = e.touches[0].clientX; setPaused(true); };
-  const onTouchEnd = (e) => {
-    setPaused(false);
-    if (touchStartY.current == null) return;
-    const dy = e.changedTouches[0].clientY - touchStartY.current;
-    const dx = e.changedTouches[0].clientX - touchStartX.current;
-    if (dy > 80 && Math.abs(dx) < 60) { onClose(); return; } // swipe down closes
-    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) { dx < 0 ? goNextSlide() : goPrevSlide(); }
-  };
-
-  if (!open || !slide) return null;
-
-  const taggedProduct = activeTag ? products.find((p) => p.id === activeTag) : null;
-
-  return (
-    <div
-      className="fixed inset-0 z-[70] search-fade"
-      style={{ background: "#050505" }}
-      onKeyDown={onKeyDown}
-      tabIndex={-1}
-      ref={(el) => el?.focus()}
-    >
-      <div
-        className="relative w-full h-full mx-auto overflow-hidden"
-        style={{ maxWidth: 460 }}
-        onTouchStart={onTouchStart}
-        onTouchEnd={onTouchEnd}
-      >
-        <StorySlideView slide={slide} onTagTap={(pid) => { setActiveTag(pid); setPaused(true); }} />
-
-        {/* Progress bars — one segment per slide in the current ring */}
-        <div className="absolute top-3 left-3 right-3 flex gap-1.5 z-10">
-          {ring.slides.map((_, i) => (
-            <div key={i} className="flex-1 rounded-full overflow-hidden" style={{ height: 2.5, background: "rgba(255,255,255,0.28)" }}>
-              <div
-                className="h-full rounded-full"
-                style={{
-                  width: i < slideIdx ? "100%" : i === slideIdx ? `${progress * 100}%` : "0%",
-                  background: "#fff",
-                  transition: i === slideIdx ? "none" : "width 0.2s",
-                }}
-              />
-            </div>
-          ))}
-        </div>
-
-        {/* Header: ring title + close */}
-        <div className="absolute top-7 left-3 right-3 flex items-center justify-between z-10">
-          <div className="flex items-center gap-2">
-            <span className="font-body text-white text-sm font-medium" style={{ textShadow: "0 1px 4px rgba(0,0,0,0.5)" }}>{ring.title}</span>
-          </div>
-          <button onClick={onClose} className="rounded-full p-2 tap-scale" style={{ background: "rgba(0,0,0,0.35)" }} aria-label="Close">
-            <X className="w-4 h-4 text-white" />
-          </button>
-        </div>
-
-        {/* Tap zones for prev/next — kept below the tag layer via z-index */}
-        <button className="absolute top-0 left-0 h-full z-[5]" style={{ width: "35%" }} onClick={goPrevSlide} aria-label="Previous" />
-        <button className="absolute top-0 right-0 h-full z-[5]" style={{ width: "35%" }} onClick={goNextSlide} aria-label="Next" />
-
-        {/* Caption */}
-        {slide.caption && (
-          <div className="absolute left-4 right-4 z-10" style={{ bottom: taggedProduct ? "auto" : 84 }}>
-            <p className="font-body text-white text-sm" style={{ textShadow: "0 1px 6px rgba(0,0,0,0.6)" }}>{slide.caption}</p>
-          </div>
-        )}
-
-        {/* Complete the look — related pieces, shown whenever this slide has a tag */}
-        {slide.tags.length > 0 && !activeTag && (
-          <CompleteTheLook slide={slide} products={products} onPick={(pid) => { setActiveTag(pid); setPaused(true); }} />
-        )}
-
-        {/* Quick-add bottom sheet for the tapped product */}
-        {taggedProduct && (
-          <StoryQuickAdd
-            product={taggedProduct}
-            onClose={() => { setActiveTag(null); setPaused(false); }}
-            addToCart={addToCart}
-            openProduct={openProduct}
-          />
-        )}
-      </div>
-    </div>
-  );
-}
-
-function StorySlideView({ slide, onTagTap }) {
-  if (slide.kind === "compare") return <CompareSlide slide={slide} />;
-  return (
-    <div className="absolute inset-0">
-      <img src={productImageSrc(slide.image)} alt="" className="absolute inset-0 w-full h-full" style={{ objectFit: "cover" }} />
-      <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, rgba(0,0,0,0.35) 0%, transparent 20%, transparent 60%, rgba(0,0,0,0.55) 100%)" }} />
-      {slide.tags.map((tag) => (
-        <TagDot key={tag.productId + tag.x + tag.y} tag={tag} onTap={() => onTagTap(tag.productId)} />
-      ))}
-    </div>
-  );
-}
-
-function TagDot({ tag, onTap }) {
-  return (
-    <button
-      onClick={(e) => { e.stopPropagation(); onTap(); }}
-      className="absolute z-[6] tap-scale"
-      style={{ left: `${tag.x}%`, top: `${tag.y}%`, transform: "translate(-50%, -50%)" }}
-      aria-label="Shop this piece"
-    >
-      <span className="tag-dot-ping" aria-hidden="true" />
-      <span className="tag-dot" aria-hidden="true" />
-    </button>
-  );
-}
-
-/* Comparison slide: drag the vertical handle to reveal Oversized vs Regular
-   (or Baggy vs Regular) on the same garment — the one thing here nobody
-   else can build, since it needs the fit/subcategory data this shop already
-   tracks. */
-function CompareSlide({ slide }) {
-  const [pos, setPos] = useState(50); // 0..100, % revealed of image B from the right
-  const wrapRef = useRef(null);
-  const dragging = useRef(false);
-
-  const setFromClientX = (clientX) => {
-    const el = wrapRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const pct = ((clientX - rect.left) / rect.width) * 100;
-    setPos(Math.max(6, Math.min(94, pct)));
-  };
-
-  return (
-    <div
-      ref={wrapRef}
-      className="absolute inset-0 select-none"
-      onMouseDown={(e) => { dragging.current = true; setFromClientX(e.clientX); }}
-      onMouseMove={(e) => { if (dragging.current) setFromClientX(e.clientX); }}
-      onMouseUp={() => { dragging.current = false; }}
-      onMouseLeave={() => { dragging.current = false; }}
-      onTouchMove={(e) => setFromClientX(e.touches[0].clientX)}
-    >
-      <img src={productImageSrc(slide.image)} alt={slide.labelA} className="absolute inset-0 w-full h-full" style={{ objectFit: "cover" }} draggable={false} />
-      <div className="absolute inset-0" style={{ clipPath: `inset(0 0 0 ${pos}%)` }}>
-        <img src={productImageSrc(slide.imageB)} alt={slide.labelB} className="absolute inset-0 w-full h-full" style={{ objectFit: "cover" }} draggable={false} />
-      </div>
-      <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, rgba(0,0,0,0.3) 0%, transparent 25%, transparent 65%, rgba(0,0,0,0.5) 100%)" }} />
-
-      {/* Handle */}
-      <div className="absolute top-0 bottom-0 z-[6]" style={{ left: `${pos}%`, transform: "translateX(-50%)", width: 2, background: "rgba(255,255,255,0.85)" }}>
-        <div
-          className="absolute top-1/2 left-1/2 rounded-full flex items-center justify-center"
-          style={{ width: 40, height: 40, transform: "translate(-50%,-50%)", background: "rgba(255,255,255,0.95)", boxShadow: "0 4px 14px rgba(0,0,0,0.35)" }}
-        >
-          <span style={{ fontSize: 14 }}>↔</span>
-        </div>
-      </div>
-
-      {/* Labels */}
-      <div className="absolute top-16 left-4 z-[6]"><span className="a-story-chip">{slide.labelA}</span></div>
-      <div className="absolute top-16 right-4 z-[6]"><span className="a-story-chip">{slide.labelB}</span></div>
-
-      {slide.ctaCategory && (
-        <div className="absolute left-4 right-4 z-[6] flex gap-2" style={{ bottom: 84 }}>
-          <a href={`/shop/${slide.ctaCategory}${slide.ctaSubcategory ? `/${slide.ctaSubcategory}` : ""}`} className="flex-1 text-center rounded-full font-body text-xs py-2.5 tap-scale" style={{ background: "rgba(255,255,255,0.16)", backdropFilter: "blur(8px)", color: "#fff", border: "1px solid rgba(255,255,255,0.3)" }}>
-            Shop {slide.labelA}
-          </a>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Small strip suggesting nearby pieces so the story keeps the shopping
-// going, not just a single pop-up sheet.
-function CompleteTheLook({ slide, products, onPick }) {
-  const tagged = slide.tags.map((t) => products.find((p) => p.id === t.productId)).filter(Boolean);
-  if (tagged.length === 0) return null;
-  const category = tagged[0].category;
-  const excludeIds = new Set(tagged.map((p) => p.id));
-  const more = products.filter((p) => p.category === category && !excludeIds.has(p.id)).slice(0, 4);
-  const strip = [...tagged, ...more].slice(0, 5);
-
-  return (
-    <div
-      className="absolute left-0 right-0 z-[6] px-4"
-      style={{ bottom: isNativeApp ? "calc(20px + env(safe-area-inset-bottom, 0px))" : 20 }}
-    >
-      <p className="font-body text-white text-xs mb-2" style={{ opacity: 0.85, textShadow: "0 1px 4px rgba(0,0,0,0.5)" }}>Shop this look</p>
-      <div className="flex gap-2 overflow-x-auto pb-1" style={{ WebkitOverflowScrolling: "touch" }}>
-        {strip.map((p) => (
-          <button key={p.id} onClick={(e) => { e.stopPropagation(); onPick(p.id); }} className="flex-shrink-0 rounded-xl overflow-hidden tap-scale" style={{ width: 52, height: 65, border: "1.5px solid rgba(255,255,255,0.5)" }}>
-            {p.images?.[0]?.url ? (
-              <img src={productImageSrc(p.images[0].url)} alt="" className="w-full h-full" style={{ objectFit: "cover" }} />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center" style={{ background: "#222" }}><Shirt className="w-4 h-4 text-white" style={{ opacity: 0.5 }} /></div>
-            )}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// Bottom sheet: colour/size/qty/Add to cart, without leaving the story.
-function StoryQuickAdd({ product, onClose, addToCart, openProduct }) {
-  const [color, setColor] = useState(() => product.colors.find((c) => colorHasStock(product, c)) || product.colors[0]);
-  const [size, setSize] = useState(() => product.sizes.find((s) => stockFor(product, color, s) > 0) || product.sizes[0]);
-  const [added, setAdded] = useState(false);
-
-  useEffect(() => {
-    if (stockFor(product, color, size) <= 0) {
-      const s = product.sizes.find((sz) => stockFor(product, color, sz) > 0);
-      if (s) setSize(s);
-    }
-  }, [color]); // eslint-disable-line
-
-  const available = stockFor(product, color, size);
-  const outOfStock = product.soldOut || !productHasStock(product);
-  const canAdd = !outOfStock && available > 0;
-
-  const handleAdd = () => {
-    if (!canAdd) return;
-    addToCart(product, size, color, COLORS[color]?.label || color, 1);
-    setAdded(true);
-    setTimeout(() => setAdded(false), 1400);
-  };
-
-  return (
-    <div className="absolute inset-x-0 bottom-0 z-20 search-rise" onClick={(e) => e.stopPropagation()}>
-      <div className="glass rounded-t-3xl px-4 pt-4 pb-5" style={{ background: "rgba(20,20,24,0.88)", backdropFilter: "blur(20px)", borderColor: "rgba(255,255,255,0.14)" }}>
-        <div className="flex justify-center mb-3"><span style={{ width: 36, height: 4, borderRadius: 4, background: "rgba(255,255,255,0.25)" }} /></div>
-        <div className="flex items-center gap-3 mb-3">
-          {product.images?.[0]?.url && (
-            <img src={productImageSrc(product.images[0].url)} alt="" className="rounded-xl flex-shrink-0" style={{ width: 52, height: 65, objectFit: "cover" }} />
-          )}
-          <div className="flex-1 min-w-0">
-            <p className="font-body text-white text-sm font-medium truncate">{product.name}</p>
-            <p className="font-num text-white text-base">{money(effectivePrice(product))}
-              {product.discount > 0 && <span className="font-num text-xs ml-2" style={{ color: "rgba(255,255,255,0.5)", textDecoration: "line-through" }}>{money(product.price)}</span>}
-            </p>
-          </div>
-          <button onClick={onClose} className="p-1.5 rounded-full tap-scale flex-shrink-0" style={{ background: "rgba(255,255,255,0.1)" }} aria-label="Close"><X className="w-3.5 h-3.5 text-white" /></button>
-        </div>
-
-        <div className="flex gap-1.5 mb-3 flex-wrap">
-          {product.colors.map((c) => {
-            const inStock = colorHasStock(product, c);
-            return (
-              <button key={c} onClick={() => inStock && setColor(c)} disabled={!inStock} className="rounded-full tap-scale" style={{ width: 26, height: 26, border: color === c ? "2px solid #fff" : "1px solid rgba(255,255,255,0.3)", opacity: inStock ? 1 : 0.3 }}>
-                <span className="block w-full h-full rounded-full" style={{ background: swatchBackground(c) }} />
-              </button>
-            );
-          })}
-        </div>
-        <div className="flex gap-1.5 mb-4 flex-wrap">
-          {product.sizes.map((s) => {
-            const inStock = stockFor(product, color, s) > 0;
-            return (
-              <button key={s} onClick={() => inStock && setSize(s)} disabled={!inStock} className="font-num text-xs px-3 py-1.5 rounded-full tap-scale" style={size === s ? { background: "#fff", color: "#111" } : { background: "rgba(255,255,255,0.1)", color: "#fff", opacity: inStock ? 1 : 0.35, textDecoration: inStock ? "none" : "line-through" }}>
-                {s}
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="flex gap-2">
-          <button onClick={() => openProduct(product)} className="rounded-full font-body text-sm px-4 py-3 tap-scale" style={{ border: "1px solid rgba(255,255,255,0.3)", color: "#fff" }}>
-            View
-          </button>
-          <button onClick={handleAdd} disabled={!canAdd} className="flex-1 rounded-full font-body font-medium text-sm py-3 tap-scale flex items-center justify-center gap-2" style={{ background: canAdd ? "var(--coral)" : "rgba(255,255,255,0.15)", color: "#fff", opacity: canAdd ? 1 : 0.6 }}>
-            {added ? <><Check className="w-4 h-4" /> Added</> : outOfStock || !canAdd ? "Out of stock" : <><ShoppingCart className="w-4 h-4" /> Add to cart</>}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 /* A slow band of the things that actually close a sale here — delivery,
    cash on delivery, where the shop is. Sits between the hero and the
    products as a seam, so the two read as one page rather than two
@@ -3960,7 +3391,7 @@ function AppTeaser({ appExclusiveCount = 0 }) {
   );
 }
 
-function HomeView({ products, loading, goCatalog, goSale, openProduct, likes, toggleLike, storyRings, openStory, appExclusiveCount }) {
+function HomeView({ products, loading, goCatalog, goSale, openProduct, likes, toggleLike, appExclusiveCount }) {
   useEffect(() => {
     document.title = `${STORE_NAME} — Menswear from Saida, Lebanon`;
   }, []);
@@ -4168,7 +3599,6 @@ function HomeView({ products, loading, goCatalog, goSale, openProduct, likes, to
 
       <ValueMarquee />
 
-      {storyRings.length > 0 && <StoryRail rings={storyRings} onOpen={openStory} />}
 
       <section className="max-w-6xl mx-auto px-4 sm:px-6 py-10 section-lazy">
         <div className="grid grid-cols-2 lg:grid-cols-4 lg:grid-rows-2 gap-4">
@@ -4281,7 +3711,7 @@ function SpotlightCard({ product, onOpen }) {
   );
 }
 
-function NativeHomeView({ products, loading, error, onRetry, goCatalog, goSale, goExclusives, openProduct, likes, toggleLike, storyRings, openStory, goFavorites, onCart, cartCount }) {
+function NativeHomeView({ products, loading, error, onRetry, goCatalog, goSale, goExclusives, openProduct, likes, toggleLike, goFavorites, onCart, cartCount }) {
   useEffect(() => {
     document.title = `${STORE_NAME} — Menswear from Saida, Lebanon`;
   }, []);
@@ -4346,7 +3776,6 @@ function NativeHomeView({ products, loading, error, onRetry, goCatalog, goSale, 
         </div>
       </section>
 
-      {storyRings.length > 0 && <StoryRail rings={storyRings} onOpen={openStory} />}
 
       {/* بطاقة Spotlight — منتج واحد مميز بصورة حقيقية كبيرة */}
       {spotlight && !loading && (
@@ -4831,7 +4260,7 @@ const SHOE_SIZE_CHART = [
 function SizeGuideModal({ category, onClose }) {
   const isShoe = category === "shoes";
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-center" onClick={onClose}>
+    <div className="fixed inset-0 z-[80] flex items-end sm:items-center sm:justify-center" onClick={onClose}>
       <div className="absolute inset-0" style={{ background: "rgba(0,0,0,0.5)" }} />
       <div
         onClick={(e) => e.stopPropagation()}
@@ -4870,22 +4299,178 @@ function SizeGuideModal({ category, onClose }) {
   );
 }
 
+/* The size sheet. On a phone, "Add" on a product page no longer drops the
+   piece straight into the bag with whatever size happened to be selected:
+   it opens this sheet — the photo, the colours, big size buttons with what
+   is left in each, and an "Add to cart" that only lights up once a size is
+   chosen. Tapping it without a size shakes the sizes. Swipe it down, tap
+   outside or press Esc to close. */
+function SizeSheet({ product, color, onColor, size, onSize, qty, setQty, onAdd, onClose, onSizeGuide }) {
+  const [nudge, setNudge] = useState(0);
+  const [dragY, setDragY] = useState(0);
+  const drag = useRef(null);
+  const firstSize = useRef(null);
+  const available = size ? stockFor(product, color, size) : 0;
+  const canAdd = !!size && available > 0;
+  const photo = getImagesForColor(product, color)[0]?.url;
+
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    // keyboards land on the sizes, the choice that matters here
+    const t = setTimeout(() => firstSize.current && firstSize.current.focus({ preventScroll: true }), 80);
+    return () => { document.body.style.overflow = prev; window.removeEventListener("keydown", onKey); clearTimeout(t); };
+  }, []); // eslint-disable-line
+
+  const tryAdd = () => {
+    if (!canAdd) { setNudge((n) => n + 1); hapticLight(); return; }
+    onAdd();
+  };
+
+  // swipe down on the top of the sheet to close it
+  const onDown = (e) => { drag.current = { y: e.clientY, id: e.pointerId }; e.currentTarget.setPointerCapture?.(e.pointerId); };
+  const onMove = (e) => { if (drag.current) setDragY(Math.max(0, e.clientY - drag.current.y)); };
+  const onUp = () => { if (!drag.current) return; drag.current = null; if (dragY > 90) onClose(); else setDragY(0); };
+
+  let firstAssigned = false;
+  return (
+    <div className="fixed inset-0 z-[70] flex items-end justify-center" role="dialog" aria-modal="true" aria-label={`Choose your size — ${product.name}`}>
+      <div className="pick-backdrop absolute inset-0" onClick={onClose} />
+      <div
+        className="pick-sheet relative w-full sm:max-w-md rounded-t-[28px] px-5 pt-2"
+        style={{ paddingBottom: "calc(20px + env(safe-area-inset-bottom, 0px))", transform: dragY ? `translateY(${dragY}px)` : undefined, transition: drag.current ? "none" : "transform 0.25s ease" }}
+      >
+        <div className="flex justify-center pt-1 pb-3 cursor-grab touch-none" onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
+          <span style={{ width: 40, height: 5, borderRadius: 5, background: "var(--border)" }} />
+        </div>
+
+        <div className="flex items-center gap-3 mb-5">
+          {photo ? (
+            <img src={photo} alt="" className="rounded-2xl flex-shrink-0" style={{ width: 64, height: 80, objectFit: "cover", background: "var(--field-bg)" }} />
+          ) : (
+            <div className="rounded-2xl flex-shrink-0 flex items-center justify-center" style={{ width: 64, height: 80, background: "var(--field-bg)" }}><Shirt className="w-5 h-5 text-muted" /></div>
+          )}
+          <div className="flex-1 min-w-0">
+            <p className="font-display font-semibold text-base leading-tight truncate">{product.name}</p>
+            <p className="mt-1">
+              <span className={`font-num text-lg ${product.discount > 0 ? "text-coral" : ""}`}>{money(effectivePrice(product))}</span>
+              {product.discount > 0 && <span className="font-num text-sm text-muted line-through ml-2">{money(product.price)}</span>}
+            </p>
+          </div>
+          <button onClick={onClose} className="glass rounded-full p-2 tap-scale flex-shrink-0" aria-label="Close"><X className="w-4 h-4" /></button>
+        </div>
+
+        {product.colors.length > 1 && (
+          <div className="mb-5">
+            <p className="font-body text-sm mb-2">
+              <span className="text-muted">Colour</span> <span className="font-medium">{COLORS[color]?.label || color}</span>
+            </p>
+            <div className="flex gap-2.5 flex-wrap">
+              {product.colors.map((key) => {
+                const inStock = colorHasStock(product, key);
+                return (
+                  <button
+                    key={key}
+                    onClick={() => inStock && onColor(key)}
+                    disabled={!inStock}
+                    className="relative w-10 h-10 rounded-full border-2 tap-scale"
+                    style={{ borderColor: color === key ? "var(--coral)" : "transparent", boxShadow: "0 0 0 1px var(--border)", opacity: inStock ? 1 : 0.35 }}
+                    aria-label={`${COLORS[key]?.label || key}${inStock ? "" : " (out of stock)"}`}
+                    aria-pressed={color === key}
+                  >
+                    <span className="block w-full h-full rounded-full" style={{ background: swatchBackground(key) }} />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        <div className="flex items-baseline justify-between mb-2.5">
+          <p className="font-display font-bold text-xl">{size ? <>Size <span className="text-coral">{size}</span></> : "Pick your size"}</p>
+          <button onClick={onSizeGuide} className="font-body text-sm text-coral tap-scale">Size guide</button>
+        </div>
+        <div key={nudge} className={`grid grid-cols-4 gap-2 p-0.5 ${nudge ? "size-nudge" : ""}`} role="radiogroup" aria-label="Size">
+          {product.sizes.map((sz, i) => {
+            const left = stockFor(product, color, sz);
+            const inStock = left > 0;
+            const on = size === sz && inStock;
+            const low = product.tracked && inStock && left <= 3;
+            const ref = inStock && !firstAssigned ? (firstAssigned = true, firstSize) : undefined;
+            return (
+              <button
+                key={sz}
+                ref={ref}
+                role="radio"
+                aria-checked={on}
+                onClick={() => { if (inStock) { onSize(sz); setQty(1); hapticLight(); } }}
+                disabled={!inStock}
+                className={`pick-size tap-scale rounded-2xl flex flex-col items-center justify-center ${on ? "is-on" : ""}`}
+                style={{
+                  animationDelay: on ? "0s" : `${0.05 + i * 0.035}s`,
+                  height: 58,
+                  background: on ? "var(--fg)" : "var(--field-bg)",
+                  color: on ? "var(--bg)" : "var(--fg)",
+                  border: on ? "1px solid var(--fg)" : "1px solid var(--border)",
+                  opacity: inStock ? 1 : 0.38,
+                  cursor: inStock ? "pointer" : "not-allowed",
+                }}
+                aria-label={`${sz}${inStock ? (low ? `, ${left} left` : "") : ", out of stock"}`}
+              >
+                <span className="font-num text-lg leading-none" style={{ textDecoration: inStock ? "none" : "line-through" }}>{sz}</span>
+                {low && <span className="font-body leading-none mt-1" style={{ fontSize: 11, color: on ? "var(--bg)" : "var(--coral)", opacity: on ? 0.8 : 1 }}>{left} left</span>}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="flex items-center gap-3 mt-5">
+          {canAdd && available > 1 && (
+            <div className="glass flex items-center rounded-full flex-shrink-0">
+              <button onClick={() => setQty((q) => Math.max(1, q - 1))} className="p-3 tap-scale" aria-label="Decrease quantity"><Minus className="w-4 h-4" /></button>
+              <span className="font-num w-6 text-center">{qty}</span>
+              <button onClick={() => setQty((q) => Math.min(available, q + 1))} disabled={qty >= available} className="p-3 tap-scale" aria-label="Increase quantity"><Plus className="w-4 h-4" /></button>
+            </div>
+          )}
+          <button
+            onClick={tryAdd}
+            className="pick-cta glass-btn flex-1 rounded-full font-body font-medium py-4 tap-scale flex items-center justify-center gap-2"
+            style={canAdd ? { background: "var(--coral)", color: "#fff" } : { background: "var(--field-bg)", color: "var(--fg-muted)", border: "1px solid var(--border)" }}
+          >
+            {canAdd ? (<><ShoppingCart className="w-5 h-5" /> Add to cart · <span className="font-num">{money(effectivePrice(product) * qty)}</span></>) : "Pick a size to add"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ProductView({ product, products, addToCart, openProduct, liked, toggleLike }) {
-  const [size, setSize] = useState(product.sizes[0]);
+  // no size is chosen for the shopper (unless there's only one): picking it
+  // is a deliberate tap, so nobody ends up with the wrong size by accident
+  const [size, setSize] = useState(null);
   const [color, setColor] = useState(product.colors[0]);
   const [qty, setQty] = useState(1);
   const [added, setAdded] = useState(false);
   const [copied, setCopied] = useState(false);
   const [notifyState, setNotifyState] = useState("idle"); // idle | loading | done | unavailable
   const [showSizeGuide, setShowSizeGuide] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [sizeNudge, setSizeNudge] = useState(0);
+  const sizeRowRef = useRef(null);
 
   useEffect(() => {
-    // Start on a colour/size that's actually in stock where possible.
+    // Start on a colour that's actually in stock where possible; the size
+    // is the shopper's to pick (pre-chosen only when there is just one).
     const firstColor = product.colors.find((c) => colorHasStock(product, c)) || product.colors[0];
     setColor(firstColor);
-    setSize(product.sizes.find((s) => stockFor(product, firstColor, s) > 0) || product.sizes[0]);
+    const inStockSizes = product.sizes.filter((s) => stockFor(product, firstColor, s) > 0);
+    setSize(product.sizes.length === 1 && inStockSizes.length === 1 ? inStockSizes[0] : null);
     setQty(1);
     setAdded(false);
+    setSheetOpen(false);
     addRecentlyViewed(product.id);
   }, [product.id]); // eslint-disable-line
 
@@ -4896,17 +4481,15 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
   const related = products.filter((p) => p.category === product.category && p.id !== product.id).slice(0, 3);
   const productUrl = `${SITE_URL}/product/${product.slug}`;
 
-  const available = stockFor(product, color, size);
+  const available = size ? stockFor(product, color, size) : 0;
   const outOfStock = product.soldOut || !productHasStock(product);
-  const canAdd = !outOfStock && available > 0;
+  const canAdd = !outOfStock && !!size && available > 0;
 
-  // Switching colour: if the current size isn't available in it, move to one that is.
+  // Switching colour: if the chosen size isn't available in it, the size
+  // is cleared rather than silently swapped for another one.
   const pickColor = (key) => {
     setColor(key);
-    if (stockFor(product, key, size) <= 0) {
-      const firstAvailable = product.sizes.find((s) => stockFor(product, key, s) > 0);
-      if (firstAvailable) setSize(firstAvailable);
-    }
+    if (size && stockFor(product, key, size) <= 0) setSize(null);
     setQty(1);
   };
 
@@ -4915,6 +4498,20 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
     addToCart(product, size, color, COLORS[color]?.label || color, qty);
     setAdded(true);
     setTimeout(() => setAdded(false), 1800);
+  };
+
+  // "Add" without a size, on a bigger screen: bring the sizes into view and
+  // give them a small shake
+  const nudgeSizes = () => {
+    setSizeNudge((n) => n + 1);
+    hapticLight();
+    sizeRowRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+
+  // the sheet's "Add to cart": close it, then add (the cart slides open)
+  const addFromSheet = () => {
+    setSheetOpen(false);
+    setTimeout(handleAdd, 180);
   };
 
   const handleNotifyRestock = async () => {
@@ -4996,12 +4593,12 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
             <ColorPicker product={product} color={color} onPick={pickColor} />
           </div>
 
-          <div className="mb-8">
+          <div className="mb-8" ref={sizeRowRef}>
             <div className="flex items-center justify-between mb-2">
-              <p className="font-body text-sm font-medium">Size</p>
+              <p className="font-body text-sm font-medium">{size ? <>Size <span className="text-coral">{size}</span></> : "Pick your size"}</p>
               <button onClick={() => setShowSizeGuide(true)} className="font-body text-xs text-coral hover:underline">Size guide</button>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div key={sizeNudge} className={`flex flex-wrap gap-2 p-0.5 ${sizeNudge ? "size-nudge" : ""}`}>
               {product.sizes.map((sz) => {
                 const left = stockFor(product, color, sz);
                 const inStock = left > 0;
@@ -5029,7 +4626,7 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
                 );
               })}
             </div>
-            {product.tracked && available > 0 && available <= 3 && (
+            {size && product.tracked && available > 0 && available <= 3 && (
               <p className="font-body text-xs text-coral mt-2">Only {available} left in this size</p>
             )}
           </div>
@@ -5056,6 +4653,10 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
                   Sold out
                 </button>
               )
+            ) : !size ? (
+              <button onClick={nudgeSizes} className="w-full rounded-full font-body font-medium py-3 flex items-center justify-center gap-2 tap-scale" style={{ background: "var(--glass-bg)", border: "1px solid var(--glass-border)", color: "var(--fg)" }}>
+                Pick a size to add
+              </button>
             ) : !canAdd ? (
               <button disabled className="w-full rounded-full font-body font-medium py-3 flex items-center justify-center gap-2 cursor-not-allowed" style={{ background: "var(--glass-bg)", border: "1px solid var(--glass-border)", color: "var(--fg-muted)" }}>
                 This size is out of stock
@@ -5142,7 +4743,7 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
       >
         <div className="glass rounded-2xl px-4 py-3 flex items-center gap-3 dock-in">
           <div className="flex-1 min-w-0">
-            <p className="font-body text-xs text-muted truncate">{product.name}</p>
+            <p className="font-body text-xs text-muted truncate">{product.name}{size && !outOfStock ? ` · ${size}` : ""}</p>
             <p className="font-num text-base">{outOfStock ? "Sold out" : money(effectivePrice(product))}</p>
           </div>
           {outOfStock && isNativeApp ? (
@@ -5155,19 +4756,33 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
               {notifyState === "done" ? <Check className="w-4 h-4" /> : <Bell className="w-4 h-4" />}
               {notifyState === "done" ? "Notified" : notifyState === "loading" ? "..." : "Notify me"}
             </button>
-          ) : !canAdd ? (
+          ) : outOfStock ? (
             <button disabled className="rounded-full font-body font-medium px-5 py-2.5 flex items-center gap-2 flex-shrink-0 cursor-not-allowed" style={{ border: "1px solid var(--glass-border)", color: "var(--fg-muted)" }}>
-              {outOfStock ? "Sold out" : "Out of stock"}
+              Sold out
             </button>
           ) : (
-            <button onClick={handleAdd} className="glass-btn rounded-full font-body font-medium px-5 py-2.5 tap-scale flex items-center gap-2 flex-shrink-0" style={{ background: "var(--coral)", color: "#fff" }}>
+            <button onClick={() => setSheetOpen(true)} className="pick-open glass-btn rounded-full font-body font-medium px-5 py-2.5 tap-scale flex items-center gap-2 flex-shrink-0" style={{ background: "var(--coral)", color: "#fff" }}>
               {added ? <Check className="w-4 h-4" /> : <ShoppingCart className="w-4 h-4" />}
-              {added ? "Added" : "Add"}
+              {added ? "Added" : size ? "Add to cart" : "Choose size"}
             </button>
           )}
         </div>
       </div>
 
+      {sheetOpen && (
+        <SizeSheet
+          product={product}
+          color={color}
+          onColor={pickColor}
+          size={size}
+          onSize={setSize}
+          qty={qty}
+          setQty={setQty}
+          onAdd={addFromSheet}
+          onClose={() => setSheetOpen(false)}
+          onSizeGuide={() => setShowSizeGuide(true)}
+        />
+      )}
       {showSizeGuide && <SizeGuideModal category={product.category} onClose={() => setShowSizeGuide(false)} />}
     </div>
   );
@@ -5930,12 +5545,11 @@ function Footer({ goCatalog, goSale }) {
   );
 }
 
-/* Shared with the homepage lab (src/home/HomeLab.jsx), so it reuses the
-   shop's own product card, story rail and data helpers instead of copies. */
+/* Shared with the homepage (src/home/HomeLab.jsx), so it reuses the shop's
+   own product card and data helpers instead of copies. */
 export {
   useApp,
   ProductCard,
-  StoryRail,
   ScrollProgress,
   AppTeaser,
   CATEGORIES,

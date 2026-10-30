@@ -115,25 +115,6 @@ export function foldTexture() {
   return tex(c);
 }
 
-/* Fabric grain for hanging garments — barely there, it just stops large
-   coats from looking like painted plastic. */
-export function fabricTexture() {
-  const [c, g] = canvas(128, 128);
-  const r = rng(5);
-  g.fillStyle = "#ededed";
-  g.fillRect(0, 0, 128, 128);
-  for (let i = 0; i < 1600; i++) {
-    g.fillStyle = `rgba(0,0,0,${r() * 0.05})`;
-    g.fillRect(r() * 128, r() * 128, 1, 2 + r() * 3);
-  }
-  const grd = g.createLinearGradient(0, 0, 0, 128);
-  grd.addColorStop(0, "rgba(255,255,255,0.25)");
-  grd.addColorStop(1, "rgba(0,0,0,0.12)");
-  g.fillStyle = grd;
-  g.fillRect(0, 0, 128, 128);
-  return tex(c, { repeat: [1, 1] });
-}
-
 /* Radial glow: bulbs, lamp heads, light pools. White, so the material
    colour tints it. */
 export function glowTexture(size = 128, falloff = 2.2) {
@@ -208,65 +189,6 @@ export function logoCanvasTexture({ width = 1024, color = "#ffffff", blur = 0, p
   return t;
 }
 
-/* Neon script for the back wall. A white-hot core inside a coloured halo,
-   drawn once; the scene only fades its opacity. */
-export function neonTexture(text, color = "#FF4522") {
-  const W = 1024, H = 320;
-  const [c, g] = canvas(W, H);
-  g.textAlign = "center";
-  g.textBaseline = "middle";
-  const font = `600 ${text.length > 7 ? 150 : 190}px "Space Grotesk", system-ui, sans-serif`;
-  g.font = font;
-  g.shadowColor = color;
-  for (const [blur, alpha] of [[60, 0.55], [28, 0.8], [10, 1]]) {
-    g.shadowBlur = blur;
-    g.globalAlpha = alpha;
-    g.fillStyle = color;
-    g.fillText(text, W / 2, H / 2);
-  }
-  g.globalAlpha = 1;
-  g.shadowBlur = 6;
-  g.shadowColor = "#fff";
-  g.lineWidth = 7;
-  g.strokeStyle = "#fff4ec";
-  g.strokeText(text, W / 2, H / 2);
-  const t = tex(c, { srgb: true, mips: false });
-  t.userData = { aspect: W / H };
-  return t;
-}
-
-/* Small printed card: the category plaques on the shelves. */
-export function plaqueTexture(text, { bg = "#151518", fg = "#f2f2f4" } = {}) {
-  const W = 512, H = 128;
-  const [c, g] = canvas(W, H);
-  g.fillStyle = bg;
-  g.fillRect(0, 0, W, H);
-  g.fillStyle = fg;
-  g.font = `600 62px "Space Grotesk", system-ui, sans-serif`;
-  g.textAlign = "center";
-  g.textBaseline = "middle";
-  g.fillText(text, W / 2, H / 2 + 2);
-  const t = tex(c, { mips: true });
-  t.userData = { aspect: W / H };
-  return t;
-}
-
-/* Black slatted back wall with the vertical light strips from the photos. */
-export function slatTexture() {
-  const [c, g] = canvas(256, 256);
-  g.fillStyle = "#121215";
-  g.fillRect(0, 0, 256, 256);
-  for (let x = 0; x < 256; x += 16) {
-    const grd = g.createLinearGradient(x, 0, x + 16, 0);
-    grd.addColorStop(0, "#1d1d21");
-    grd.addColorStop(0.5, "#16161a");
-    grd.addColorStop(1, "#0b0b0d");
-    g.fillStyle = grd;
-    g.fillRect(x, 0, 14, 256);
-  }
-  return tex(c, { repeat: [6, 1] });
-}
-
 /* The textured white plaster of the entrance pillar. */
 export function plasterTexture() {
   const [c, g] = canvas(256, 256);
@@ -296,9 +218,9 @@ export function shutterTexture() {
 }
 
 /* ------------------------------------------------------------------
-   The real-shop look (buildStoreV2): textures for what's actually in
-   the Kanaan shop — denim twill, sock packs, the "Your Happy Place"
-   neon, the striped curtain over the back door, soft corner shading.
+   What's actually in the Kanaan shop — denim twill, sock packs, the
+   "Your Happy Place" neon, the striped curtain over the back door, soft
+   corner shading.
    ------------------------------------------------------------------ */
 
 /* Denim twill, grey so each pile's own wash tints it: fine diagonal

@@ -1,13 +1,17 @@
 /* ============================================================
    THE HOMEPAGE — the Kanaan shop in Saida, in 3D
    ------------------------------------------------------------
-   The website's homepage ("/", chosen by the owner on 29 Oct 2026: walk).
+   The website's homepage ("/", chosen by the owner on 29 Oct 2026: walk;
+   on 30 Oct the realistic drawing walked by section went live).
    /lab still shows all three directions with a switch, for comparing
    (not indexed, not linked).
 
      walk      Scroll walks you into the shop: storefront, through the
-               door, past the new-in wall, the racks, the sale neon, to
-               the counter. The 3D store is the spine of the page.
+               door, then section by section — knitwear, hoodies, jackets &
+               coats, pants & jeans, shoes — to the counter. A bar of the
+               sections lets anyone jump straight to one. The pieces hang
+               on paper tags in the shop itself. The 3D store is the spine
+               of the page.
      facade    Just the storefront in 3D at the top, then a calm page.
      lite      No 3D engine at all: a still of the storefront, the same
                calm page. This is also what any weak or reduced-motion
@@ -22,7 +26,6 @@ import { ArrowDown, MapPin, MessageCircle, RotateCcw, ShieldCheck, Truck } from 
 import {
   useApp,
   ProductCard,
-  StoryRail,
   ScrollProgress,
   AppTeaser,
   CATEGORIES,
@@ -41,42 +44,31 @@ const StoreStage = React.lazy(() => import("../store3d/StoreStage.jsx"));
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
-/* Where along the walk each block of text belongs (0 = on the pavement,
-   1 = at the counter) and which side of the screen it sits on — always the
-   side the camera ISN'T looking at, so text never covers the products. */
-// Each window sits around its camera stop (KanaanStore's walk keys), with
-// a gap of at least two fades between neighbours, so on a phone — where
-// every block sits at the bottom — two never show at once.
-const STATIONS = [
-  { id: "hero", from: 0, to: 0.06 },
-  { id: "new", from: 0.26, to: 0.45 },
-  { id: "shelves", from: 0.52, to: 0.6 },
-  { id: "pants", from: 0.67, to: 0.74 },
-  { id: "sale", from: 0.81, to: 0.87 },
-  { id: "desk", from: 0.94, to: 1.2 },
-];
 const FADE = 0.035;
-const PANTS = ["jeans", "pants"];
 
-/* The second drawing (/lab, look v2) walks by the shop's own sections, in
-   the order you meet them in the real shop. Each has a name the site can
-   adopt as a category, the words for its stop, where along the walk it is
-   (at: where the section bar jumps to) and which side its words sit
-   (the side the camera isn't looking at).
+/* The walk goes by the shop's own sections, in the order you meet them in
+   the real shop. Each has a name the site can adopt as a category, the
+   words for its stop, where along the walk it is (at: where the section bar
+   jumps to) and which side its words sit — always the side the camera
+   ISN'T looking at, so the words never cover the stock.
    A section collects the site's categories whose id or name matches it
    (the owner adds categories in Kanaan POS); pieces in no matching
    category are placed by their name. A section with nothing online yet
    still shows — it's on the rails in Saida — with a WhatsApp question. */
 const SECTIONS = [
   { id: "knit", label: "Knitwear", title: "Knitwear", ask: "knitwear", at: 0.315, side: "end", re: /knit|sweater|pullover|jumper|cardigan|turtle ?neck|كنز/i },
-  { id: "hoodies", label: "Hoodies", title: "Hoodies", ask: "hoodies", at: 0.45, side: "end", re: /hood|sweatshirt|هود/i },
+  { id: "hoodies", label: "Hoodies", title: "Hoodies", ask: "hoodies", at: 0.45, side: "start", re: /hood|sweatshirt|هود/i },
   { id: "jackets", label: "Jackets", title: "Jackets & coats", ask: "jackets and coats", at: 0.58, side: "start", re: /jacket|coat|puffer|parka|bomber|blazer|gilet|overshirt|جاك/i },
   { id: "pants", label: "Pants", title: "Pants & jeans", ask: "pants and jeans", at: 0.71, side: "end", re: /jean|pant|trouser|chino|cargo|jogger|denim|بنطل|بناطل/i },
-  { id: "shoes", label: "Shoes", title: "Shoes", ask: "shoes", at: 0.84, side: "end", re: /shoe|sneaker|boot|loafer|slipper|sandal|صباب|حذ/i },
+  { id: "shoes", label: "Shoes", title: "Shoes", ask: "shoes", at: 0.84, side: "end", re: /shoe|sneaker|\bboots?\b|loafer|slipper|sandal|صباب|حذ/i },
 ];
 // which section claims a category or a name first: the most specific
 // words first ("denim jacket" is a jacket, not pants)
 const CLAIM_ORDER = ["jackets", "hoodies", "knit", "shoes", "pants"];
+// Where along the walk each block of words shows (0 = on the pavement, 1 =
+// at the counter). Each window sits around its camera stop (KanaanStore's
+// walk keys), with a gap of at least two fades between neighbours, so on a
+// phone — where every block sits at the bottom — two never show at once.
 const SECTION_STATIONS = [
   { id: "hero", from: 0, to: 0.06 },
   { id: "knit", from: 0.27, to: 0.35 },
@@ -172,7 +164,7 @@ function useIsTall() {
   return tall;
 }
 
-export default function HomeLab({ home = false, products, loading, goCatalog, goSale, openProduct, likes, toggleLike, storyRings, openStory, appExclusiveCount = 0 }) {
+export default function HomeLab({ home = false, products, loading, goCatalog, goSale, openProduct, likes, toggleLike, appExclusiveCount = 0 }) {
   const { theme } = useApp();
   const tall = useIsTall();
   // ?tier=high|mid|static lets the owner (and our tests) see a given
@@ -187,17 +179,10 @@ export default function HomeLab({ home = false, products, loading, goCatalog, go
   const forced = useMemo(() => {
     try { return new URLSearchParams(window.location.search).get("v"); } catch { return null; }
   }, []);
-  const forcedLook = useMemo(() => {
-    try { return new URLSearchParams(window.location.search).get("look"); } catch { return null; }
-  }, []);
   // the homepage is always the walk; only /lab can switch
   const [variant, setVariant] = useState(() => (!home && (forced === "facade" || forced === "lite") ? forced : "walk"));
   const canDo3D = tier === "high" || tier === "mid";
   const mode = canDo3D ? variant : "lite";
-  // which drawing of the shop: the homepage keeps the first one until the
-  // owner approves the second, which /lab shows (?look=v1 brings the first
-  // back there, to compare)
-  const look = home ? "v1" : forcedLook === "v1" ? "v1" : "v2";
 
   useEffect(() => {
     document.title = `${STORE_NAME} — Menswear from Saida, Lebanon`;
@@ -212,30 +197,9 @@ export default function HomeLab({ home = false, products, loading, goCatalog, go
   }, [variant, home]);
 
   const featured = useMemo(() => pickFeatured(products), [products]);
-  const pantsPicks = useMemo(() => products.filter((p) => PANTS.includes(p.category) && firstImage(p)).slice(0, 4), [products]);
   const onSale = useMemo(() => products.filter(isOnSale), [products]);
   const saleCount = onSale.length;
   const maxDiscount = saleCount ? Math.max(...onSale.map((p) => p.discount)) : 0;
-
-  // lightboxes in the 3D shop: the same new-in pieces, then anything else
-  // with a photo, so all thirteen frames are filled when there's stock
-  const stagePieces = useMemo(() => {
-    const seen = new Set();
-    const list = [];
-    for (const p of [...featured, ...products]) {
-      if (seen.has(p.id)) continue;
-      const image = firstImage(p);
-      if (!image) continue;
-      seen.add(p.id);
-      list.push({ id: p.id, name: p.name, image, product: p });
-      if (list.length >= 13) break;
-    }
-    // and the denim corner gets jeans and pants of its own
-    for (const p of pantsPicks.slice(0, 3)) {
-      list.push({ id: `${p.id}-denim`, name: p.name, image: firstImage(p), product: p, group: "pants" });
-    }
-    return list;
-  }, [featured, products, pantsPicks]);
 
   const counts = useMemo(() => {
     const m = {};
@@ -243,17 +207,6 @@ export default function HomeLab({ home = false, products, loading, goCatalog, go
     return m;
   }, [products]);
   const sections = useMemo(() => sortIntoSections(products, counts), [products, counts]);
-  // the second drawing's frames belong to sections: give each section a
-  // couple of its own pieces (the rest of the frames take the general list)
-  const sectionPieces = useMemo(() => {
-    const list = stagePieces.filter((x) => !x.group);
-    for (const sec of SECTIONS) {
-      for (const p of sections[sec.id].items.filter((x) => firstImage(x)).slice(0, 2)) {
-        list.push({ id: `${p.id}-${sec.id}`, name: p.name, image: firstImage(p), product: p, group: sec.id });
-      }
-    }
-    return list;
-  }, [stagePieces, sections]);
 
   return (
     // lab-is-*, not lab-walk etc.: those name the tall scroll sections, and
@@ -262,12 +215,11 @@ export default function HomeLab({ home = false, products, loading, goCatalog, go
     <div className={`lab lab-is-${mode}`}>
       <LabStyles />
       {home && <ScrollProgress />}
-      {mode === "walk" && look === "v2" && (
+      {mode === "walk" && (
         <SectionWalk
           theme={theme}
           tall={tall}
           tier={tier}
-          stagePieces={sectionPieces}
           sections={sections}
           counts={counts}
           saleCount={saleCount}
@@ -277,28 +229,10 @@ export default function HomeLab({ home = false, products, loading, goCatalog, go
           openProduct={openProduct}
         />
       )}
-      {mode === "walk" && look !== "v2" && (
-        <WalkHero
-          theme={theme}
-          tall={tall}
-          tier={tier}
-          look={look}
-          stagePieces={stagePieces}
-          featured={featured}
-          pantsPicks={pantsPicks}
-          counts={counts}
-          saleCount={saleCount}
-          maxDiscount={maxDiscount}
-          goCatalog={goCatalog}
-          goSale={goSale}
-          openProduct={openProduct}
-        />
-      )}
-      {mode === "facade" && <FacadeHero theme={theme} tall={tall} tier={tier} look={look} stagePieces={stagePieces} goCatalog={goCatalog} openProduct={openProduct} />}
+      {mode === "facade" && <FacadeHero theme={theme} tall={tall} tier={tier} goCatalog={goCatalog} openProduct={openProduct} />}
       {mode === "lite" && <LiteHero theme={theme} tall={tall} goCatalog={goCatalog} />}
 
       <div id="lab-shop" className="lab-page">
-        {storyRings.length > 0 && <StoryRail rings={storyRings} onOpen={openStory} />}
         <NewIn featured={featured} loading={loading} goCatalog={goCatalog} openProduct={openProduct} likes={likes} toggleLike={toggleLike} />
         <Shelves products={products} counts={counts} goCatalog={goCatalog} />
         {saleCount > 0 && <SaleBand count={saleCount} maxDiscount={maxDiscount} goSale={goSale} />}
@@ -316,9 +250,8 @@ export default function HomeLab({ home = false, products, loading, goCatalog, go
    The 3D stage plus the still behind it. The still is shown first; when the
    live scene has drawn its first frame it fades in on top.
    ------------------------------------------------------------------ */
-function Stage({ mode, theme, tall, tier, look = "v1", stagePieces, showcase, neon, safe, onStore, openProduct }) {
+function Stage({ mode, theme, tall, tier, tags, safe, onStore, openProduct }) {
   const [ready, setReady] = useState(false);
-  const pieces = stagePieces;
   const onSelect = useCallback((piece) => piece && piece.product && openProduct(piece.product), [openProduct]);
   return (
     <div className="lab-stage" aria-hidden="true">
@@ -328,10 +261,7 @@ function Stage({ mode, theme, tall, tier, look = "v1", stagePieces, showcase, ne
           mode={mode}
           theme={theme}
           tier={tier}
-          look={look}
-          products={pieces}
-          showcase={showcase}
-          neon={neon}
+          tags={tags}
           safeLeft={safe ? safe.left : 0}
           safeBottom={safe ? safe.bottom : 0}
           onSelect={onSelect}
@@ -427,182 +357,11 @@ function useSectionProgress(ref, onProgress) {
   }, [ref, onProgress]);
 }
 
-function WalkHero({ theme, tall, tier, look, stagePieces, featured, pantsPicks, counts, saleCount, maxDiscount, goCatalog, goSale, openProduct }) {
-  const sectionRef = useRef(null);
-  const storeRef = useRef(null);
-  const stationRefs = useRef({});
-  const railRef = useRef(null);
-  const heroCardRef = useRef(null);
-  const safe = useSafeArea(heroCardRef);
-  const lastP = useRef(0);
-
-  const apply = useCallback((p) => {
-    lastP.current = p;
-    if (storeRef.current) storeRef.current.setProgress(p);
-    for (const st of STATIONS) {
-      const el = stationRefs.current[st.id];
-      if (!el) continue;
-      const v = stationLevel(st, p);
-      el.style.opacity = String(v);
-      el.style.transform = `translate3d(0, ${(1 - v) * 18}px, 0)`;
-      const hidden = v < 0.05;
-      el.style.visibility = hidden ? "hidden" : "visible";
-      el.toggleAttribute("inert", v < 0.6);
-    }
-    if (railRef.current) railRef.current.style.setProperty("--p", String(p));
-  }, []);
-  useSectionProgress(sectionRef, apply);
-
-  const onStore = useCallback((s) => {
-    storeRef.current = s;
-    if (s) s.setProgress(lastP.current);
-  }, []);
-
-  const jumpTo = (p) => {
-    const el = sectionRef.current;
-    if (!el) return;
-    const top = el.getBoundingClientRect().top + window.scrollY;
-    const stage = el.querySelector(".lab-sticky");
-    const total = el.offsetHeight - (stage ? stage.offsetHeight : window.innerHeight);
-    window.scrollTo({ top: top + total * p, behavior: "smooth" });
-  };
-
-  const newList = featured.slice(0, 4);
-  const shelfCats = CATEGORIES.filter((c) => counts[c.id] && !PANTS.includes(c.id)).slice(0, 8);
-  const pantsCats = CATEGORIES.filter((c) => counts[c.id] && PANTS.includes(c.id));
-  const picks = (list) => (
-    <ul className="lab-picks">
-      {list.map((p) => (
-        <li key={p.id}>
-          <button onClick={() => openProduct(p)} className="lab-pick tap-scale" aria-label={p.name}>
-            {firstImage(p) ? <img src={firstImage(p)} alt="" loading="lazy" decoding="async" /> : <span className="lab-pick-ph" />}
-            <span className="lab-pick-name">{p.name}</span>
-            <span className="lab-pick-price font-num">{money(effectivePrice(p))}</span>
-          </button>
-        </li>
-      ))}
-    </ul>
-  );
-  const chips = (cats) => (
-    <div className="lab-chips">
-      {cats.map((c) => (
-        <button key={c.id} onClick={() => goCatalog(c.id)} className="glass rounded-full font-body text-sm px-4 py-2 tap-scale">
-          {c.label} <span className="text-muted font-num">{counts[c.id]}</span>
-        </button>
-      ))}
-    </div>
-  );
-  const reg = (id) => (el) => { stationRefs.current[id] = el; };
-
-  return (
-    <section ref={sectionRef} className="lab-walk" aria-label="Kanaan Shop">
-      <div className="lab-sticky">
-        <Stage mode="walk" theme={theme} tall={tall} tier={tier} look={look} stagePieces={stagePieces} neon={saleCount > 0 ? "sale" : "new in"} safe={safe} onStore={onStore} openProduct={openProduct} />
-
-        <div ref={reg("hero")} className="lab-station lab-side-start lab-hero-station">
-          <div className="lab-scrim" />
-          <div ref={heroCardRef} className="lab-card">
-            <h1 className="lab-display">Everyday wear, refined.</h1>
-            <p className="lab-lede lab-sub">Our shop in Saida, in 3D. Scroll to walk in.</p>
-            <div className="lab-actions">
-              <button onClick={() => goCatalog("all")} className="glass glass-btn rounded-full font-body font-medium px-6 py-3 tap-scale lab-primary">Shop the collection</button>
-              <button onClick={() => jumpTo(0.33)} className="glass rounded-full font-body px-5 py-3 tap-scale inline-flex items-center gap-2">
-                <ArrowDown className="w-4 h-4" /> Walk in
-              </button>
-            </div>
-            <a href="#lab-shop" className="lab-skip">Skip to new arrivals</a>
-          </div>
-        </div>
-
-        <div ref={reg("new")} className="lab-station lab-side-end">
-          <div className="lab-scrim" />
-          <div className="lab-card">
-            <h2 className="lab-title">New this winter</h2>
-            {newList.length > 0 ? picks(newList) : <p className="lab-lede">New pieces are on their way to the wall.</p>}
-            <button onClick={() => goCatalog("all")} className="lab-link">See everything new</button>
-          </div>
-        </div>
-
-        <div ref={reg("shelves")} className="lab-station lab-side-start">
-          <div className="lab-scrim" />
-          <div className="lab-card">
-            <h2 className="lab-title">Find your rack</h2>
-            {chips(shelfCats)}
-          </div>
-        </div>
-
-        <div ref={reg("pants")} className="lab-station lab-side-end">
-          <div className="lab-scrim" />
-          <div className="lab-card">
-            <h2 className="lab-title">Jeans & pants</h2>
-            {pantsPicks.length > 0 && picks(pantsPicks)}
-            {pantsCats.length > 0 ? chips(pantsCats) : <p className="lab-lede">New jeans and pants are on their way.</p>}
-          </div>
-        </div>
-
-        <div ref={reg("sale")} className="lab-station lab-side-start">
-          <div className="lab-scrim" />
-          <div className="lab-card">
-            {saleCount > 0 ? (
-              <>
-                <h2 className="lab-title">Up to {maxDiscount}% off</h2>
-                <div className="lab-actions">
-                  <button onClick={goSale} className="glass glass-btn rounded-full font-body font-medium px-6 py-3 tap-scale lab-primary">Shop the sale</button>
-                </div>
-              </>
-            ) : (
-              <>
-                <h2 className="lab-title">Fresh every week</h2>
-                <div className="lab-actions">
-                  <button onClick={() => goCatalog("all")} className="glass glass-btn rounded-full font-body font-medium px-6 py-3 tap-scale lab-primary">Shop new in</button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-
-        <div ref={reg("desk")} className={`lab-station ${look === "v2" ? "lab-side-end" : "lab-side-start"}`}>
-          <div className="lab-scrim" />
-          <div className="lab-card">
-            <h2 className="lab-title">Order here, pay at your door</h2>
-            <ul className="lab-promises">
-              <li><Truck className="w-4 h-4" /> All of Lebanon</li>
-              <li><ShieldCheck className="w-4 h-4" /> Cash on delivery</li>
-              <li><RotateCcw className="w-4 h-4" /> 3-day returns</li>
-            </ul>
-            <div className="lab-actions">
-              <button onClick={() => goCatalog("all")} className="glass glass-btn rounded-full font-body font-medium px-6 py-3 tap-scale lab-primary">Start shopping</button>
-              <a href={`https://wa.me/${WHATSAPP_NUMBER}`} target="_blank" rel="noopener noreferrer" className="glass rounded-full font-body px-5 py-3 tap-scale inline-flex items-center gap-2">
-                <MessageCircle className="w-4 h-4" /> WhatsApp
-              </a>
-            </div>
-          </div>
-        </div>
-
-        <nav ref={railRef} className="lab-rail" aria-label="Walk through the shop">
-          {[
-            ["Outside", 0],
-            ["New in", 0.36],
-            ["Racks", 0.565],
-            ["Jeans", 0.705],
-            ["Sale", 0.84],
-            ["Counter", 1],
-          ].map(([label, p]) => (
-            <button key={label} onClick={() => jumpTo(p)} style={{ "--at": p }}>
-              <span>{label}</span>
-            </button>
-          ))}
-        </nav>
-      </div>
-    </section>
-  );
-}
-
-/* The walk by section (the second drawing). Same machinery as WalkHero —
-   the scroll drives the camera, one stop's words at a time — plus a bar of
-   the shop's sections at the top: tap one and the walk carries you there,
-   so nobody has to scroll through the whole shop to reach the shoes. */
-function SectionWalk({ theme, tall, tier, stagePieces, sections, counts, saleCount, maxDiscount, goCatalog, goSale, openProduct }) {
+/* The walk, section by section. The scroll drives the camera, one stop's
+   words at a time, and a bar of the shop's sections sits at the top: tap
+   one and the walk carries you there, so nobody has to scroll through the
+   whole shop to reach the shoes. */
+function SectionWalk({ theme, tall, tier, sections, counts, saleCount, maxDiscount, goCatalog, goSale, openProduct }) {
   const sectionRef = useRef(null);
   const storeRef = useRef(null);
   const stationRefs = useRef({});
@@ -683,12 +442,13 @@ function SectionWalk({ theme, tall, tier, stagePieces, sections, counts, saleCou
     </div>
   );
   const ask = (sec) => `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(`Hi Kanaan! What ${sec.ask} do you have in my size?`)}`;
-  // each section's pieces, for the 3D: they come out of their own shelf
-  // when the walk stops there (store3d/showcase.js)
-  const showcase = useMemo(() => SECTIONS.map((sec) => {
+  // each section's pieces, for the 3D: they hang on paper swing tags in
+  // that part of the shop (store3d/hangtags.js)
+  const tags = useMemo(() => SECTIONS.map((sec) => {
     const st = SECTION_STATIONS.find((x) => x.id === sec.id);
     const items = sections[sec.id].items.filter((p) => firstImage(p)).slice(0, 4).map((p) => ({
       id: p.id,
+      name: p.name,
       image: firstImage(p),
       product: p,
       price: money(effectivePrice(p)),
@@ -701,7 +461,7 @@ function SectionWalk({ theme, tall, tier, stagePieces, sections, counts, saleCou
   return (
     <section ref={sectionRef} className="lab-walk" aria-label="Kanaan Shop">
       <div className="lab-sticky">
-        <Stage mode="walk" theme={theme} tall={tall} tier={tier} look="v2" stagePieces={stagePieces} showcase={showcase} safe={safe} onStore={onStore} openProduct={openProduct} />
+        <Stage mode="walk" theme={theme} tall={tall} tier={tier} tags={tags} safe={safe} onStore={onStore} openProduct={openProduct} />
 
         <nav ref={barRef} className="lab-aisles glass" aria-label="Sections of the shop">
           {SECTIONS.map((sec) => (
@@ -732,8 +492,8 @@ function SectionWalk({ theme, tall, tier, stagePieces, sections, counts, saleCou
               <div className="lab-scrim" />
               <div className="lab-card">
                 <h2 className="lab-title">{sec.title}</h2>
-                {shown.length > 0 && <p className="lab-lede lab-hint">Tap a piece to see it.</p>}
-                {/* the pieces themselves float in the 3D; this list is for
+                {shown.length > 0 && <p className="lab-lede lab-hint">Tap a tag to see the piece.</p>}
+                {/* the pieces hang on tags in the 3D; this list is for
                     keyboards and screen readers, and shows itself when a
                     keyboard reaches it */}
                 {shown.length > 0 && <div className="lab-sr">{picks(shown)}</div>}
@@ -776,7 +536,7 @@ function SectionWalk({ theme, tall, tier, stagePieces, sections, counts, saleCou
   );
 }
 
-function FacadeHero({ theme, tall, tier, look, stagePieces, goCatalog, openProduct }) {
+function FacadeHero({ theme, tall, tier, goCatalog, openProduct }) {
   const sectionRef = useRef(null);
   const storeRef = useRef(null);
   const textRef = useRef(null);
@@ -800,7 +560,7 @@ function FacadeHero({ theme, tall, tier, look, stagePieces, goCatalog, openProdu
   return (
     <section ref={sectionRef} className="lab-facade" aria-label="Kanaan Shop">
       <div className="lab-sticky">
-        <Stage mode="facade" theme={theme} tall={tall} tier={tier} look={look} stagePieces={stagePieces} safe={safe} onStore={onStore} openProduct={openProduct} />
+        <Stage mode="facade" theme={theme} tall={tall} tier={tier} safe={safe} onStore={onStore} openProduct={openProduct} />
         <div ref={textRef} className="lab-station lab-side-start lab-hero-station" style={{ opacity: 1, visibility: "visible" }}>
           <div className="lab-scrim" />
           <div ref={cardRef} className="lab-card">
@@ -1062,18 +822,6 @@ const LAB_CSS = String.raw`
   .lab-chips > * { flex: 0 0 auto; }
 }
 .lab-promises svg { color: var(--teal); }
-
-/* where you are in the shop — desktop only */
-.lab-rail { display: none; }
-@media (min-width: 1024px) {
-  .lab-rail { display: flex; position: absolute; right: 28px; top: 50%; transform: translateY(-50%); flex-direction: column; gap: 18px; z-index: 2; }
-  .lab-rail button { position: relative; display: flex; align-items: center; justify-content: flex-end; gap: 10px; height: 16px; font-family: Inter, system-ui, sans-serif; font-size: 0.78rem; color: var(--fg-muted); }
-  .lab-rail button::after { content: ""; width: 8px; height: 8px; border-radius: 99px; border: 1.5px solid var(--fg-muted); transition: background 0.3s, transform 0.3s; }
-  .lab-rail button span { opacity: 0; transform: translateX(6px); transition: opacity 0.25s, transform 0.25s; }
-  .lab-rail button:hover span { opacity: 1; transform: none; }
-  .lab-rail::before { content: ""; position: absolute; right: 4px; top: 4px; bottom: 4px; width: 1.5px; background: var(--border); }
-  .lab-rail::after { content: ""; position: absolute; right: 4px; top: 4px; width: 1.5px; height: calc((100% - 8px) * var(--p, 0)); background: var(--coral); }
-}
 
 /* The shop's sections, at the top of the walk: tap one to walk there.
    Glass (it floats over the 3D, like the header). One line; on a narrow

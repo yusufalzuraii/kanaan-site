@@ -41,6 +41,7 @@ import {
   Bell,
   Flame,
   Home as HomeIcon,
+  Expand,
 } from "lucide-react";
 /* The admin panel is a third of the front-end code — product editor,
    stock grid, order management, image optimizer — and no
@@ -61,6 +62,11 @@ import { COLORS as PALETTE, swatchBackground } from "./palette.js";
 import { applySettings, useSiteSettings, deliveryFor } from "./lib/siteSettings.js";
 import { parsePhone } from "./lib/phone.js";
 import { AnnounceBar, FreeDeliveryMeter, SITE_BITS_CSS } from "./components/SiteBits.jsx";
+/* The shopper's own sizes (learnt from the bag, kept on the device) and what to wear a piece with */
+import { rememberSize, mySizeFor, sizeKind, useMySizes, sizeNorm, sizeOrder } from "./lib/mySize.js";
+import { completeTheLook } from "./lib/look.js";
+/* The product photos full screen: pinch / double-tap to zoom, swipe between them */
+import PhotoViewer, { PHOTO_VIEWER_CSS } from "./components/PhotoViewer.jsx";
 import {
   isNativeApp,
   hapticLight,
@@ -291,6 +297,9 @@ function useRouter() {
       try { window.history.replaceState({ depth: 0 }, "", window.location.pathname + window.location.search + window.location.hash); } catch (e) { /* ignore */ }
     }
 
+    // the way back lands where you were (the app puts it back itself, once the page is drawn)
+    try { if ("scrollRestoration" in window.history) window.history.scrollRestoration = "manual"; } catch (e) { /* ignore */ }
+
     const onPop = () => {
       setDirection("back");
       setPath(window.location.pathname || "/");
@@ -300,6 +309,8 @@ function useRouter() {
   }, []);
 
   const navigate = (to) => {
+    // remember how far down this page was, for the way back
+    try { window.history.replaceState({ ...(window.history.state || {}), y: Math.round(window.scrollY) }, ""); } catch (e) { /* ignore */ }
     const depth = (window.history.state?.depth || 0) + 1;
     try {
       window.history.pushState({ depth }, "", to);
@@ -1077,7 +1088,18 @@ function ProductGallery({ product, liked, onToggleLike, activeColor }) {
   const c2 = COLORS[product.colors[1]]?.hex || c1;
   const [active, setActive] = useState(0);
   const [broken, setBroken] = useState({});
+  const [viewer, setViewer] = useState(null); // the photo open full screen
   const touchX = useRef(null);
+
+  // full screen: a step in the browser's history, so the way back (Android's button, a swipe) closes the photos first
+  const openViewer = (k) => {
+    try { window.history.pushState({ ...(window.history.state || {}), depth: (window.history.state?.depth || 0) + 1, viewer: 1 }, ""); } catch { /* fine */ }
+    setViewer(k);
+  };
+  const closeViewer = (fromBack) => {
+    setViewer(null);
+    if (!fromBack) { try { if (window.history.state && window.history.state.viewer) window.history.back(); } catch { /* fine */ } }
+  };
 
   // Back to the first photo whenever the product or the chosen colour changes.
   useEffect(() => {
@@ -1095,6 +1117,7 @@ function ProductGallery({ product, liked, onToggleLike, activeColor }) {
     <div className="min-w-0 w-full">
       <div
         className="relative w-full flex items-center justify-center overflow-hidden"
+        onClick={() => { if (activeSrc) openViewer(idx); }}
         onTouchStart={(e) => { touchX.current = e.touches[0].clientX; }}
         onTouchEnd={(e) => {
           if (touchX.current == null) return;
@@ -1106,6 +1129,7 @@ function ProductGallery({ product, liked, onToggleLike, activeColor }) {
           aspectRatio: "4/5",
           borderRadius: "28px",
           background: `radial-gradient(120% 120% at 15% 15%, ${c1} 0%, transparent 55%), radial-gradient(120% 120% at 85% 85%, ${c2} 0%, transparent 55%), #1A1A1E`,
+          cursor: activeSrc ? "zoom-in" : undefined,
         }}
       >
         {activeSrc ? (
@@ -1134,7 +1158,22 @@ function ProductGallery({ product, liked, onToggleLike, activeColor }) {
         <div className="absolute top-3 left-3">
           <LikeButton liked={liked} onToggle={onToggleLike} size="lg" />
         </div>
+        {activeSrc && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); openViewer(idx); }}
+            className="absolute bottom-3 right-3 glass rounded-full flex items-center justify-center tap-scale"
+            style={{ width: 40, height: 40 }}
+            aria-label="See the photos full screen"
+            data-testid="photo-open"
+          >
+            <Expand className="w-[18px] h-[18px]" style={{ color: "var(--fg)" }} />
+          </button>
+        )}
       </div>
+      {viewer !== null && (
+        <PhotoViewer images={images.filter((u) => !broken[u])} start={Math.max(0, images.filter((u) => !broken[u]).indexOf(images[viewer]))} name={product.name} onClose={closeViewer} />
+      )}
 
       {images.length > 1 && (
         <div className="flex gap-2 mt-3 overflow-x-auto pb-1 max-w-full" style={{ WebkitOverflowScrolling: "touch" }}>
@@ -1180,6 +1219,16 @@ const NOOP = () => {};
 const ProductCard = memo(function ProductCard({ product, onOpen, liked, onToggleLike }) {
   const isOut = product.soldOut || !productHasStock(product);
   const tiltRef = useCardTilt();
+  // a few words when it matters: the last one in the shopper's own size, or only a few left at all
+  const mySizes = useMySizes();
+  let scarce = null;
+  if (!isOut && product.tracked && product.stock) {
+    const mine = mySizeFor(product, mySizes);
+    const mineLeft = mine ? product.colors.reduce((a, c) => a + Math.max(0, stockFor(product, c, mine)), 0) : 0;
+    const left = Object.values(product.stock).reduce((a, n) => a + Math.max(0, Number(n) || 0), 0);
+    if (mine && mineLeft === 1) scarce = `Last one in ${mine}`;
+    else if (left > 0 && left <= 3) scarce = `Only ${left} left`;
+  }
   // Bound here, once per card, instead of a fresh arrow at every call site
   // on every parent render.
   const handleToggle = useCallback(() => onToggleLike(product.id), [onToggleLike, product.id]);
@@ -1194,7 +1243,7 @@ const ProductCard = memo(function ProductCard({ product, onOpen, liked, onToggle
       </div>
       <div className="mt-3.5 space-y-1">
         <p className="font-body font-medium text-fg text-sm">{product.name}</p>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center flex-wrap gap-x-2 gap-y-0.5">
           {isOut ? (
             <span className="font-num text-muted text-base">Sold out</span>
           ) : product.discount > 0 ? (
@@ -1205,6 +1254,7 @@ const ProductCard = memo(function ProductCard({ product, onOpen, liked, onToggle
           ) : (
             <span className="font-num text-fg text-base">{money(product.price)}</span>
           )}
+          {scarce && <span className="font-body text-[11px] font-medium" style={{ color: "var(--coral-text)" }} data-testid="card-scarce">{scarce}</span>}
         </div>
         <div className="flex items-center gap-1 pt-1">
           {product.colors.map((key) => (
@@ -1320,7 +1370,7 @@ function SearchOverlay({ open, onClose, products, openProduct, goCatalog, goSale
   };
 
   return (
-    <div className="fixed inset-0 z-50 search-fade" onClick={onClose}>
+    <div className="fixed inset-0 z-50 search-fade" onClick={onClose} role="dialog" aria-modal="true" aria-label="Search the shop">
       <div className="absolute inset-0" style={{ background: "rgba(8,8,12,0.55)", backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)" }} />
       <div
         className="relative mx-auto px-4 search-rise"
@@ -2084,9 +2134,11 @@ function KanaanShop() {
   // Belt and braces on the scroll reset: navigate() jumps immediately, and
   // this runs again once the new page has actually rendered, so a tall
   // catalog can't leave you stranded halfway down the product page.
+  // Coming back (the back button, a swipe): to where that page was, as the catalog shows as many pieces as before.
   useLayoutEffect(() => {
-    window.scrollTo(0, 0);
-  }, [path]);
+    const y = navDirection === "back" ? Number(window.history.state && window.history.state.y) || 0 : 0;
+    window.scrollTo(0, y);
+  }, [path]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ⌘K / Ctrl-K opens search, the way people expect on desktop.
   useEffect(() => {
@@ -2231,6 +2283,7 @@ function KanaanShop() {
   // colorLabel = what the shopper reads ("Black")
   const addToCart = (product, size, colorKey, colorLabel, qty) => {
     track("cart", { key: product.id });
+    rememberSize(product, size); // "you usually take L" next time
     setCart((prev) => {
       const key = cartKey(product.id, size, colorKey);
       const limit = stockFor(product, colorKey, size); // Infinity when untracked
@@ -2460,7 +2513,7 @@ function KanaanShop() {
 
       {isNativeApp ? <AppFootnote /> : <Footer goCatalog={goCatalog} goSale={goSale} />}
       {/* the checkout has its own WhatsApp step: the round button would sit on the total */}
-      {route.type !== "checkout" && <WhatsAppFab raised={route.type === "product"} />}
+      {route.type !== "checkout" && <WhatsAppFab raised={route.type === "product"} product={route.type === "product" ? currentProduct : null} />}
       <SearchOverlay
         open={searchOpen}
         onClose={() => setSearchOpen(false)}
@@ -2704,6 +2757,47 @@ function GlobalStyles() {
       .size-nudge { animation: sizeNudge 0.5s ease; box-shadow: 0 0 0 2px var(--coral); border-radius: 22px; }
       .pick-cta { transition: background 0.25s ease, color 0.25s ease, transform 0.2s ease; }
 
+      /* The shopper's own size: one coral dot, on the size itself and on the line that offers it */
+      .my-size-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--coral); flex-shrink: 0; box-shadow: 0 0 0 3px rgba(255,69,34,0.16); }
+      .my-size-dot.is-corner { position: absolute; top: 5px; right: 6px; box-shadow: none; }
+      .my-size-hint { display: inline-flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 13px 0 11px; border-radius: 999px; background: rgba(255,69,34,0.08); color: var(--fg); font-family: 'Inter', sans-serif; font-size: 13px; line-height: 1.25; text-align: left; }
+      .my-size-hint b { font-weight: 700; color: var(--coral-text); }
+      .my-size-hint.is-out { background: var(--field-bg); color: var(--fg-muted); border: 1px solid var(--border); }
+      .my-size-hint.is-out b { color: inherit; }
+
+      /* Complete the look: the outfit in one row, piece + piece + piece (every photo the same size) */
+      .look-row { --lw: clamp(120px, 36vw, 210px); display: flex; overflow-x: auto; scroll-snap-type: x mandatory; padding: 3px 3px 8px; margin: 0 -3px; scrollbar-width: none; list-style: none; }
+      .look-row::-webkit-scrollbar { display: none; }
+      .look-item { position: relative; flex: 0 0 var(--lw); width: var(--lw); scroll-snap-align: start; min-width: 0; }
+      .look-item + .look-item { margin-left: 30px; }
+      .look-plus { position: absolute; left: -30px; width: 30px; top: calc(var(--lw) * 0.625 - 14px); text-align: center; font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 22px; line-height: 28px; color: var(--fg-muted); }
+      .look-open { display: block; width: 100%; text-align: left; }
+      .look-art { aspect-ratio: 4 / 5; border-radius: 20px; overflow: hidden; background: var(--field-bg); border: 1px solid var(--border); display: grid; place-items: center; }
+      .look-art img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.5s cubic-bezier(0.16,1,0.3,1); }
+      .look-open:hover .look-art img { transform: scale(1.04); }
+      .look-item.is-this .look-art { box-shadow: 0 0 0 2px var(--fg); border-color: transparent; }
+      .look-name { margin-top: 10px; font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 500; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .look-item.is-this .look-name { color: var(--fg-muted); }
+      .look-price { margin-top: 2px; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+      .look-fit { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--coral-text); font-family: 'Inter', sans-serif; font-weight: 600; }
+      .look-fit .my-size-dot { width: 6px; height: 6px; box-shadow: none; }
+      @media (min-width: 640px) { .look-row { --lw: 190px; } .look-plus { font-size: 26px; } }
+      @media (prefers-reduced-motion: reduce) { .look-art img { transition: none; } .look-open:hover .look-art img { transform: none; } }
+
+      /* The catalog's size row and sort */
+      .cat-sizes { display: flex; align-items: center; gap: 8px; overflow-x: auto; scrollbar-width: none; padding: 2px; margin: 0 -2px; }
+      .cat-sizes::-webkit-scrollbar { display: none; }
+      .cat-size { position: relative; flex-shrink: 0; min-width: 44px; height: 38px; padding: 0 14px; border-radius: 999px; font-family: 'Space Grotesk', sans-serif; font-size: 14px; background: var(--glass-bg); border: 1px solid var(--glass-border); color: var(--fg); }
+      .cat-size.is-on { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+      .cat-order { display: flex; flex-direction: column-reverse; gap: 10px; }
+      @media (min-width: 640px) { .cat-order { flex-direction: row; align-items: center; justify-content: space-between; gap: 16px; } }
+      .sort-toggle { position: relative; display: grid; grid-template-columns: repeat(var(--n), 1fr); align-items: center; height: 40px; padding: 4px; border-radius: 999px; }
+      @media (min-width: 640px) { .sort-toggle { width: 380px; flex-shrink: 0; } }
+      .sort-knob { position: absolute; top: 4px; bottom: 4px; left: 4px; width: calc((100% - 8px) / var(--n)); border-radius: 999px; background: var(--fg); box-shadow: 0 2px 8px rgba(0,0,0,0.25); transform: translateX(calc(100% * var(--i))); transition: transform 0.35s cubic-bezier(0.2,0.9,0.2,1); }
+      .sort-toggle button { position: relative; z-index: 1; height: 32px; padding: 0 6px; border-radius: 999px; font-family: 'Inter', sans-serif; font-size: 13px; color: var(--fg-muted); white-space: nowrap; transition: color 0.25s ease; }
+      .sort-toggle button.is-on { color: var(--bg); font-weight: 600; }
+      @media (prefers-reduced-motion: reduce) { .sort-knob { transition: none; } }
+
       /* Search overlay */
       @keyframes searchFade { from { opacity: 0; } to { opacity: 1; } }
       @keyframes searchRise { from { opacity: 0; transform: translateY(-10px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
@@ -2825,6 +2919,7 @@ function GlobalStyles() {
       :root { --header-h: calc(76px + var(--announce-h, 0px)); }
       @media (min-width: 640px) { :root { --header-h: calc(84px + var(--announce-h, 0px)); } }
       ${SITE_BITS_CSS}
+      ${PHOTO_VIEWER_CSS}
 
       /* Loading ring for the admin panel while its bundle downloads.
          Plain CSS rather than a lucide icon on purpose — the icon set
@@ -4175,9 +4270,65 @@ function FavoritesView({ products, loading, likes, openProduct, toggleLike, goCa
    ============================================================ */
 const PAGE_SIZE = 12;
 
+/* The catalog's size and order live in the address (?size=L&sort=low): a shared link keeps them, and the way
+   back from a product finds them again. */
+const SORTS = [
+  { id: "", label: "Featured", short: "Featured" },
+  { id: "new", label: "Newest", short: "Newest" },
+  { id: "low", label: "Price: low to high", short: "Price ↑" },
+  { id: "high", label: "Price: high to low", short: "Price ↓" },
+];
+/* The order of the catalog: the theme toggle's sliding pill (DESIGN_SYSTEM.md §4), with four stops. */
+function SortToggle({ value, onChange }) {
+  const i = Math.max(0, SORTS.findIndex((s) => s.id === value));
+  return (
+    <div className="sort-toggle glass" role="radiogroup" aria-label="Sort" style={{ "--n": SORTS.length, "--i": i }} data-testid="catalog-sort">
+      <span className="sort-knob" aria-hidden="true" />
+      {SORTS.map((s) => (
+        <button
+          key={s.id || "featured"}
+          type="button"
+          role="radio"
+          aria-checked={s.id === value}
+          aria-label={s.label}
+          title={s.label}
+          className={`tap-scale ${s.id === value ? "is-on" : ""}`}
+          onClick={() => { if (s.id !== value) { onChange(s.id); hapticLight(); } }}
+          data-testid={`sort-${s.id || "featured"}`}
+        >
+          {s.short}
+        </button>
+      ))}
+    </div>
+  );
+}
+function readCatalogQuery() {
+  try {
+    const q = new URLSearchParams(window.location.search);
+    const sort = q.get("sort") || "";
+    return { size: (q.get("size") || "").slice(0, 12), sort: SORTS.some((s) => s.id === sort) ? sort : "" };
+  } catch { return { size: "", sort: "" }; }
+}
+function writeCatalogQuery(patch) {
+  try {
+    const q = new URLSearchParams(window.location.search);
+    for (const [k, v] of Object.entries(patch)) { if (v) q.set(k, v); else q.delete(k); }
+    const s = q.toString();
+    window.history.replaceState(window.history.state, "", window.location.pathname + (s ? `?${s}` : "") + window.location.hash);
+  } catch { /* the filter still works, it just isn't in the address */ }
+}
+// a piece can be bought in this size, in at least one colour
+const leftInSize = (p, size) => !p.soldOut && p.colors.some((c) => stockFor(p, c, size) > 0);
+
 function CatalogView({ activeCategory, activeSub, loading, error, onRetry, goCatalog, products, openProduct, likes, toggleLike }) {
   const label = activeCategory === "all" ? "Shop" : CATEGORIES.find((c) => c.id === activeCategory)?.label || "Shop";
-  const [shown, setShown] = useState(PAGE_SIZE);
+  // coming back from a product: as many pieces as were showing (the page scrolls back to where you were)
+  const [shown, setShown] = useState(() => {
+    const n = Number(window.history.state && window.history.state.shown);
+    return n > PAGE_SIZE && n < 500 ? n : PAGE_SIZE;
+  });
+  const [{ size: sizeF, sort }, setQuery] = useState(readCatalogQuery);
+  const sizesMine = useMySizes();
   const subs = subsFor(activeCategory);
 
   useEffect(() => {
@@ -4185,11 +4336,54 @@ function CatalogView({ activeCategory, activeSub, loading, error, onRetry, goCat
     document.title = `${label}${suffix} — ${STORE_NAME}`;
   }, [label, activeCategory, activeSub]);
 
-  // Start from the top of the list again when the category or fit changes.
-  useEffect(() => { setShown(PAGE_SIZE); }, [activeCategory, activeSub]);
+  // Start from the top of the list again when the category or fit changes (not on the way back in).
+  const place = useRef(`${activeCategory}/${activeSub}`);
+  useEffect(() => {
+    const now = `${activeCategory}/${activeSub}`;
+    if (place.current === now) return;
+    place.current = now;
+    setShown(PAGE_SIZE);
+  }, [activeCategory, activeSub]);
+  // how far down the list was, kept with this page in the browser's history
+  useEffect(() => {
+    try { window.history.replaceState({ ...(window.history.state || {}), shown }, ""); } catch { /* fine */ }
+  }, [shown]);
 
-  const visible = products.slice(0, shown);
-  const remaining = products.length - visible.length;
+  const setFilter = (patch) => {
+    setQuery((q) => ({ ...q, ...patch }));
+    writeCatalogQuery(patch);
+    setShown(PAGE_SIZE);
+  };
+
+  // the sizes still left here, in reading order (only inside a category: "All" mixes waists, feet and tops)
+  const sizeOptions = useMemo(() => {
+    if (activeCategory === "all") return [];
+    const seen = new Map();
+    for (const p of products) {
+      for (const s of p.sizes || []) {
+        const n = sizeNorm(s);
+        if (!n || /^ONESIZE$|^OS$/.test(n) || seen.has(n)) continue;
+        if (leftInSize(p, s)) seen.set(n, s);
+      }
+    }
+    return [...seen.values()].sort(sizeOrder);
+  }, [products, activeCategory]);
+  // a size chip is "yours" when it's the size you bought before, in the same way of sizing (L for tops, 32 for waists)
+  const isMineChip = (s) => { const k = sizeKind({ category: activeCategory }, s); return !!(k && sizesMine[k] && sizeNorm(sizesMine[k]) === sizeNorm(s)); };
+
+  const list = useMemo(() => {
+    let l = products;
+    if (sizeF) l = l.filter((p) => (p.sizes || []).some((s) => sizeNorm(s) === sizeNorm(sizeF) && leftInSize(p, s)));
+    if (sort) {
+      const out = (p) => (p.soldOut || !productHasStock(p) ? 1 : 0);
+      const key = sort === "new" ? (p) => -(p.createdAt || 0) : sort === "low" ? (p) => effectivePrice(p) : (p) => -effectivePrice(p);
+      l = [...l].sort((a, b) => out(a) - out(b) || key(a) - key(b));
+    }
+    return l;
+  }, [products, sizeF, sort]);
+
+  const visible = list.slice(0, shown);
+  const remaining = list.length - visible.length;
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10">
@@ -4224,7 +4418,7 @@ function CatalogView({ activeCategory, activeSub, loading, error, onRetry, goCat
       {/* Fits — only for the categories that have them (Jeans, T-Shirts).
           Secondary styling on purpose: it's a refinement, not a new aisle. */}
       {subs.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2 mb-8">
+        <div className="flex flex-wrap items-center gap-2 mb-4">
           <span className="font-body text-xs text-muted mr-1">Fit</span>
           <button
             onClick={() => goCatalog(activeCategory)}
@@ -4249,7 +4443,41 @@ function CatalogView({ activeCategory, activeSub, loading, error, onRetry, goCat
           ))}
         </div>
       )}
-      {subs.length === 0 && <div className="mb-4" />}
+      {subs.length === 0 && <div className="mb-1" />}
+
+      {/* Your size, then how many pieces and in what order. The size you bought before carries a coral dot. */}
+      {products.length > 0 && (
+        <div className="mb-6" data-testid="catalog-tools">
+          {sizeOptions.length > 1 && (
+            <div className="cat-sizes mb-3" role="group" aria-label="Show pieces left in a size">
+              <span className="font-body text-xs text-muted mr-1 flex-shrink-0">Size</span>
+              {sizeOptions.map((s) => {
+                const on = sizeNorm(s) === sizeNorm(sizeF);
+                const mine = isMineChip(s);
+                return (
+                  <button
+                    key={s}
+                    type="button"
+                    className={`cat-size tap-scale ${on ? "is-on" : ""}`}
+                    aria-pressed={on}
+                    aria-label={`${s}${mine ? ", your size" : ""}`}
+                    onClick={() => { setFilter({ size: on ? "" : s }); hapticLight(); }}
+                  >
+                    {mine && <span className="my-size-dot is-corner" aria-hidden="true" />}
+                    {s}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          <div className="cat-order">
+            <p className="font-body text-sm text-muted" aria-live="polite" data-testid="catalog-count">
+              {list.length} {list.length === 1 ? "piece" : "pieces"}{sizeF ? <> in <span className="font-num text-fg">{sizeF}</span></> : null}
+            </p>
+            <SortToggle value={sort} onChange={(v) => setFilter({ sort: v })} />
+          </div>
+        </div>
+      )}
 
       {loading && products.length === 0 ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
@@ -4266,6 +4494,11 @@ function CatalogView({ activeCategory, activeSub, loading, error, onRetry, goCat
         <p className="font-body text-muted py-16 text-center">
           {activeSub ? `No ${subLabel(activeCategory, activeSub).toLowerCase()} pieces here yet.` : "No products in this category yet."}
         </p>
+      ) : list.length === 0 ? (
+        <div className="py-16 text-center">
+          <p className="font-body text-muted text-sm mb-3">Nothing left in {sizeF} here right now.</p>
+          <button onClick={() => setFilter({ size: "" })} className="glass rounded-full font-body text-sm px-5 py-2 tap-scale">Show every size</button>
+        </div>
       ) : (
         <>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
@@ -4279,7 +4512,7 @@ function CatalogView({ activeCategory, activeSub, loading, error, onRetry, goCat
           {remaining > 0 && (
             <div className="flex flex-col items-center gap-3 mt-10">
               <p className="font-body text-xs text-muted">
-                Showing {visible.length} of {products.length}
+                Showing {visible.length} of {list.length}
               </p>
               <button
                 onClick={() => setShown((n) => n + PAGE_SIZE)}
@@ -4330,7 +4563,7 @@ function SizeGuideModal({ category, onClose }) {
     return () => window.removeEventListener("keydown", onKey, true);
   }, [onClose]);
   return (
-    <div className="fixed inset-0 z-[80] flex items-end sm:items-center sm:justify-center" onClick={onClose}>
+    <div className="fixed inset-0 z-[80] flex items-end sm:items-center sm:justify-center" onClick={onClose} role="dialog" aria-modal="true" aria-label="Size guide">
       <div className="absolute inset-0" style={{ background: "rgba(0,0,0,0.5)" }} />
       <div
         onClick={(e) => e.stopPropagation()}
@@ -4375,7 +4608,74 @@ function SizeGuideModal({ category, onClose }) {
    is left in each, and an "Add to cart" that only lights up once a size is
    chosen. Tapping it without a size shakes the sizes. Swipe it down, tap
    outside or press Esc to close. */
+/* Complete the look: this piece, then what goes with it (from lib/look.js), laid out as one outfit —
+   piece + piece + piece — with what it all comes to. A piece left in the shopper's own size says so. */
+function CompleteTheLook({ product, color, look, openProduct }) {
+  const sizes = useMySizes();
+  const total = effectivePrice(product) + look.reduce((a, p) => a + effectivePrice(p), 0);
+  const first = getImagesForColor(product, color)[0]?.url;
+  return (
+    <section className="mt-16" aria-labelledby="look-h" data-testid="complete-the-look">
+      <div className="flex items-baseline justify-between gap-3 mb-5">
+        <h2 id="look-h" className="font-display font-bold text-xl">Complete the look</h2>
+        <p className="font-body text-sm text-muted whitespace-nowrap">All together <span className="font-num text-fg">{money(total)}</span></p>
+      </div>
+      <ol className="look-row">
+        <li className="look-item is-this">
+          <div className="look-art">{first ? <img src={thumbUrlFor(first) || first} alt="" loading="lazy" onError={(e) => { if (first && e.currentTarget.src !== new URL(first, location.href).href) e.currentTarget.src = first; }} /> : <Shirt className="w-6 h-6 text-muted" />}</div>
+          <p className="look-name">This piece</p>
+          <p className="look-price font-num">{money(effectivePrice(product))}</p>
+        </li>
+        {look.map((p) => {
+          const img = getImageList(p)[0]?.url;
+          const mine = mySizeFor(p, sizes);
+          const fits = mine && p.colors.some((c) => stockFor(p, c, mine) > 0);
+          return (
+            <li key={p.id} className="look-item">
+              <span className="look-plus" aria-hidden="true">+</span>
+              <button type="button" onClick={() => openProduct(p)} className="look-open tap-scale" aria-label={`${p.name}, ${money(effectivePrice(p))}${fits ? `, in your size ${mine}` : ""}`}>
+                <div className="look-art">{img ? <img src={thumbUrlFor(img) || img} alt="" loading="lazy" onError={(e) => { if (e.currentTarget.src !== new URL(img, location.href).href) e.currentTarget.src = img; }} /> : <Shirt className="w-6 h-6 text-muted" />}</div>
+                <p className="look-name">{p.name}</p>
+                <p className="look-price font-num">
+                  <span className={p.discount > 0 ? "text-coral" : ""}>{money(effectivePrice(p))}</span>
+                  {fits && <span className="look-fit"><span className="my-size-dot" aria-hidden="true" />{mine}</span>}
+                </p>
+              </button>
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
+}
+
+/* "You usually take L": the size the shopper bought before, offered as one tap — never picked for them.
+   When it's gone in this colour but left in another, it says which; when it's gone everywhere, it says so. */
+function MySizeHint({ product, color, size, mine, onSize, onColor, className = "" }) {
+  if (!mine || size === mine) return null;
+  const here = stockFor(product, color, mine) > 0;
+  if (here) {
+    return (
+      <button type="button" onClick={() => { onSize(mine); hapticLight(); }} className={`my-size-hint tap-scale ${className}`} data-testid="my-size-hint">
+        <span className="my-size-dot" aria-hidden="true" />
+        <span>You usually take <b className="font-num">{mine}</b></span>
+      </button>
+    );
+  }
+  const other = product.colors.find((c) => c !== color && stockFor(product, c, mine) > 0);
+  if (other) {
+    return (
+      <button type="button" onClick={() => { onColor(other); hapticLight(); }} className={`my-size-hint tap-scale ${className}`} data-testid="my-size-hint">
+        <span className="my-size-dot" aria-hidden="true" />
+        <span>Your size <b className="font-num">{mine}</b> is left in {COLORS[other]?.label || other}</span>
+      </button>
+    );
+  }
+  return <p className={`my-size-hint is-out ${className}`} data-testid="my-size-hint">Your size <b className="font-num">{mine}</b> is sold out in this piece</p>;
+}
+
 function SizeSheet({ product, color, onColor, size, onSize, qty, setQty, onAdd, onClose, onSizeGuide }) {
+  const mine = mySizeFor(product, useMySizes());
   const [nudge, setNudge] = useState(0);
   const [dragY, setDragY] = useState(0);
   const drag = useRef(null);
@@ -4462,6 +4762,7 @@ function SizeSheet({ product, color, onColor, size, onSize, qty, setQty, onAdd, 
           <p className="font-display font-bold text-xl">{size ? <>Size <span className="text-coral">{size}</span></> : "Pick your size"}</p>
           <button onClick={onSizeGuide} className="font-body text-sm text-coral tap-scale">Size guide</button>
         </div>
+        <MySizeHint product={product} color={color} size={size} mine={mine} onSize={(s) => { onSize(s); setQty(1); }} onColor={onColor} className="mb-3" />
         <div key={nudge} className={`grid grid-cols-4 gap-2 p-0.5 ${nudge ? "size-nudge" : ""}`} role="radiogroup" aria-label="Size">
           {product.sizes.map((sz, i) => {
             const left = stockFor(product, color, sz);
@@ -4469,6 +4770,7 @@ function SizeSheet({ product, color, onColor, size, onSize, qty, setQty, onAdd, 
             const on = size === sz && inStock;
             const low = product.tracked && inStock && left <= 3;
             const ref = inStock && !firstAssigned ? (firstAssigned = true, firstSize) : undefined;
+            const isMine = sz === mine;
             return (
               <button
                 key={sz}
@@ -4477,7 +4779,7 @@ function SizeSheet({ product, color, onColor, size, onSize, qty, setQty, onAdd, 
                 aria-checked={on}
                 onClick={() => { if (inStock) { onSize(sz); setQty(1); hapticLight(); } }}
                 disabled={!inStock}
-                className={`pick-size tap-scale rounded-2xl flex flex-col items-center justify-center ${on ? "is-on" : ""}`}
+                className={`pick-size tap-scale rounded-2xl flex flex-col items-center justify-center relative ${on ? "is-on" : ""}`}
                 style={{
                   animationDelay: on ? "0s" : `${0.05 + i * 0.035}s`,
                   height: 58,
@@ -4487,8 +4789,9 @@ function SizeSheet({ product, color, onColor, size, onSize, qty, setQty, onAdd, 
                   opacity: inStock ? 1 : 0.38,
                   cursor: inStock ? "pointer" : "not-allowed",
                 }}
-                aria-label={`${sz}${inStock ? (low ? `, ${left} left` : "") : ", out of stock"}`}
+                aria-label={`${sz}${isMine ? ", your size" : ""}${inStock ? (low ? `, ${left} left` : "") : ", out of stock"}`}
               >
+                {isMine && <span className="my-size-dot is-corner" aria-hidden="true" />}
                 <span className="font-num text-lg leading-none" style={{ textDecoration: inStock ? "none" : "line-through" }}>{sz}</span>
                 {low && <span className="font-body leading-none mt-1" style={{ fontSize: 11, color: on ? "var(--bg)" : "var(--coral)", opacity: on ? 0.8 : 1 }}>{left} left</span>}
               </button>
@@ -4519,6 +4822,7 @@ function SizeSheet({ product, color, onColor, size, onSize, qty, setQty, onAdd, 
 
 function ProductView({ product, products, addToCart, openProduct, liked, toggleLike, likes = [], onLike = NOOP }) {
   const site = useSiteSettings();
+  const mine = mySizeFor(product, useMySizes());
   // no size is chosen for the shopper (unless there's only one): picking it
   // is a deliberate tap, so nobody ends up with the wrong size by accident
   const [size, setSize] = useState(null);
@@ -4549,7 +4853,19 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
     document.title = `${product.name} — ${STORE_NAME}`;
   }, [product.name]);
 
-  const related = products.filter((p) => p.category === product.category && p.id !== product.id).slice(0, 3);
+  // for "Ask about this piece" (the WhatsApp button): which colour and size
+  useEffect(() => {
+    productPick.id = product.id;
+    productPick.color = COLORS[color]?.label || color || "";
+    productPick.size = size || "";
+  }, [product.id, color, size]);
+
+  // what to wear it with (other families: jeans and shoes for a tee…), then more of the same kind
+  const look = useMemo(
+    () => completeTheLook(product, products, (id) => CATEGORIES.find((c) => c.id === id)?.label || "", (p) => !p.soldOut && productHasStock(p)),
+    [product, products]
+  );
+  const related = products.filter((p) => p.category === product.category && p.id !== product.id && !look.includes(p)).slice(0, 3);
   const productUrl = `${SITE_URL}/product/${product.slug}`;
 
   const available = size ? stockFor(product, color, size) : 0;
@@ -4669,19 +4985,21 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
               <p className="font-body text-sm font-medium">{size ? <>Size <span className="text-coral">{size}</span></> : "Pick your size"}</p>
               <button onClick={() => setShowSizeGuide(true)} className="font-body text-xs text-coral hover:underline">Size guide</button>
             </div>
+            <MySizeHint product={product} color={color} size={size} mine={mine} onSize={(s) => { setSize(s); setQty(1); }} onColor={pickColor} className="mb-2.5" />
             <div key={sizeNudge} className={`flex flex-wrap gap-2 p-0.5 ${sizeNudge ? "size-nudge" : ""}`} role="radiogroup" aria-label="Size">
               {product.sizes.map((sz) => {
                 const left = stockFor(product, color, sz);
                 const inStock = left > 0;
+                const isMine = sz === mine;
                 return (
                   <button
                     key={sz}
                     role="radio"
                     aria-checked={size === sz && inStock}
-                    aria-label={inStock ? `Size ${sz}` : `Size ${sz}, sold out`}
+                    aria-label={`Size ${sz}${isMine ? ", your size" : ""}${inStock ? "" : ", sold out"}`}
                     onClick={() => { if (inStock) { setSize(sz); setQty(1); } }}
                     disabled={!inStock}
-                    className="font-num text-sm px-4 py-2 rounded-full tap-scale transition-all"
+                    className="font-num text-sm px-4 py-2 rounded-full tap-scale transition-all relative"
                     style={
                       size === sz && inStock
                         ? { background: "var(--fg)", color: "var(--bg)" }
@@ -4693,8 +5011,9 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
                             cursor: inStock ? "pointer" : "not-allowed",
                           }
                     }
-                    title={inStock ? undefined : "Out of stock"}
+                    title={inStock ? (isMine ? "Your size" : undefined) : "Out of stock"}
                   >
+                    {isMine && <span className="my-size-dot is-corner" aria-hidden="true" />}
                     {sz}
                   </button>
                 );
@@ -4787,6 +5106,8 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
           </div>
         </div>
       </div>
+
+      {look.length > 0 && <Reveal><CompleteTheLook product={product} color={color} look={look} openProduct={openProduct} /></Reveal>}
 
       {related.length > 0 && (
         <div className="mt-16">
@@ -5558,28 +5879,37 @@ function BottomTabBar({ activeType, goHome, goCatalog, onSearch, goFavorites, on
 /* ============================================================
    FLOATING WHATSAPP HELP BUTTON
    ============================================================ */
-function WhatsAppFab({ raised }) {
+/* What the shopper has picked on the product page (set by ProductView), so "Ask about this piece" on WhatsApp
+   says which piece, colour and size — the shop answers without asking back. */
+const productPick = { id: null, color: "", size: "" };
+
+function WhatsAppFab({ raised, product = null }) {
   const { reducedMotion } = useApp();
   // بالتطبيق ما بنعرض هالزر العائم أبداً — كان يتصادم بصرياً مع شريط
   // التنقّل السفلي والبطاقات، وأصلاً في رابط "Need help?" بآخر كل
   // صفحة (AppFootnote) بيغطي نفس الحاجة بدون تراكم.
   if (isNativeApp) return null;
 
-  const href = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(
-    `Hi ${STORE_NAME}! I have a question`
-  )}`;
+  const message = () => {
+    if (!product) return `Hi ${STORE_NAME}! I have a question`;
+    const pick = productPick.id === product.id ? [productPick.color, productPick.size && `size ${productPick.size}`].filter(Boolean).join(", ") : "";
+    return `Hi ${STORE_NAME}! I'm asking about ${product.name} — ${money(effectivePrice(product))}${pick ? ` (${pick})` : ""}\n${SITE_URL}/product/${product.slug}`;
+  };
+  const href = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(message())}`;
   const bottom = raised ? "6rem" : "1.25rem";
   return (
     <a
       href={href}
+      onClick={(e) => { e.currentTarget.href = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(message())}`; }}
       target="_blank"
       rel="noopener noreferrer"
-      aria-label="Chat with us on WhatsApp"
+      aria-label={product ? `Ask about ${product.name} on WhatsApp` : "Chat with us on WhatsApp"}
       className="fab-wrap fixed right-4 z-30 flex items-center"
       style={{ bottom }}
+      data-testid="whatsapp-fab"
     >
       <span className="fab-label glass rounded-full font-body text-sm px-3 py-2 mr-1" style={{ boxShadow: "var(--glass-shadow)" }}>
-        Need help? Chat with us
+        {product ? "Ask about this piece" : "Need help? Chat with us"}
       </span>
       <span
         className={`glass glass-sheen rounded-full flex items-center justify-center tap-scale ${reducedMotion ? "" : "fab-pulse"}`}

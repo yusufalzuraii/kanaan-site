@@ -170,6 +170,7 @@ export function rowToProduct(r) {
     soldOut: !!r.sold_out,
     active: r.active === undefined ? true : !!r.active,
     sortOrder: Number(r.sort_order) || 0,
+    createdAt: Number(r.created_at) || 0, // the shop's "Newest" order
     isSpotlight: !!r.is_spotlight,
     appExclusive: !!r.app_exclusive,
     source: r.source || "", // 'pos' = published and run from Kanaan POS

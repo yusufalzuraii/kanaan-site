@@ -41,7 +41,25 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: تجهيز Android SDK
+      # أجهزة GitHub (ubuntu-24.04) فيها Android SDK جاهز. أداة setup-android
+      # صارت توقف البناء من 25 تشرين الأول — فمنستعمل الموجود، وما منرجع
+      # للأداة إلا إذا يوماً ما لقيناه ناقص.
+      - name: تجهيز Android SDK (الموجود أصلاً على جهاز GitHub)
+        id: sdk
+        run: |
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          if [ -d "$SDK/platforms" ] && [ -d "$SDK/build-tools" ]; then
+            echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+            echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "Android SDK: $SDK"; ls "$SDK/platforms" | tail -4; ls "$SDK/build-tools" | tail -4
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "No Android SDK on this machine — downloading it"
+          fi
+
+      - name: تنزيل Android SDK (بس إذا ما كان موجود)
+        if: steps.sdk.outputs.ready != 'true'
         uses: android-actions/setup-android@v3
 
       - name: تثبيت حزم المشروع
@@ -101,12 +119,15 @@ jobs:
           cd android
           ./gradlew assembleDebug
 
+      # نسخة تجريبية للفحص بس: إذا مساحة GitHub للملفات مليانة (نسخ برنامج
+      # المحل بتاخدها)، البناء بيضل ناجح — المهم إنو التطبيق انبنى.
       - name: رفع الـ APK كملف جاهز للتنزيل
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: kanaan-shop-debug-apk
           path: kanaan-shop-v3-admin/kanaan-site/android/app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 30
+          retention-days: 7
 
       - name: إعادة بناء ملف مفتاح التوقيع من سر GitHub (لنسخة Google Play الرسمية)
         if: ${{ github.event_name == 'workflow_dispatch' }}

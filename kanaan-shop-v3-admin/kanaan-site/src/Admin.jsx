@@ -410,19 +410,25 @@ function NotifyTab() {
     setSending(true);
     setResult(null);
     try {
-      const r = await fetch("/api/admin/send-notification", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: title.trim(), body: body.trim(), url: url.trim() || undefined }),
-      });
-      const d = await r.json();
-      if (!r.ok) setResult({ error: d.error || "صار خطأ، جرب كمان مرة." });
-      else {
-        setResult(d);
-        setTitle("");
-        setBody("");
-        setUrl("");
+      // the site sends to 40 phones a call (the free plan's limit per call): go on until everyone had it
+      const sum = { ok: true, sent: 0, failed: 0, removed: 0, total: 0 };
+      let after = 0;
+      for (let round = 0; round < 60; round++) {
+        const r = await fetch("/api/admin/send-notification", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: title.trim(), body: body.trim(), url: url.trim() || undefined, after }),
+        });
+        const d = await r.json();
+        if (!r.ok) { setResult(round ? { ...sum, error: d.error } : { error: d.error || "صار خطأ، جرب كمان مرة." }); setSending(false); return; }
+        sum.sent += d.sent || 0; sum.failed += d.failed || 0; sum.removed += d.removed || 0; sum.total = d.total || sum.total;
+        if (!d.next) break;
+        after = d.next;
       }
+      setResult(sum);
+      setTitle("");
+      setBody("");
+      setUrl("");
     } catch {
       setResult({ error: "مشكلة اتصال. تأكد من الإنترنت وجرب كمان مرة." });
     }

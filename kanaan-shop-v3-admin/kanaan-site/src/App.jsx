@@ -57,6 +57,10 @@ import HomeLab from "./home/HomeLab.jsx";
 /* false brings back the previous homepage (HomeView) in one line */
 const HOME_3D = true;
 import { COLORS as PALETTE, swatchBackground } from "./palette.js";
+/* Set from Kanaan POS (Website → Site): the bar at the top, delivery, exchanges, opening hours */
+import { applySettings, useSiteSettings, deliveryFor } from "./lib/siteSettings.js";
+import { parsePhone } from "./lib/phone.js";
+import { AnnounceBar, FreeDeliveryMeter, SITE_BITS_CSS } from "./components/SiteBits.jsx";
 import {
   isNativeApp,
   hapticLight,
@@ -67,6 +71,7 @@ import {
   nativeShare,
   saveCheckoutInfo,
   loadCheckoutInfo,
+  forgetCheckoutInfo,
   registerPushNotifications,
   addRecentlyViewed,
   getRecentlyViewed,
@@ -97,7 +102,7 @@ const SITE_URL = "https://kanaanshop.com"; // update once the real domain is con
    العادي apiBase فاضي وكل شي بيضل يشتغل زي ما كان (نسبي لنفس النطاق).
    بالتطبيق بس، منحط الدومين الحقيقي قبل أي مسار يبلش بـ "/". */
 const apiBase = isNativeApp ? SITE_URL : "";
-const DELIVERY_FEE = 5;
+/* Delivery comes from the shop's settings now (Kanaan POS → Website → Site → Delivery); $5 until they arrive. */
 const INSTAGRAM_URL = "https://www.instagram.com/kanaan.shop";
 const INSTAGRAM_HANDLE = "@kanaan.shop";
 // Real logo files live in /public/logo-compact.png and /public/logo-full.png.
@@ -214,20 +219,19 @@ const ProductsContext = createContext([]);
 const useProducts = () => useContext(ProductsContext);
 
 function AppProvider({ children }) {
-  /* The theme was reset to light on every refresh — a visitor who chose
-     dark had to choose it again on every page load. Read it back from the
-     device, and fall back to whatever the phone itself prefers, so the
-     first visit already matches their system. */
+  /* Light is the shop's look (the owner's choice); dark is there for
+     whoever picks it with the toggle, and is remembered on that device. */
   const [theme, setTheme] = useState(() => {
     try {
       const saved = localStorage.getItem("kanaan-theme");
       if (saved === "dark" || saved === "light") return saved;
-      if (window.matchMedia?.("(prefers-color-scheme: dark)").matches) return "dark";
     } catch { /* private mode or storage disabled */ }
     return "light";
   });
 
+  const themeChosen = useRef(false);
   useEffect(() => {
+    if (!themeChosen.current) { themeChosen.current = true; return; }
     try { localStorage.setItem("kanaan-theme", theme); } catch { /* ignore */ }
   }, [theme]);
   const [reducedMotion, setReducedMotion] = useState(false);
@@ -1227,13 +1231,33 @@ function scoreProduct(product, q) {
   if (name.includes(q)) return 60;
 
   const category = (CATEGORIES.find((c) => c.id === product.category)?.label || "").toLowerCase();
-  if (category.includes(q)) return 40;
+  const colorNames = (product.colors || []).map((k) => (COLORS[k]?.label || k).toLowerCase());
+  const sub = String(product.subcategory || "").toLowerCase();
+  const desc = (product.desc || "").toLowerCase();
 
-  const colorNames = product.colors.map((k) => (COLORS[k]?.label || k).toLowerCase());
-  if (colorNames.some((c) => c.includes(q))) return 30;
+  // "black shirt", "jeans 32": every word must match somewhere, in any order
+  const words = q.split(/\s+/).filter(Boolean);
+  if (words.length > 1) {
+    let total = 0;
+    for (const w0 of words) {
+      const forms = w0.length > 3 && w0.endsWith("s") ? [w0, w0.slice(0, -1)] : [w0];
+      const hit = (t) => forms.some((w) => t.includes(w));
+      const sc = hit(name) ? 20 : hit(category) ? 14 : colorNames.some(hit) ? 12 : hit(sub) ? 10 : (product.sizes || []).some((z) => forms.includes(String(z).toLowerCase())) ? 10 : hit(desc) ? 4 : 0;
+      if (!sc) return 0;
+      total += sc;
+    }
+    return Math.min(59, total);
+  }
+
+  const forms = q.length > 3 && q.endsWith("s") ? [q, q.slice(0, -1)] : [q];
+  const hit = (t) => forms.some((w) => t.includes(w));
+  if (forms.length > 1 && hit(name)) return 55;
+  if (hit(category)) return 40;
+  if (colorNames.some(hit)) return 30;
+  if (hit(sub)) return 20;
 
   // last resort: match against the description
-  if ((product.desc || "").toLowerCase().includes(q)) return 10;
+  if (hit(desc)) return 10;
   return 0;
 }
 
@@ -2128,6 +2152,9 @@ function KanaanShop() {
       });
       const data = await res.json();
       if (Array.isArray(data.categories)) applyCategories(data.categories);
+      if (data.settings) applySettings(data.settings);
+      // the database failing answers "no products" with an error: keep what's shown and say so
+      if (!res.ok || (data.error && !(data.products || []).length)) { setProductsError(true); return; }
       if (Array.isArray(data.products)) {
         setProducts(data.products);
         setProductsError(false);
@@ -2149,7 +2176,7 @@ function KanaanShop() {
     return () => { alive = false; };
   }, []);
 
-  const goHome = () => navigate("/");
+  const goHome = () => { navigate("/"); setMenuOpen(false); };
   const goCatalog = (cat, sub) => {
     if (!cat || cat === "all") navigate("/shop");
     else navigate(sub ? `/shop/${cat}/${sub}` : `/shop/${cat}`);
@@ -2232,6 +2259,22 @@ function KanaanShop() {
     }).filter((i) => i.qty > 0));
   };
   const removeFromCart = (key) => setCart((prev) => prev.filter((i) => i.key !== key));
+  // a piece kept in the bag since another day shows today's price and name: what the checkout will charge
+  useEffect(() => {
+    if (!products.length) return;
+    setCart((prev) => {
+      let changed = false;
+      const next = prev.map((i) => {
+        const p = products.find((x) => x.id === i.productId);
+        if (!p) return i;
+        const price = effectivePrice(p);
+        if (price === i.price && p.name === i.name) return i;
+        changed = true;
+        return { ...i, price, name: p.name };
+      });
+      return changed ? next : prev;
+    });
+  }, [products]); // eslint-disable-line
 
   const cartCount = cart.reduce((sum, i) => sum + i.qty, 0);
 
@@ -2317,7 +2360,7 @@ function KanaanShop() {
           />
         )
       ) : (
-        <Header cartCount={cartCount} onHome={goHome} onCart={() => setCartOpen(true)} onSearch={() => setSearchOpen(true)} onSale={goSale} menuOpen={menuOpen} setMenuOpen={setMenuOpen} goCatalog={goCatalog} />
+        <Header cartCount={cartCount} likesCount={likes.length} onHome={goHome} onCart={() => setCartOpen(true)} onSearch={() => setSearchOpen(true)} onSale={goSale} onFavorites={goFavorites} menuOpen={menuOpen} setMenuOpen={setMenuOpen} goCatalog={goCatalog} navigate={navigate} />
       )}
       {isNativeApp && isOffline && (
         <div className="px-4 sm:px-6" style={{ paddingTop: route.type === "home" ? "calc(0.75rem + env(safe-area-inset-top, 0px))" : 8 }}>
@@ -2384,7 +2427,7 @@ function KanaanShop() {
         )}
         {route.type === "privacy" && <PrivacyPolicyView />}
         {route.type === "product" && currentProduct && (
-          <ProductView product={currentProduct} products={products} addToCart={addToCart} openProduct={openProduct} liked={likes.includes(currentProduct.id)} toggleLike={() => toggleLike(currentProduct.id)} />
+          <ProductView product={currentProduct} products={products} addToCart={addToCart} openProduct={openProduct} liked={likes.includes(currentProduct.id)} toggleLike={() => toggleLike(currentProduct.id)} likes={likes} onLike={toggleLike} />
         )}
         {route.type === "product" && !currentProduct && catalogLoading && (
           <div className="max-w-lg mx-auto px-6 py-24 text-center">
@@ -2401,6 +2444,7 @@ function KanaanShop() {
           <CheckoutView
             cart={cart}
             total={cartTotal}
+            goCatalog={goCatalog}
             onSubmitted={(orderInfo) => {
               track("order", { key: String(orderInfo && orderInfo.orderNumber || "") });
               setLastOrder(orderInfo);
@@ -2415,7 +2459,8 @@ function KanaanShop() {
       </main>
 
       {isNativeApp ? <AppFootnote /> : <Footer goCatalog={goCatalog} goSale={goSale} />}
-      <WhatsAppFab raised={route.type === "product"} />
+      {/* the checkout has its own WhatsApp step: the round button would sit on the total */}
+      {route.type !== "checkout" && <WhatsAppFab raised={route.type === "product"} />}
       <SearchOverlay
         open={searchOpen}
         onClose={() => setSearchOpen(false)}
@@ -2428,6 +2473,7 @@ function KanaanShop() {
         open={cartOpen}
         onClose={() => setCartOpen(false)}
         cart={cart}
+        products={products}
         updateQty={updateQty}
         removeFromCart={removeFromCart}
         total={cartTotal}
@@ -2484,6 +2530,9 @@ function GlobalStyles() {
         --glass-shadow: 0 8px 32px rgba(0,0,0,0.35);
         --field-bg: rgba(255,255,255,0.05);
         --logo-filter: invert(1) brightness(1.1);
+        /* the brand colours as small text (readable: 4.5:1 and up) */
+        --coral-text: #FF7A5C;
+        --teal-text: #3FD2BF;
       }
       [data-theme="light"] {
         color-scheme: light;
@@ -2497,6 +2546,9 @@ function GlobalStyles() {
         --glass-shadow: 0 8px 32px rgba(20,20,26,0.08);
         --field-bg: rgba(255,255,255,0.7);
         --logo-filter: none;
+        /* the brand colours as small text (readable: 4.5:1 and up) */
+        --coral-text: #C93412;
+        --teal-text: #0B7A6D;
       }
       :root { --coral: #FF4522; --teal: #12B3A0; }
 
@@ -2770,8 +2822,9 @@ function GlobalStyles() {
 
       /* One source of truth for the header's height. The hero reaches up
          behind it by exactly this much, so the two can never drift apart. */
-      :root { --header-h: 76px; }
-      @media (min-width: 640px) { :root { --header-h: 84px; } }
+      :root { --header-h: calc(76px + var(--announce-h, 0px)); }
+      @media (min-width: 640px) { :root { --header-h: calc(84px + var(--announce-h, 0px)); } }
+      ${SITE_BITS_CSS}
 
       /* Loading ring for the admin panel while its bundle downloads.
          Plain CSS rather than a lucide icon on purpose — the icon set
@@ -3150,7 +3203,7 @@ function GlobalStyles() {
 /* ============================================================
    HEADER
    ============================================================ */
-function Header({ cartCount, onHome, onCart, onSearch, onSale, menuOpen, setMenuOpen, goCatalog }) {
+function Header({ cartCount, likesCount = 0, onHome, onCart, onSearch, onSale, onFavorites, menuOpen, setMenuOpen, goCatalog, navigate }) {
   const [scrolled, setScrolled] = useState(false);
 
   useEffect(() => {
@@ -3161,6 +3214,7 @@ function Header({ cartCount, onHome, onCart, onSearch, onSale, menuOpen, setMenu
 
   return (
     <div className="sticky top-0 z-40 px-3 sm:px-6 pt-3 header-layer">
+      <AnnounceBar navigate={navigate} />
       <header className="glass max-w-6xl mx-auto rounded-2xl transition-all duration-300" style={{ paddingTop: scrolled ? 8 : 12, paddingBottom: scrolled ? 8 : 12, transform: "translateZ(0)", willChange: "transform" }}>
         <div className="flex items-center justify-between px-4 sm:px-5">
           <button onClick={onHome} className="flex items-center tap-scale" aria-label={STORE_NAME}>
@@ -3180,6 +3234,13 @@ function Header({ cartCount, onHome, onCart, onSearch, onSale, menuOpen, setMenu
             <button onClick={onSearch} className="p-2 tap-scale hover:text-coral transition-colors" aria-label="Search products">
               <Search className="w-5 h-5" />
             </button>
+            {/* the pieces you saved with the heart, on the website too */}
+            {likesCount > 0 && (
+              <button onClick={onFavorites} className="relative p-2 tap-scale hover:text-coral transition-colors hidden sm:inline-flex" aria-label={`Saved pieces (${likesCount})`}>
+                <Heart className="w-5 h-5" />
+                <span className="absolute -top-1 -right-1 text-white text-[10px] font-num rounded-full flex items-center justify-center" style={{ minWidth: 18, height: 18, background: "var(--fg)", color: "var(--bg)" }}>{likesCount}</span>
+              </button>
+            )}
             <button onClick={onCart} className="relative p-2 tap-scale hover:text-coral transition-colors" aria-label="Cart">
               <ShoppingBag className="w-5 h-5" />
               {cartCount > 0 && (
@@ -3188,7 +3249,7 @@ function Header({ cartCount, onHome, onCart, onSearch, onSale, menuOpen, setMenu
                 </span>
               )}
             </button>
-            <button className="lg:hidden p-2 tap-scale" onClick={() => setMenuOpen((v) => !v)} aria-label="Menu">
+            <button className="lg:hidden p-2 tap-scale" onClick={() => setMenuOpen((v) => !v)} aria-label="Menu" aria-expanded={menuOpen}>
               {menuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </button>
           </div>
@@ -3200,6 +3261,9 @@ function Header({ cartCount, onHome, onCart, onSearch, onSale, menuOpen, setMenu
             <button onClick={() => goCatalog("all")} className="text-left hover:text-coral">Shop — all products</button>
             <button onClick={onSale} className="text-left flex items-center gap-1.5" style={{ color: "var(--coral)" }}>
               <Tag className="w-3.5 h-3.5" /> Sale
+            </button>
+            <button onClick={onFavorites} className="text-left flex items-center gap-1.5 hover:text-coral">
+              <Heart className="w-3.5 h-3.5" /> Saved pieces{likesCount ? ` (${likesCount})` : ""}
             </button>
             <div className="border-t pt-2.5 mt-0.5 flex flex-col gap-2.5" style={{ borderColor: "var(--border)" }}>
               {CATEGORIES.map((c) => {
@@ -3249,7 +3313,7 @@ function ValueMarquee() {
   const items = [
     "Delivery across Lebanon",
     "Cash on delivery",
-    "Easy 3-day returns",
+    "3-day exchanges",
     "Saida, Lebanon",
     "Premium. Fresh. Always.",
   ];
@@ -3371,18 +3435,18 @@ function AppTeaser({ appExclusiveCount = 0 }) {
               </div>
               <div>
                 <p className="font-display font-bold text-xl">
-                  {appExclusiveCount > 0 ? "🔥 App-only prices, waiting" : "Coming soon"}
+                  {appExclusiveCount > 0 ? "App-only pieces, waiting" : "The Kanaan Shop app"}
                 </p>
                 <p className="font-body text-sm text-muted mt-1 max-w-sm">
                   {appExclusiveCount > 0
-                    ? `${appExclusiveCount} piece${appExclusiveCount === 1 ? "" : "s"} are priced lower right now — visible only in the Kanaan Shop app.`
-                    : "The Kanaan Shop app is on its way — a faster, native way to shop from your phone."}
+                    ? `${appExclusiveCount} ${appExclusiveCount === 1 ? "piece is" : "pieces are"} only in the app right now.`
+                    : "Faster shopping, your saved pieces, and a note when your size is back."} Android now; iPhone is on its way.
                 </p>
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <GlassChip>Android</GlassChip>
-              <GlassChip>iPhone</GlassChip>
+              <a href="https://play.google.com/store/apps/details?id=com.kanaanshop.app" target="_blank" rel="noopener noreferrer" className="glass-btn rounded-full font-body font-medium text-sm px-5 py-2.5 tap-scale" style={{ background: "var(--fg)", color: "var(--bg)" }}>Get it on Google Play</a>
+              <GlassChip>iPhone soon</GlassChip>
             </div>
           </div>
         </div>
@@ -3637,7 +3701,7 @@ function HomeView({ products, loading, goCatalog, goSale, openProduct, likes, to
           {[
             { icon: Truck, label: "Delivery all over Lebanon" },
             { icon: ShieldCheck, label: "Cash on delivery" },
-            { icon: RotateCcw, label: "Easy 3-day returns" },
+            { icon: RotateCcw, label: "3-day exchanges" },
             { icon: BadgeCheck, label: "Premium. Fresh. Always." },
           ].map(({ icon: Icon, label }, i) => (
             <Reveal key={label} delay={i * 80}>
@@ -4258,7 +4322,13 @@ const SHOE_SIZE_CHART = [
 ];
 
 function SizeGuideModal({ category, onClose }) {
-  const isShoe = category === "shoes";
+  const isShoe = /shoe|slipper|sandal|sneaker|boot/i.test(String(category || ""));
+  // Esc closes the guide only (not the size sheet under it): heard first, and kept from the sheet
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); onClose(); } };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [onClose]);
   return (
     <div className="fixed inset-0 z-[80] flex items-end sm:items-center sm:justify-center" onClick={onClose}>
       <div className="absolute inset-0" style={{ background: "rgba(0,0,0,0.5)" }} />
@@ -4447,7 +4517,8 @@ function SizeSheet({ product, color, onColor, size, onSize, qty, setQty, onAdd, 
   );
 }
 
-function ProductView({ product, products, addToCart, openProduct, liked, toggleLike }) {
+function ProductView({ product, products, addToCart, openProduct, liked, toggleLike, likes = [], onLike = NOOP }) {
+  const site = useSiteSettings();
   // no size is chosen for the shopper (unless there's only one): picking it
   // is a deliberate tap, so nobody ends up with the wrong size by accident
   const [size, setSize] = useState(null);
@@ -4598,13 +4669,16 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
               <p className="font-body text-sm font-medium">{size ? <>Size <span className="text-coral">{size}</span></> : "Pick your size"}</p>
               <button onClick={() => setShowSizeGuide(true)} className="font-body text-xs text-coral hover:underline">Size guide</button>
             </div>
-            <div key={sizeNudge} className={`flex flex-wrap gap-2 p-0.5 ${sizeNudge ? "size-nudge" : ""}`}>
+            <div key={sizeNudge} className={`flex flex-wrap gap-2 p-0.5 ${sizeNudge ? "size-nudge" : ""}`} role="radiogroup" aria-label="Size">
               {product.sizes.map((sz) => {
                 const left = stockFor(product, color, sz);
                 const inStock = left > 0;
                 return (
                   <button
                     key={sz}
+                    role="radio"
+                    aria-checked={size === sz && inStock}
+                    aria-label={inStock ? `Size ${sz}` : `Size ${sz}, sold out`}
                     onClick={() => { if (inStock) { setSize(sz); setQty(1); } }}
                     disabled={!inStock}
                     className="font-num text-sm px-4 py-2 rounded-full tap-scale transition-all"
@@ -4701,9 +4775,9 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
 
           <div className="mt-8 pt-6 border-t grid grid-cols-3 gap-3 text-center" style={{ borderColor: "var(--border)" }}>
             {[
-              { icon: Truck, label: "Fast delivery" },
+              { icon: Truck, label: site.freeOver ? `Free delivery from ${money(site.freeOver)}` : `${money(site.deliveryFee)} delivery, all Lebanon` },
               { icon: ShieldCheck, label: "Cash on delivery" },
-              { icon: RotateCcw, label: "Easy returns" },
+              site.exchangeDays > 0 ? { icon: RotateCcw, label: `Exchange within ${site.exchangeDays} days` } : { icon: MapPin, label: "Try it on in Saida" },
             ].map(({ icon: Icon, label }) => (
               <div key={label} className="flex flex-col items-center gap-1">
                 <Icon className="w-5 h-5 text-teal" />
@@ -4719,7 +4793,7 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
           <h2 className="font-display font-bold text-xl mb-5">You might also like</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 sm:gap-6">
             {related.map((p) => (
-              <ProductCard key={p.id} product={p} onOpen={openProduct} liked={false} onToggleLike={NOOP} />
+              <ProductCard key={p.id} product={p} onOpen={openProduct} liked={likes.includes(p.id)} onToggleLike={onLike} />
             ))}
           </div>
         </div>
@@ -4819,21 +4893,45 @@ function CartItemThumb({ item }) {
   );
 }
 
-function CartDrawer({ open, onClose, cart, updateQty, removeFromCart, total, onCheckout }) {
+function CartDrawer({ open, onClose, cart, products = [], updateQty, removeFromCart, total, onCheckout }) {
+  const site = useSiteSettings();
+  const delivery = deliveryFor(site, total);
+  // a piece that sold out or left the shop since it went in the bag says so here, not at the last step
+  const gone = (item) => {
+    if (!products.length) return false;
+    const p = products.find((x) => x.id === item.productId);
+    return !p || p.soldOut || stockFor(p, item.colorKey, item.size) <= 0;
+  };
+  const blocked = cart.some(gone);
+  useEffect(() => {
+    if (!open) return undefined;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => { document.body.style.overflow = prev; window.removeEventListener("keydown", onKey); };
+  }, [open]); // eslint-disable-line
   return (
     <>
       <div onClick={onClose} className={`fixed inset-0 z-40 transition-opacity ${open ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"}`} style={{ background: "rgba(0,0,0,0.4)", backdropFilter: "blur(2px)" }} />
       <aside
-        className="glass fixed right-3 w-[calc(100%-24px)] sm:w-96 z-50 rounded-3xl transition-transform duration-400 flex flex-col"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Your cart"
+        aria-hidden={!open}
+        inert={!open}
+        className="glass fixed right-3 w-[calc(100%-24px)] sm:w-96 z-50 rounded-3xl transition-transform duration-300 flex flex-col"
         style={{
           transform: open ? "translateX(0)" : "translateX(calc(100% + 24px))",
+          visibility: open ? "visible" : "hidden",
+          transitionProperty: "transform, visibility",
           top: isNativeApp ? "calc(0.75rem + env(safe-area-inset-top, 0px))" : "0.75rem",
           bottom: isNativeApp ? "calc(0.75rem + env(safe-area-inset-bottom, 0px))" : "0.75rem",
         }}
       >
         <div className="flex items-center justify-between p-5 border-b" style={{ borderColor: "var(--border)" }}>
           <h2 className="font-display font-bold text-lg">Your cart</h2>
-          <button onClick={onClose} className="p-1 tap-scale" aria-label="Close">
+          <button onClick={onClose} className="w-10 h-10 -mr-2 rounded-full flex items-center justify-center tap-scale" aria-label="Close">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -4845,42 +4943,50 @@ function CartDrawer({ open, onClose, cart, updateQty, removeFromCart, total, onC
               <p className="font-body text-sm text-muted">Your cart is empty</p>
             </div>
           ) : (
-            cart.map((item) => (
-              <div key={item.key} className="flex gap-3">
-                <CartItemThumb item={item} />
-                <div className="flex-1 min-w-0">
-                  <p className="font-body text-sm font-medium truncate">{item.name}</p>
-                  <p className="font-body text-xs text-muted">{item.color} · {item.size}</p>
-                  <div className="flex items-center justify-between mt-2">
-                    <div className="flex items-center rounded-full" style={{ background: "var(--field-bg)", border: "1px solid var(--border)" }}>
-                      <button onClick={() => updateQty(item.key, -1)} className="p-1.5 tap-scale">
-                        <Minus className="w-3 h-3" />
-                      </button>
-                      <span className="font-num text-xs w-6 text-center">{item.qty}</span>
-                      <button onClick={() => updateQty(item.key, 1)} className="p-1.5 tap-scale">
-                        <Plus className="w-3 h-3" />
-                      </button>
-                    </div>
-                    <span className="font-num text-sm">{money(item.price * item.qty)}</span>
+            cart.map((item) => {
+              const out = gone(item);
+              return (
+                <div key={item.key} className="flex gap-3" style={out ? { opacity: 0.75 } : undefined}>
+                  <CartItemThumb item={item} />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-body text-sm font-medium truncate">{item.name}</p>
+                    <p className="font-body text-xs text-muted">{item.color} · {item.size}</p>
+                    {out ? (
+                      <p className="font-body text-xs font-medium mt-2" style={{ color: "var(--coral)" }}>Sold out — remove it to check out</p>
+                    ) : (
+                      <div className="flex items-center justify-between mt-2">
+                        <div className="flex items-center rounded-full" style={{ background: "var(--field-bg)", border: "1px solid var(--border)" }}>
+                          <button onClick={() => (item.qty > 1 ? updateQty(item.key, -1) : removeFromCart(item.key))} className="w-9 h-9 flex items-center justify-center tap-scale" aria-label={item.qty > 1 ? "One less" : "Remove"}>
+                            {item.qty > 1 ? <Minus className="w-3.5 h-3.5" /> : <X className="w-3.5 h-3.5" />}
+                          </button>
+                          <span className="font-num text-sm w-6 text-center" aria-live="polite">{item.qty}</span>
+                          <button onClick={() => updateQty(item.key, 1)} className="w-9 h-9 flex items-center justify-center tap-scale" aria-label="One more">
+                            <Plus className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                        <span className="font-num text-sm">{money(item.price * item.qty)}</span>
+                      </div>
+                    )}
                   </div>
+                  <button onClick={() => removeFromCart(item.key)} className="w-9 h-9 -mt-1.5 -mr-2 rounded-full flex items-center justify-center text-muted hover:text-coral transition-colors self-start" aria-label={`Remove ${item.name}`}>
+                    <X className="w-4 h-4" />
+                  </button>
                 </div>
-                <button onClick={() => removeFromCart(item.key)} className="text-muted hover:text-coral transition-colors self-start" aria-label="Remove" style={{ opacity: 0.5 }}>
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
 
         {cart.length > 0 && (
           <div className="p-5 border-t space-y-1" style={{ borderColor: "var(--border)" }}>
+            <FreeDeliveryMeter subtotal={total} money={money} />
             <div className="flex items-center justify-between font-body text-sm">
               <span className="text-muted">Subtotal</span>
               <span className="font-num text-lg">{money(total)}</span>
             </div>
-            <p className="font-body text-xs text-muted mb-3">+ ${DELIVERY_FEE} flat delivery, added at checkout</p>
-            <button onClick={onCheckout} className="glass-btn w-full font-body font-medium py-3 rounded-full tap-scale" style={{ background: "var(--fg)", color: "var(--bg)" }}>
-              Checkout
+            <p className="font-body text-xs text-muted mb-3">{delivery ? `+ ${money(delivery)} delivery, paid at your door` : "Free delivery · pay at your door"}</p>
+            <button onClick={onCheckout} disabled={blocked} className="glass-btn w-full font-body font-semibold py-3.5 rounded-full tap-scale" style={{ background: "var(--coral)", color: "#fff", opacity: blocked ? 0.5 : 1 }}>
+              {blocked ? "Remove the sold-out piece first" : "Checkout"}
             </button>
           </div>
         )}
@@ -4892,102 +4998,137 @@ function CartDrawer({ open, onClose, cart, updateQty, removeFromCart, total, onC
 /* ============================================================
    CHECKOUT
    ============================================================ */
-function CheckoutView({ cart, total, onSubmitted }) {
-  // بالتطبيق: نعبّي البيانات المحفوظة من طلب سابق تلقائياً (اسم/هاتف/
-  // محافظة/عنوان)، فما في داعي المستخدم يكتبها من جديد كل مرة.
-  // بالموقع، loadCheckoutInfo() برجع null دايماً والنموذج بيضل فاضي
-  // زي ما كان.
+function CheckoutView({ cart, total, onSubmitted, goCatalog }) {
+  // the delivery details of the last order (kept on this device when the
+  // shopper said so), so the next checkout is two taps
+  const [saved] = useState(() => loadCheckoutInfo());
   const [form, setForm] = useState(() => ({
-    name: "", phone: "", area: LEBANON_GOVERNORATES[0], address: "", notes: "",
-    ...loadCheckoutInfo(),
+    name: "", phone: "", area: "", address: "", notes: "",
+    ...(saved || {}),
   }));
+  const [remember, setRemember] = useState(true);
   const [error, setError] = useState("");
+  const [bad, setBad] = useState(""); // the field to fix
   const [sending, setSending] = useState(false);
-  const [autofilled] = useState(() => !!loadCheckoutInfo());
+  const [offline, setOffline] = useState(false); // the shop's server couldn't be reached: WhatsApp instead
+  const site = useSiteSettings();
+  const refs = { name: useRef(null), phone: useRef(null), area: useRef(null), address: useRef(null) };
 
   useEffect(() => {
     document.title = `Checkout — ${STORE_NAME}`;
   }, []);
 
-  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
-  const grandTotal = total + DELIVERY_FEE;
+  const set = (k) => (e) => { setForm((f) => ({ ...f, [k]: e.target.value })); if (bad === k) { setBad(""); setError(""); } };
+  const delivery = deliveryFor(site, total);
+  const grandTotal = total + delivery;
+  const phoneOk = parsePhone(form.phone);
 
-  const buildMessage = (orderNumber) => {
+  /* The WhatsApp message: the server's own lines and totals when the order
+     was saved (what the shop's program shows), the cart's otherwise. */
+  const buildMessage = (o) => {
     const lines = [
-      `New order from ${STORE_NAME} — Order #${orderNumber}`,
+      o.orderNumber ? `New order from ${STORE_NAME} — Order #${o.orderNumber}` : `New order from ${STORE_NAME}`,
       "",
-      ...cart.map((i) => `• ${i.name} — ${i.color} / ${i.size} × ${i.qty} = ${money(i.price * i.qty)}`),
+      ...o.items.map((i) => `• ${i.name} — ${i.color} / ${i.size} × ${i.qty} = ${money(i.price * i.qty)}`),
       "",
-      `Subtotal: ${money(total)}`,
-      `Delivery: ${money(DELIVERY_FEE)}`,
-      `Total: ${money(grandTotal)}`,
+      `Subtotal: ${money(o.subtotal)}`,
+      `Delivery: ${o.delivery ? money(o.delivery) : "free"}`,
+      `Total: ${money(o.total)}`,
       "",
-      `Name: ${form.name}`,
-      `Phone: ${form.phone}`,
-      `Governorate: ${form.area}`,
-      `Address: ${form.address}`,
-      form.notes ? `Notes: ${form.notes}` : null,
+      `Name: ${o.name}`,
+      `Phone: ${o.phone}`,
+      o.area ? `Governorate: ${o.area}` : null,
+      `Address: ${o.address}`,
+      o.notes ? `Notes: ${o.notes}` : null,
       "",
       "Payment: cash on delivery",
-    ].filter(Boolean);
+    ].filter((x) => x !== null);
     return lines.join("\n");
+  };
+  const waLink = (o) => `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(buildMessage(o))}`;
+
+  const check = () => {
+    if (!form.name.trim()) return ["name", "Write your name, so the driver knows who to ask for."];
+    if (!form.phone.trim()) return ["phone", "Add a phone number — the driver calls it before coming."];
+    if (!phoneOk) return ["phone", "Check the phone number — for example 03 123 456 or 70 123 456 (with + for a number outside Lebanon)."];
+    if (!form.area) return ["area", "Choose your governorate."];
+    if (form.address.trim().length < 6) return ["address", "Write the address: town, street, building — and a landmark helps."];
+    return null;
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!form.name.trim() || !form.phone.trim() || !form.address.trim()) {
-      setError("Please fill in your name, phone number and address before sending.");
+    const problem = check();
+    if (problem) {
+      setBad(problem[0]); setError(problem[1]);
+      const el = refs[problem[0]] && refs[problem[0]].current;
+      if (el) { el.focus(); el.scrollIntoView({ block: "center", behavior: "smooth" }); }
       return;
     }
-    setError("");
+    setError(""); setBad(""); setOffline(false);
     setSending(true);
-
-    // Register the order first so the shop can hold the stock and track it.
-    // We open WhatsApp with the real order number the server gave us.
-    let orderNumber = null;
+    const phone = phoneOk.pretty;
+    let res = null; let data = {};
     try {
-      /* Was a bare fetch. There's a sensible fallback below — if the API
-         can't be reached the order still goes out over WhatsApp — but
-         without a timeout the request could hang indefinitely and never
-         reach it. The customer would sit watching a spinner that never
-         resolves, at the exact moment they're trying to buy. */
-      const res = await fetchWithTimeout(`${apiBase}/api/orders`, {
+      // the order is registered first (the shop holds the pieces and sees it in Kanaan POS at once)
+      res = await fetchWithTimeout(`${apiBase}/api/orders`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: form.name, phone: form.phone, area: form.area,
-          address: form.address, notes: form.notes,
+          name: form.name.trim(), phone, area: form.area,
+          address: form.address.trim(), notes: form.notes.trim(),
+          pricing: 2,
           items: cart.map((i) => ({
             productId: i.productId, colorKey: i.colorKey, color: i.color,
             size: i.size, qty: i.qty,
           })),
         }),
-      }, 20000);
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setSending(false);
-        setError(data.error || "Something went wrong. Please try again.");
-        return;
-      }
-      orderNumber = data.orderNumber;
+      }, 15000);
+      data = await res.json().catch(() => ({}));
     } catch {
-      // Offline or the API is unreachable — don't block the sale, fall back
-      // to sending the order on WhatsApp without a tracked number.
-      orderNumber = String(Math.floor(1000 + Math.random() * 9000));
+      // no answer from the shop's server: nothing was saved. The cart stays; the order can go on WhatsApp.
+      setSending(false);
+      setOffline(true);
+      return;
     }
-
-    const msg = encodeURIComponent(buildMessage(orderNumber));
-    // الصوت والاهتزاز *قبل* فتح واتساب، مع تأخير بسيط — لأنو فتح
-    // واتساب بيبعد التطبيق عن الواجهة فوراً، وإذا فتحناه أول، الصوت
-    // ما بيلحق يتسمع أصلاً (الـ WebView بيصير بالخلفية قبل ما يشتغل).
+    if (!res.ok) {
+      setSending(false);
+      setError(data.error || "Something went wrong. Please try again.");
+      if (data.field && refs[data.field]) setBad(data.field);
+      return;
+    }
+    const order = {
+      ...form, phone: data.phone || phone, orderNumber: data.orderNumber,
+      items: data.items || cart, subtotal: data.subtotal ?? total, delivery: data.delivery ?? delivery, total: data.total ?? grandTotal,
+      count: cart.reduce((sum, i) => sum + i.qty, 0),
+    };
+    order.waUrl = waLink(order);
+    if (remember) saveCheckoutInfo({ name: form.name.trim(), phone: order.phone, area: form.area, address: form.address.trim() }); else forgetCheckoutInfo();
+    // the sound and the buzz before WhatsApp takes over the screen (in the app it would be cut short)
     hapticSuccess();
     playSuccessChime();
     setSending(false);
-    saveCheckoutInfo(form); // بالتطبيق بس — عشان يتعبّى تلقائياً المرة الجاية
-    setTimeout(() => {
-      window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${msg}`, "_blank");
-    }, isNativeApp ? 380 : 0);
-    onSubmitted({ ...form, total: grandTotal, count: cart.reduce((sum, i) => sum + i.qty, 0), orderNumber });
+    if (isNativeApp) {
+      setTimeout(() => { window.open(order.waUrl, "_blank"); }, 380);
+      order.waOpened = true;
+    } else {
+      // a browser may not let a page open WhatsApp after waiting for the server: the thank-you page has the button
+      let w = null;
+      try { w = window.open(order.waUrl, "_blank"); } catch { w = null; }
+      order.waOpened = !!w;
+    }
+    onSubmitted(order);
+  };
+
+  // the server didn't answer: the same order, by WhatsApp (nothing is lost, and nothing pretends it was saved)
+  const sendByWhatsApp = () => {
+    const o = { ...form, phone: phoneOk ? phoneOk.pretty : form.phone, orderNumber: null, items: cart, subtotal: total, delivery, total: grandTotal, count: cart.reduce((sum, i) => sum + i.qty, 0) };
+    if (remember) saveCheckoutInfo({ name: form.name.trim(), phone: o.phone, area: form.area, address: form.address.trim() });
+    o.waUrl = waLink(o);
+    o.viaWhatsApp = true;
+    o.waOpened = true;
+    setTimeout(() => onSubmitted(o), 300);
+    return o.waUrl;
   };
 
   if (cart.length === 0) {
@@ -4995,54 +5136,79 @@ function CheckoutView({ cart, total, onSubmitted }) {
       <div className="max-w-lg mx-auto px-4 sm:px-6 py-20 text-center">
         <ShoppingBag className="w-10 h-10 text-muted mx-auto mb-4" style={{ opacity: 0.3 }} />
         <p className="font-body text-muted mb-2">Your cart is empty</p>
-        <p className="font-body text-muted text-sm">Add a few things before checking out.</p>
+        <p className="font-body text-muted text-sm mb-6">Add a few things before checking out.</p>
+        {goCatalog && <button onClick={() => goCatalog("all")} className="glass-btn rounded-full font-body font-medium px-6 py-3 tap-scale" style={{ background: "var(--coral)", color: "#fff" }}>Shop the collection</button>}
       </div>
     );
   }
 
+  const fieldCls = (k) => `field${bad === k ? " field-bad" : ""}`;
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 py-10 grid md:grid-cols-5 gap-10">
-      <form onSubmit={handleSubmit} className="md:col-span-3 space-y-5">
+      <form onSubmit={handleSubmit} noValidate className="md:col-span-3 space-y-5">
         <h1 className="font-display font-bold text-2xl mb-2">Delivery details</h1>
-        {autofilled && (
-          <p className="font-body text-xs text-teal -mt-2 mb-1">
-            Filled in from your last order — check it's still correct.
+        {saved && (
+          <p className="font-body text-xs -mt-2 mb-1" style={{ color: "var(--teal-text)" }}>
+            Filled in from your last order — check it's still right.
           </p>
         )}
 
-        <Field label="Full name" required>
-          <input value={form.name} onChange={set("name")} className="field" placeholder="Your name" />
+        <Field label="Full name" required id="co-name">
+          <input id="co-name" ref={refs.name} value={form.name} onChange={set("name")} className={fieldCls("name")} placeholder="Your name" autoComplete="name" enterKeyHint="next" aria-invalid={bad === "name"} />
         </Field>
-        <Field label="Phone number" required>
-          <input value={form.phone} onChange={set("phone")} className="field" placeholder="03 123 456" />
+        <Field label="Phone number" required id="co-phone" hint={form.phone && phoneOk ? `We'll call ${phoneOk.pretty}` : "The driver calls before coming"}>
+          <input id="co-phone" ref={refs.phone} value={form.phone} onChange={set("phone")} onBlur={() => { if (phoneOk) setForm((f) => ({ ...f, phone: phoneOk.lebanon ? phoneOk.national : phoneOk.pretty })); }} className={fieldCls("phone")} placeholder="03 123 456" type="tel" inputMode="tel" autoComplete="tel" enterKeyHint="next" aria-invalid={bad === "phone"} />
         </Field>
-        <Field label="Governorate" required>
-          <select value={form.area} onChange={set("area")} className="field">
+        <Field label="Governorate" required id="co-area">
+          <select id="co-area" ref={refs.area} value={form.area} onChange={set("area")} className={fieldCls("area")} autoComplete="address-level1" aria-invalid={bad === "area"}>
+            <option value="" disabled>Choose…</option>
             {LEBANON_GOVERNORATES.map((a) => (
               <option key={a} value={a}>{a}</option>
             ))}
           </select>
         </Field>
-        <Field label="Address" required>
-          <input value={form.address} onChange={set("address")} className="field" placeholder="Street, building, floor..." />
+        <Field label="Address" required id="co-address">
+          <input id="co-address" ref={refs.address} value={form.address} onChange={set("address")} className={fieldCls("address")} placeholder="Town, street, building, a landmark" autoComplete="street-address" enterKeyHint="done" aria-invalid={bad === "address"} />
         </Field>
-        <Field label="Notes (optional)">
-          <textarea value={form.notes} onChange={set("notes")} rows={3} className="field resize-none" />
+        <Field label="Notes (optional)" id="co-notes">
+          <textarea id="co-notes" value={form.notes} onChange={set("notes")} rows={3} className="field resize-none" placeholder="A time that suits you, a size question…" />
         </Field>
+        <label className="flex items-center gap-2.5 font-body text-sm text-muted cursor-pointer select-none">
+          <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} className="w-4 h-4 accent-[var(--coral)]" />
+          Remember my details on this device
+        </label>
 
-        {error && <p className="font-body text-sm text-coral">{error}</p>}
+        {/* the total right above the button, on a phone too: no surprise at the door */}
+        <div className="md:hidden glass rounded-2xl px-4 py-3 flex items-center justify-between font-body text-sm">
+          <span className="text-muted">{(() => { const n = cart.reduce((a, i) => a + i.qty, 0); return `${n} ${n === 1 ? "piece" : "pieces"}`; })()} · {delivery ? `${money(delivery)} delivery` : "free delivery"}</span>
+          <span className="font-num text-lg">{money(grandTotal)}</span>
+        </div>
 
-        <Magnetic strength={8} className="block w-full">
-          <button type="submit" disabled={sending} className="glass-btn w-full font-body font-medium py-3.5 rounded-full tap-scale flex items-center justify-center gap-2" style={{ background: "var(--teal)", color: "#062420", opacity: sending ? 0.7 : 1 }}>
-            <MessageCircle className="w-5 h-5" />
-            {sending ? "Preparing your order…" : "Send order on WhatsApp"}
-          </button>
-        </Magnetic>
-        <p className="font-body text-xs text-muted text-center">WhatsApp will open with your order ready — just review and send.</p>
+        {error && <p role="alert" className="font-body text-sm" style={{ color: "var(--coral-text)" }}>{error}</p>}
+
+        {offline ? (
+          <div role="alert" className="glass rounded-2xl p-4 space-y-3">
+            <p className="font-body text-sm"><b>We couldn't reach the shop just now.</b> Your order isn't lost — send it to us on WhatsApp and we'll confirm it there.</p>
+            <a href={waLink({ ...form, phone: phoneOk ? phoneOk.pretty : form.phone, orderNumber: null, items: cart, subtotal: total, delivery, total: grandTotal })} target="_blank" rel="noopener noreferrer" onClick={(e) => { e.currentTarget.href = sendByWhatsApp(); }} className="glass-btn w-full font-body font-semibold py-3.5 rounded-full tap-scale flex items-center justify-center gap-2" style={{ background: "var(--teal)", color: "#062420" }}>
+              <MessageCircle className="w-5 h-5" /> Send the order on WhatsApp
+            </a>
+            <button type="submit" className="w-full font-body text-sm text-muted underline">Try again</button>
+          </div>
+        ) : (
+          <>
+            <Magnetic strength={8} className="block w-full">
+              <button type="submit" disabled={sending} className="glass-btn w-full font-body font-semibold py-3.5 rounded-full tap-scale flex items-center justify-center gap-2" style={{ background: "var(--coral)", color: "#fff", opacity: sending ? 0.7 : 1 }}>
+                {sending ? "Placing your order…" : <>Place order · {money(grandTotal)}</>}
+              </button>
+            </Magnetic>
+            <p className="font-body text-xs text-muted text-center">Pay cash at your door. WhatsApp opens with your order so you can message us about it.</p>
+          </>
+        )}
 
         <style>{`
           .field { width: 100%; border: 1px solid var(--border); background: var(--field-bg); color: var(--fg); border-radius: 14px; padding: 0.7rem 1rem; font-family: 'Inter', sans-serif; font-size: 16px; }
           .field:focus { outline: none; border-color: var(--coral); box-shadow: 0 0 0 3px rgba(255,69,34,0.15); }
+          .field-bad { border-color: var(--coral); box-shadow: 0 0 0 3px rgba(255,69,34,0.12); }
         `}</style>
       </form>
 
@@ -5051,12 +5217,13 @@ function CheckoutView({ cart, total, onSubmitted }) {
           <h2 className="font-display font-bold text-lg mb-4">Order summary</h2>
           <div className="space-y-3 mb-4">
             {cart.map((i) => (
-              <div key={i.key} className="flex justify-between font-body text-sm">
-                <span className="text-muted">{i.name} × {i.qty}</span>
+              <div key={i.key} className="flex justify-between gap-3 font-body text-sm">
+                <span className="text-muted">{i.name} <span className="whitespace-nowrap">· {i.size} × {i.qty}</span></span>
                 <span className="font-num">{money(i.price * i.qty)}</span>
               </div>
             ))}
           </div>
+          <FreeDeliveryMeter subtotal={total} money={money} />
           <div className="border-t pt-3 space-y-1.5" style={{ borderColor: "var(--border)" }}>
             <div className="flex justify-between font-body text-sm text-muted">
               <span>Subtotal</span>
@@ -5064,26 +5231,28 @@ function CheckoutView({ cart, total, onSubmitted }) {
             </div>
             <div className="flex justify-between font-body text-sm text-muted">
               <span>Delivery</span>
-              <span className="font-num">{money(DELIVERY_FEE)}</span>
+              <span className="font-num">{delivery ? money(delivery) : "Free"}</span>
             </div>
             <div className="flex justify-between items-center pt-1.5">
-              <span className="font-body text-sm font-medium">Total</span>
+              <span className="font-body text-sm font-medium">Total · cash on delivery</span>
               <span className="font-num text-xl">{money(grandTotal)}</span>
             </div>
           </div>
+          {site.exchangeDays > 0 && <p className="font-body text-xs text-muted mt-3 flex items-center gap-1.5"><RotateCcw className="w-3.5 h-3.5" /> Exchange within {site.exchangeDays} days</p>}
         </div>
       </div>
     </div>
   );
 }
 
-function Field({ label, children, required }) {
+function Field({ label, children, required, id, hint }) {
   return (
     <div>
-      <label className="font-body text-sm block mb-1.5">
-        {label} {required && <span className="text-required">*</span>}
+      <label htmlFor={id} className="font-body text-sm block mb-1.5">
+        {label} {required && <span className="text-required" aria-hidden="true">*</span>}
       </label>
       {children}
+      {hint && <p className="font-body text-xs text-muted mt-1.5">{hint}</p>}
     </div>
   );
 }
@@ -5092,20 +5261,33 @@ function Field({ label, children, required }) {
    CONFIRMATION
    ============================================================ */
 function ConfirmationView({ order, goHome }) {
+  useEffect(() => { document.title = `Thank you — ${STORE_NAME}`; }, []);
   return (
-    <div className="max-w-lg mx-auto px-4 sm:px-6 py-24 text-center">
+    <div className="max-w-lg mx-auto px-4 sm:px-6 py-20 text-center">
       <div className="glass w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6">
         <Check className="w-8 h-8 text-teal" />
       </div>
-      <h1 className="font-display font-bold text-2xl mb-2">Thank you! 🎉</h1>
-      <p className="font-body text-muted mb-4">Your order has been sent — we'll confirm it with you within a short time.</p>
+      <h1 className="font-display font-bold text-2xl mb-2">{order && order.viaWhatsApp ? "Over to WhatsApp" : "Thank you — your order is in"}</h1>
       {order && (
         <>
-          <div className="glass inline-flex flex-col items-center rounded-2xl px-6 py-4 mb-4">
-            <span className="font-body text-xs text-muted">Order number — save this to track your order</span>
-            <span className="font-num text-2xl text-coral mt-1">#{order.orderNumber}</span>
-          </div>
-          <p className="font-body text-muted mb-8">We'll reach out on {order.phone} to confirm delivery to {order.area}.</p>
+          <p className="font-body text-muted mb-5">
+            {order.viaWhatsApp
+              ? "Send the message in WhatsApp and we'll confirm your order there."
+              : <>We'll call {order.phone} to confirm, then deliver to {order.area || "you"}. Pay <b className="font-num" style={{ color: "var(--fg)" }}>{money(order.total)}</b> in cash at your door.</>}
+          </p>
+          {order.orderNumber && (
+            <div className="glass inline-flex flex-col items-center rounded-2xl px-6 py-4 mb-5">
+              <span className="font-body text-xs text-muted">Your order number</span>
+              <span className="font-num text-2xl mt-1" style={{ color: "var(--coral-text)" }}>#{order.orderNumber}</span>
+            </div>
+          )}
+          {order.waUrl && (
+            <div className="mb-8">
+              <a href={order.waUrl} target="_blank" rel="noopener noreferrer" className={`${order.waOpened ? "glass" : "glass-btn"} inline-flex items-center justify-center gap-2 rounded-full font-body font-semibold px-6 py-3 tap-scale`} style={order.waOpened ? undefined : { background: "var(--teal)", color: "#062420" }}>
+                <MessageCircle className="w-5 h-5" /> {order.waOpened ? "WhatsApp didn't open? Send it here" : "Send it to us on WhatsApp"}
+              </a>
+            </div>
+          )}
         </>
       )}
       <button onClick={goHome} className="glass-btn font-body font-medium px-6 py-3 rounded-full tap-scale" style={{ background: "var(--fg)", color: "var(--bg)" }}>

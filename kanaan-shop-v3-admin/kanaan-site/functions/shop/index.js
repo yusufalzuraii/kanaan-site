@@ -12,7 +12,7 @@ export async function onRequestGet(context) {
 
   let res;
   try {
-    res = await next();
+    res = await next(fresh(context.request));
   } catch {
     return new Response("Not found", { status: 404 });
   }
@@ -22,7 +22,7 @@ export async function onRequestGet(context) {
 
   let count = 0;
   try {
-    const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM products WHERE active = 1 AND sold_out = 0").first();
+    const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM products WHERE active = 1 AND app_exclusive = 0 AND sold_out = 0").first();
     count = Number(row?.n) || 0;
   } catch { /* description still works without the count */ }
 
@@ -56,6 +56,19 @@ export async function onRequestGet(context) {
     .replace(/<\/head>/i, `${tags}\n  </head>`);
 
   const headers = new Headers(res.headers);
-  headers.set("Cache-Control", "public, max-age=300");
+  // the page is re-checked every visit (like the shell, see public/_headers): a cached copy could point at the
+  // previous deploy's files; and its own ETag (the shell's) must not answer "not changed" for a page that did
+  headers.set("Cache-Control", "public, max-age=0, must-revalidate");
+  headers.delete("ETag");
+  headers.delete("Last-Modified");
   return new Response(html, { status: 200, headers });
+}
+
+/* The shell, asked plainly: without the browser's If-None-Match / If-Modified-Since (the shell's "not changed"
+   would answer for this page, which did change). */
+function fresh(request) {
+  const h = new Headers(request.headers);
+  h.delete("If-None-Match");
+  h.delete("If-Modified-Since");
+  return new Request(request.url, { method: "GET", headers: h });
 }

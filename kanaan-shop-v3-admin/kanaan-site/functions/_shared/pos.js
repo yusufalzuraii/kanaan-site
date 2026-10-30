@@ -106,3 +106,54 @@ export async function withPosInfo(env, orders) {
   }
   return orders;
 }
+
+/**
+ * The stock of many products at once from the POS — the same rules as setStock, in a few queries whatever the
+ * number of products: one read of the rows, then every change in batches (a call may make only ~50 queries on the
+ * free plan; one at a time, a big sync used to stop after about a dozen products and try again forever).
+ * entries: [{ id, stock: { "color|size": qty }, v? }] → Map(id → { before, after })
+ */
+export async function setStockMany(env, entries) {
+  const out = new Map();
+  const list = (entries || []).filter((e) => e && e.id);
+  if (!list.length) return out;
+  const ids = [...new Set(list.map((e) => String(e.id)))];
+  const cur = new Map(ids.map((id) => [id, new Map()]));
+  for (let i = 0; i < ids.length; i += 40) {
+    const part = ids.slice(i, i + 40);
+    const { results } = await env.DB.prepare(`SELECT product_id, color, size, quantity, reserved FROM variants WHERE product_id IN (${part.map(() => "?").join(",")})`).bind(...part).all();
+    for (const r of results || []) cur.get(r.product_id).set(`${r.color}|${r.size}`, r);
+  }
+  const avail = (rows) => rows.reduce((a, r) => a + Math.max(0, (Number(r.quantity) || 0) - (Number(r.reserved) || 0)), 0);
+  const stmts = [];
+  for (const e of list) {
+    const id = String(e.id);
+    const have = cur.get(id);
+    const before = avail([...have.values()]);
+    const want = new Map();
+    for (const [key, q] of Object.entries(e.stock || {})) {
+      const [color, size] = String(key).split("|");
+      if (!color || !size) continue;
+      want.set(`${color}|${size}`, Math.max(0, Math.round(Number(q) || 0)));
+    }
+    for (const [key, q] of want) {
+      const [color, size] = key.split("|");
+      if (have.has(key)) { if (Number(have.get(key).quantity) !== q) stmts.push(env.DB.prepare("UPDATE variants SET quantity = ? WHERE product_id = ? AND color = ? AND size = ?").bind(q, id, color, size)); }
+      else stmts.push(env.DB.prepare("INSERT INTO variants (product_id, color, size, quantity, reserved) VALUES (?,?,?,?,0)").bind(id, color, size, q));
+    }
+    for (const [key, r] of have) {
+      if (want.has(key)) continue;
+      const [color, size] = key.split("|");
+      if (Number(r.reserved) > 0) { if (Number(r.quantity) !== 0) stmts.push(env.DB.prepare("UPDATE variants SET quantity = 0 WHERE product_id = ? AND color = ? AND size = ?").bind(id, color, size)); }
+      else stmts.push(env.DB.prepare("DELETE FROM variants WHERE product_id = ? AND color = ? AND size = ?").bind(id, color, size));
+    }
+    const total = [...want.values()].reduce((a, q) => a + q, 0);
+    stmts.push(env.DB.prepare("UPDATE products SET sold_out = ? WHERE id = ?").bind(total > 0 ? 0 : 1, id));
+    const v = Math.max(0, Math.round(Number(e.v) || 0));
+    if (v) stmts.push(env.DB.prepare("UPDATE products SET pos_v = MAX(pos_v, ?) WHERE id = ?").bind(v, id));
+    const after = [...want.entries()].reduce((a, [key, q]) => a + Math.max(0, q - (have.has(key) ? Number(have.get(key).reserved) || 0 : 0)), 0);
+    out.set(id, { before, after });
+  }
+  for (let i = 0; i < stmts.length; i += 200) await env.DB.batch(stmts.slice(i, i + 200));
+  return out;
+}

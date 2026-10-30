@@ -87,14 +87,13 @@ export async function onRequestGet(context) {
   const old = new URL(context.request.url).searchParams.get("old") === "1";
   const { results } = await context.env.DB.prepare(old
     ? "SELECT id, name, category, subcategory, price, colors, sizes, description, images, active, sold_out, replaced_by, created_at FROM products WHERE source <> 'pos' ORDER BY active DESC, sort_order ASC, created_at DESC"
-    : "SELECT id, name, category, subcategory, price, colors, sizes, images, active, sold_out, pos_model, pos_v, created_at FROM products WHERE source = 'pos' ORDER BY created_at DESC").all();
+    : "SELECT id, name, category, subcategory, price, colors, sizes, images, active, sold_out, pos_model, pos_v, created_at, is_spotlight, app_exclusive, sort_order FROM products WHERE source = 'pos' ORDER BY created_at DESC").all();
   const rows = (results || []).map((r) => ({ ...r, images: parseImages(r.images), colors: String(r.colors || "").split(",").filter(Boolean), sizes: String(r.sizes || "").split(",").filter(Boolean) }));
   if (old) {
     // what is still on the shelf there (the old stock numbers), so the owner sees what the visitors see
-    for (const r of rows) {
-      const st = await context.env.DB.prepare("SELECT COALESCE(SUM(MAX(quantity - reserved, 0)),0) n, COUNT(*) c FROM variants WHERE product_id = ?").bind(r.id).first();
-      r.available = st && st.c ? Number(st.n) : null;
-    }
+    const { results: sums } = await context.env.DB.prepare("SELECT product_id, SUM(MAX(quantity - reserved, 0)) n, COUNT(*) c FROM variants GROUP BY product_id").all();
+    const by = new Map((sums || []).map((x) => [x.product_id, x]));
+    for (const r of rows) { const st = by.get(r.id); r.available = st && st.c ? Number(st.n) : null; }
   }
   return json({ products: rows });
 }

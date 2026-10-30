@@ -149,8 +149,10 @@ export async function nativeShare({ title, text, url }) {
    ---------------------------------------------------------- */
 const CHECKOUT_INFO_KEY = "kanaan-checkout-info";
 
+/* The delivery details of the last order, kept on this device (the app, and
+   the website too since 30 Oct 2026, with a "remember me" the shopper can
+   untick) so the next checkout is two taps. */
 export function saveCheckoutInfo(form) {
-  if (!isNativeApp) return;
   try {
     // ما بنخزن الملاحظات (notes) — غالباً خاصة بطلب معيّن، مش بيانات ثابتة عن الزبون
     const { notes, ...persistent } = form;
@@ -158,8 +160,11 @@ export function saveCheckoutInfo(form) {
   } catch { /* تجاهل */ }
 }
 
+export function forgetCheckoutInfo() {
+  try { localStorage.removeItem(CHECKOUT_INFO_KEY); } catch { /* تجاهل */ }
+}
+
 export function loadCheckoutInfo() {
-  if (!isNativeApp) return null;
   try {
     const saved = localStorage.getItem(CHECKOUT_INFO_KEY);
     return saved ? JSON.parse(saved) : null;

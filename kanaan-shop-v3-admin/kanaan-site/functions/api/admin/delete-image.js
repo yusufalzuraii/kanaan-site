@@ -16,6 +16,10 @@ export async function onRequestPost(context) {
   // Only ever touch our own uploaded images.
   if (!url.startsWith("/img/")) return json({ ok: true, skipped: true });
 
+  // a photo a product still shows (another product, or one Kanaan POS published with it) stays
+  const used = env.DB ? await env.DB.prepare("SELECT id FROM products WHERE images LIKE ? LIMIT 1").bind(`%${url}%`).first().catch(() => null) : null;
+  if (used && body.productId !== used.id) return json({ ok: true, skipped: true, usedBy: used.id });
+
   await deleteUploadedImage(env, url); // removes the thumbnail too
 
   return json({ ok: true });

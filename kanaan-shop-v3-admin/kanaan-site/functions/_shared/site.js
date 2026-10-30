@@ -27,6 +27,13 @@ export async function ensureSchema(env) {
     `CREATE TABLE IF NOT EXISTS pos_state (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')`,
     // the shop's phones that get a notification for each website order (Web Push)
     `CREATE TABLE IF NOT EXISTS pos_push (endpoint TEXT PRIMARY KEY, keys TEXT NOT NULL, device_no INTEGER, user_name TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL DEFAULT 0, last_ok INTEGER NOT NULL DEFAULT 0, fails INTEGER NOT NULL DEFAULT 0)`,
+    // the limits on public calls (orders, error reports, sign-in) count here; without the table they let all through
+    `CREATE TABLE IF NOT EXISTS rate_limits (key TEXT PRIMARY KEY, count INTEGER NOT NULL DEFAULT 0, window_start INTEGER NOT NULL DEFAULT 0)`,
+    `CREATE TABLE IF NOT EXISTS app_config (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')`,
+    // every device asks for the orders changed since its last look, every 30 s: without these, each look read
+    // every order ever placed (the free plan's daily reads would run out as the orders grow)
+    `CREATE INDEX IF NOT EXISTS idx_orders_updated ON orders (updated_at)`,
+    `CREATE INDEX IF NOT EXISTS idx_orders_created ON orders (created_at)`,
   ];
   for (const s of stmts) await env.DB.prepare(s).run();
   // products published by the POS are marked, so the storefront and the old admin treat their stock right

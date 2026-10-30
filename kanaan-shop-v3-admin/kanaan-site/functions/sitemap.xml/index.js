@@ -43,7 +43,7 @@ export async function onRequestGet(context) {
 
   try {
     const { results } = await env.DB.prepare(
-      "SELECT id, images, created_at FROM products WHERE active = 1"
+      "SELECT id, images, created_at FROM products WHERE active = 1 AND app_exclusive = 0"
     ).all();
     for (const row of results || []) {
       let images = [];

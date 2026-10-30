@@ -30,7 +30,7 @@ export async function onRequestGet(context) {
   let products = [];
   try {
     const { results } = await env.DB.prepare(
-      "SELECT * FROM products WHERE active = 1 ORDER BY sort_order ASC, created_at DESC"
+      "SELECT * FROM products WHERE active = 1 AND app_exclusive = 0 ORDER BY sort_order ASC, created_at DESC"
     ).all();
     products = (results || []).map(rowToProduct);
   } catch {

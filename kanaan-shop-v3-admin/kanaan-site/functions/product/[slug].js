@@ -32,7 +32,7 @@ export async function onRequestGet(context) {
   // Always fall back to the normal app if anything is off.
   let res;
   try {
-    res = await next();
+    res = await next(fresh(context.request));
   } catch {
     return new Response("Not found", { status: 404 });
   }
@@ -46,7 +46,7 @@ export async function onRequestGet(context) {
   let row;
   try {
     row = await env.DB.prepare(
-      "SELECT id, name, category, subcategory, description, images, price, badge, discount, sold_out, colors, sizes FROM products WHERE id = ? AND active = 1"
+      "SELECT id, name, category, subcategory, description, images, price, badge, discount, sold_out, colors, sizes FROM products WHERE id = ? AND active = 1 AND app_exclusive = 0"
     ).bind(slug).first();
   } catch {
     return res;
@@ -57,10 +57,11 @@ export async function onRequestGet(context) {
     try {
       const gone = await env.DB.prepare("SELECT category, replaced_by FROM products WHERE id = ? AND active = 0").bind(slug).first();
       if (gone) {
-        let to = "";
-        if (gone.replaced_by) { const n = await env.DB.prepare("SELECT id FROM products WHERE id = ? AND active = 1").bind(gone.replaced_by).first(); if (n) to = `/product/${n.id}`; }
+        let to = ""; let moved = false;
+        if (gone.replaced_by) { const n = await env.DB.prepare("SELECT id FROM products WHERE id = ? AND active = 1").bind(gone.replaced_by).first(); if (n) { to = `/product/${n.id}`; moved = true; } }
         if (!to) { const cats = await loadCategories(env); to = cats.ids.includes(gone.category) ? `/shop/${gone.category}` : "/shop"; }
-        return Response.redirect(new URL(to, request.url).toString(), 301);
+        // replaced for good: a permanent move; only hidden (it may come back): a temporary one browsers don't keep
+        return new Response(null, { status: moved ? 301 : 302, headers: { Location: new URL(to, request.url).toString(), "Cache-Control": moved ? "public, max-age=86400" : "no-store" } });
       }
     } catch { /* fall back to the app */ }
     return res;
@@ -172,6 +173,19 @@ export async function onRequestGet(context) {
     .replace(/<\/head>/i, `${tags}\n  </head>`);
 
   const headers = new Headers(res.headers);
-  headers.set("Cache-Control", "public, max-age=300");
+  // the page is re-checked every visit (like the shell, see public/_headers): a cached copy could point at the
+  // previous deploy's files; and its own ETag (the shell's) must not answer "not changed" for a page that did
+  headers.set("Cache-Control", "public, max-age=0, must-revalidate");
+  headers.delete("ETag");
+  headers.delete("Last-Modified");
   return new Response(html, { status: 200, headers });
+}
+
+/* The shell, asked plainly: without the browser's If-None-Match / If-Modified-Since (the shell's "not changed"
+   would answer for this page, which did change). */
+function fresh(request) {
+  const h = new Headers(request.headers);
+  h.delete("If-None-Match");
+  h.delete("If-Modified-Since");
+  return new Request(request.url, { method: "GET", headers: h });
 }

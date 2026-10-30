@@ -309,33 +309,42 @@ export async function releaseExpiredOrders(env, hours = RESERVATION_HOURS) {
   }
   if (!results || results.length === 0) return 0;
 
+  let n = 0;
   for (const o of results) {
+    // the status first, and only if it is still pending: a device may have taken it in between
+    const won = await env.DB.prepare("UPDATE orders SET status = 'expired', updated_at = ? WHERE id = ? AND status = 'pending' RETURNING id")
+      .bind(Date.now(), o.id).first();
+    if (!won) continue;
     let items = [];
     try { items = JSON.parse(o.items); } catch { /* skip */ }
     await releaseReservation(env, items);
-    await env.DB.prepare("UPDATE orders SET status = 'expired', updated_at = ? WHERE id = ?")
-      .bind(Date.now(), o.id).run();
+    n++;
   }
-  return results.length;
+  return n;
 }
 
-export async function releaseReservation(env, items) {
-  for (const it of items || []) {
-    if (!it.productId || !it.colorKey || !it.size) continue;
-    await env.DB.prepare(
-      "UPDATE variants SET reserved = MAX(0, reserved - ?) WHERE product_id = ? AND color = ? AND size = ?"
-    ).bind(Math.max(0, Number(it.qty) || 0), it.productId, it.colorKey, it.size).run();
-  }
+/* The statements that let go of an order's hold (and, for a confirmed sale of a product the site keeps the stock
+   of, take the pieces out too) — one batch, so it happens all at once or not at all. */
+export function releaseStatements(env, items) {
+  return (items || []).filter((it) => it.productId && it.colorKey && it.size).map((it) => env.DB.prepare(
+    "UPDATE variants SET reserved = MAX(0, reserved - ?) WHERE product_id = ? AND color = ? AND size = ?"
+  ).bind(Math.max(0, Number(it.qty) || 0), it.productId, it.colorKey, it.size));
 }
-
-export async function confirmReservation(env, items) {
-  for (const it of items || []) {
-    if (!it.productId || !it.colorKey || !it.size) continue;
+export function confirmStatements(env, items) {
+  return (items || []).filter((it) => it.productId && it.colorKey && it.size).map((it) => {
     const qty = Math.max(0, Number(it.qty) || 0);
-    await env.DB.prepare(
+    return env.DB.prepare(
       "UPDATE variants SET quantity = MAX(0, quantity - ?), reserved = MAX(0, reserved - ?) WHERE product_id = ? AND color = ? AND size = ?"
-    ).bind(qty, qty, it.productId, it.colorKey, it.size).run();
-  }
+    ).bind(qty, qty, it.productId, it.colorKey, it.size);
+  });
+}
+export async function releaseReservation(env, items) {
+  const st = releaseStatements(env, items);
+  if (st.length) await env.DB.batch(st);
+}
+export async function confirmReservation(env, items) {
+  const st = confirmStatements(env, items);
+  if (st.length) await env.DB.batch(st);
 }
 
 export function rowToOrder(r) {

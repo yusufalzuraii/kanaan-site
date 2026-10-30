@@ -39,6 +39,8 @@ import {
   MAPS_URL,
 } from "../App.jsx";
 import { detectTier } from "../store3d/tier.js";
+import { useSiteSettings } from "../lib/siteSettings.js";
+import { OpenNow } from "../components/SiteBits.jsx";
 
 const StoreStage = React.lazy(() => import("../store3d/StoreStage.jsx"));
 
@@ -362,6 +364,7 @@ function useSectionProgress(ref, onProgress) {
    one and the walk carries you there, so nobody has to scroll through the
    whole shop to reach the shoes. */
 function SectionWalk({ theme, tall, tier, sections, counts, saleCount, maxDiscount, goCatalog, goSale, openProduct }) {
+  const site = useSiteSettings();
   const sectionRef = useRef(null);
   const storeRef = useRef(null);
   const stationRefs = useRef({});
@@ -518,10 +521,11 @@ function SectionWalk({ theme, tall, tier, sections, counts, saleCount, maxDiscou
           <div className="lab-card">
             <h2 className="lab-title">Order here, pay at your door</h2>
             <ul className="lab-promises">
-              <li><Truck className="w-4 h-4" /> All of Lebanon</li>
+              <li><Truck className="w-4 h-4" /> {site.freeOver ? `Free delivery from ${money(site.freeOver)}` : "All of Lebanon"}</li>
               <li><ShieldCheck className="w-4 h-4" /> Cash on delivery</li>
-              <li><RotateCcw className="w-4 h-4" /> 3-day returns</li>
+              {site.exchangeDays > 0 && <li><RotateCcw className="w-4 h-4" /> {site.exchangeDays}-day exchanges</li>}
             </ul>
+            <OpenNow className="lab-open" />
             <div className="lab-actions">
               <button onClick={() => goCatalog("all")} className="glass glass-btn rounded-full font-body font-medium px-6 py-3 tap-scale lab-primary">Start shopping</button>
               <a href={`https://wa.me/${WHATSAPP_NUMBER}`} target="_blank" rel="noopener noreferrer" className="glass rounded-full font-body px-5 py-3 tap-scale inline-flex items-center gap-2">
@@ -689,6 +693,7 @@ function VisitStore() {
             Everything here is also on the rails in Saida. Try it on, or order online and pay at your door.
           </p>
           <p className="font-body mt-5 inline-flex items-center gap-2"><MapPin className="w-4 h-4" style={{ color: "var(--coral)" }} /> Eastern Boulevard, Saida</p>
+          <div className="mt-2"><OpenNow /></div>
           <div className="lab-actions mt-5">
             <a href={MAPS_URL} target="_blank" rel="noopener noreferrer" className="glass glass-btn rounded-full font-body font-medium px-6 py-3 tap-scale lab-primary">Get directions</a>
             <a href={`https://wa.me/${WHATSAPP_NUMBER}`} target="_blank" rel="noopener noreferrer" className="glass rounded-full font-body px-5 py-3 tap-scale inline-flex items-center gap-2"><MessageCircle className="w-4 h-4" /> WhatsApp</a>
@@ -704,12 +709,13 @@ function VisitStore() {
 }
 
 function Promises() {
+  const site = useSiteSettings();
   return (
     <section className="lab-section max-w-6xl mx-auto px-4 sm:px-6">
       <ul className="lab-promise-row">
-        <li><Truck className="w-5 h-5" /> <span>Delivery to all of Lebanon</span></li>
+        <li><Truck className="w-5 h-5" /> <span>{site.freeOver ? `Free delivery from ${money(site.freeOver)}, all of Lebanon` : `Delivery to all of Lebanon · ${money(site.deliveryFee)}`}</span></li>
         <li><ShieldCheck className="w-5 h-5" /> <span>Cash on delivery</span></li>
-        <li><RotateCcw className="w-5 h-5" /> <span>Easy 3-day returns</span></li>
+        <li><RotateCcw className="w-5 h-5" /> <span>{site.exchangeDays > 0 ? `Exchange within ${site.exchangeDays} days` : "Try it on at the shop in Saida"}</span></li>
       </ul>
     </section>
   );
@@ -826,6 +832,7 @@ const LAB_CSS = String.raw`
 /* The shop's sections, at the top of the walk: tap one to walk there.
    Glass (it floats over the 3D, like the header). One line; on a narrow
    phone it scrolls sideways and keeps the lit section in view. */
+.lab-open { margin: 2px 0 14px; }
 .lab-aisles { position: absolute; z-index: 3; top: calc(var(--header-h) + 10px); left: 50%; transform: translateX(-50%); max-width: calc(100% - 32px); display: flex; gap: 2px; padding: 4px; border-radius: 999px; overflow-x: auto; scrollbar-width: none; }
 .lab-aisles::-webkit-scrollbar { display: none; }
 .lab-aisles button { flex: 0 0 auto; font-family: Inter, system-ui, sans-serif; font-size: 0.84rem; padding: 8px 14px; border-radius: 999px; color: var(--fg); white-space: nowrap; transition: background 0.3s, color 0.3s; }

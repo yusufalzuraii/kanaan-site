@@ -156,3 +156,12 @@ CREATE TABLE IF NOT EXISTS error_logs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_error_logs_created ON error_logs (created_at);
+
+-- Limits on public calls (orders, error reports, sign-in): one row per bucket and address.
+CREATE TABLE IF NOT EXISTS rate_limits (
+  key          TEXT PRIMARY KEY,
+  count        INTEGER NOT NULL DEFAULT 0,
+  window_start INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_orders_updated ON orders (updated_at);
+CREATE INDEX IF NOT EXISTS idx_orders_created ON orders (created_at);

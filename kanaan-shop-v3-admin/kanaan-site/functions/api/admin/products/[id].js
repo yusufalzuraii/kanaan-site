@@ -70,7 +70,9 @@ export async function onRequestDelete(context) {
     const row = await env.DB.prepare("SELECT images FROM products WHERE id = ?").bind(id).first();
     if (row && row.images && env.BUCKET) {
       for (const img of parseImages(row.images)) {
-        await deleteUploadedImage(env, img.url);
+        // a photo another product shows too (Kanaan POS reuses old products' photos) stays
+        const other = await env.DB.prepare("SELECT id FROM products WHERE id <> ? AND images LIKE ? LIMIT 1").bind(id, `%${img.url}%`).first();
+        if (!other) await deleteUploadedImage(env, img.url);
       }
     }
   } catch { /* ignore */ }

@@ -1,14 +1,13 @@
-/* GET /shop — the "all products" listing. */
+/* GET /shop — the "all products" listing.
 
-const esc = (s) =>
-  String(s == null ? "" : s)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+   Like the categories: its own title, description and address, and the
+   pieces themselves written into the page (with links to every category),
+   so a search engine that doesn't run JavaScript still sees the shop. */
+import { renderListingContent, injectContent, headTags, setHead, jsonLd } from "../_shared/ssr.js";
+import { catalogCounts, categoryLinks, categoryWords, cardsFrom, itemList, loadCategories, ONLINE } from "../_shared/seo.js";
 
 export async function onRequestGet(context) {
-  const { env, next } = context;
+  const { request, env, next } = context;
 
   let res;
   try {
@@ -19,41 +18,46 @@ export async function onRequestGet(context) {
 
   const ct = res.headers.get("Content-Type") || "";
   if (!ct.includes("text/html")) return res;
+  if (!env.DB) return res;
 
-  let count = 0;
+  const origin = new URL(request.url).origin;
+  const url = `${origin}/shop`;
+  // a search inside the shop (/shop?q=…) is the same page for Google: it
+  // keeps the plain address as its canonical one
+  let rows = [];
   try {
-    const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM products WHERE active = 1 AND app_exclusive = 0 AND sold_out = 0").first();
-    count = Number(row?.n) || 0;
-  } catch { /* description still works without the count */ }
+    rows = (await env.DB.prepare(`SELECT id, name, price, badge, discount, images FROM products WHERE ${ONLINE} AND sold_out = 0 ORDER BY sort_order ASC, created_at DESC LIMIT 96`).all()).results || [];
+  } catch { /* the tags below still apply */ }
+  const [cats, counts] = await Promise.all([loadCategories(env), catalogCounts(env)]);
+  const nav = categoryLinks(cats, counts, origin);
+  const cards = cardsFrom(rows, origin);
+  const count = counts.total || cards.length;
 
-  const title = "Shop — Kanaan Shop";
-  const descText = count > 0
-    ? `Browse all ${count} pieces at Kanaan Shop — T-Shirts, Shirts, Jeans, Pants, Shorts, Sets, Underwear, Shoes and more. Delivery all over Lebanon, cash on delivery.`
-    : "Browse the full Kanaan Shop catalogue. Delivery all over Lebanon, cash on delivery.";
-  const url = "https://kanaanshop.com/shop";
+  const title = "Shop all menswear — Kanaan Shop, Lebanon";
+  const description = count > 0
+    ? `All ${count} pieces at Kanaan Shop: ${categoryWords(nav, 6)}. From our shop in Saida, delivered all over Lebanon, cash on delivery.`
+    : "The full Kanaan Shop catalogue. Delivery all over Lebanon, cash on delivery.";
 
-  const tags = `
-    <title>${esc(title)}</title>
-    <meta name="description" content="${esc(descText)}" />
-    <link rel="canonical" href="${url}" />
-    <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="Kanaan Shop" />
-    <meta property="og:title" content="${esc(title)}" />
-    <meta property="og:description" content="${esc(descText)}" />
-    <meta property="og:url" content="${url}" />
-    <meta name="twitter:card" content="summary" />
-    <meta name="twitter:title" content="${esc(title)}" />
-    <meta name="twitter:description" content="${esc(descText)}" />
-  `;
+  const breadcrumbLd = jsonLd({
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "Kanaan Shop", item: `${origin}/` },
+      { "@type": "ListItem", position: 2, name: "Shop", item: url },
+    ],
+  });
 
   let html = await res.text();
-  html = html
-    .replace(/<title>[\s\S]*?<\/title>/i, "")
-    .replace(/<meta\s+name="description"[^>]*>/gi, "")
-    .replace(/<link\s+rel="canonical"[^>]*>/gi, "")
-    .replace(/<meta\s+property="og:[^"]*"[^>]*>/gi, "")
-    .replace(/<meta\s+name="twitter:[^"]*"[^>]*>/gi, "")
-    .replace(/<\/head>/i, `${tags}\n  </head>`);
+  try {
+    html = injectContent(html, renderListingContent({ title: "Shop all", intro: description, products: cards, origin, nav, limit: 96 }));
+  } catch { /* meta tags still apply */ }
+  html = setHead(html, headTags({
+    title,
+    description,
+    url,
+    image: cards[0] ? cards[0].image : "",
+    extra: (cards.length ? `<script type="application/ld+json">${jsonLd(itemList("Kanaan Shop", cards, origin))}</script>\n` : "") + `<script type="application/ld+json">${breadcrumbLd}</script>`,
+  }));
 
   const headers = new Headers(res.headers);
   // the page is re-checked every visit (like the shell, see public/_headers): a cached copy could point at the

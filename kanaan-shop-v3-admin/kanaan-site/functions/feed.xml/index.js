@@ -22,9 +22,15 @@ const esc = (s) =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&apos;");
 
+import { productDescription } from "../_shared/ssr.js";
+import { loadSettings } from "../_shared/settings.js";
+import { COLORS } from "../../src/palette.js";
+
 export async function onRequestGet(context) {
   const { env } = context;
   const catLabels = (await loadCategories(env)).labels;
+  const settings = await loadSettings(env).catch(() => null);
+  const fee = settings && Number.isFinite(Number(settings.deliveryFee)) ? Number(settings.deliveryFee) : 5;
   const origin = "https://kanaanshop.com";
 
   let products = [];
@@ -62,8 +68,9 @@ export async function onRequestGet(context) {
       const link = `${origin}/product/${p.id}`;
       const image = absolute(p.images[0].url);
       const extraImages = p.images.slice(1, 11).map((im) => absolute(im.url)); // Google allows up to 10 extra images
-      const desc = (p.desc || `${p.name} — available now at Kanaan Shop.`).replace(/\s+/g, " ").trim().slice(0, 5000);
       const productType = catLabels[p.category] || "Menswear";
+      const desc = productDescription({ name: p.name, categoryLabel: productType, colors: p.colors, sizes: p.sizes, price: finalPrice, desc: p.desc }).slice(0, 5000);
+      const colour = p.colors.map((k) => (COLORS[k] ? COLORS[k].label : k)).slice(0, 3).join("/");
 
       return `
     <item>
@@ -79,10 +86,13 @@ export async function onRequestGet(context) {
       <g:brand>Kanaan Shop</g:brand>
       <g:condition>new</g:condition>
       <g:product_type>${esc(productType)}</g:product_type>
-      <g:google_product_category>Apparel &amp; Accessories</g:google_product_category>
+      <g:google_product_category>Apparel &amp; Accessories &gt; Clothing</g:google_product_category>
+      <g:gender>male</g:gender>
+      <g:age_group>adult</g:age_group>
+      ${colour ? `<g:color>${esc(colour)}</g:color>` : ""}
       <g:shipping>
         <g:country>LB</g:country>
-        <g:price>5.00 USD</g:price>
+        <g:price>${fee.toFixed(2)} USD</g:price>
       </g:shipping>
     </item>`;
     })

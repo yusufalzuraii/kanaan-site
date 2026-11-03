@@ -9,6 +9,7 @@
    through Google Image Search too, not just the page itself. */
 
 import { loadCategories } from "../_shared/site.js";
+import { catalogCounts } from "../_shared/seo.js";
 
 const esc = (s) =>
   String(s == null ? "" : s)
@@ -29,14 +30,19 @@ export async function onRequestGet(context) {
 
   const add = (loc, opts = {}) => urls.push({ loc, ...opts });
 
+  // only pages with something on them: a category (or fit) with nothing
+  // online, or the sale with nothing marked down, stays out until it has
+  const counts = await catalogCounts(env);
   add(`${origin}/`, { priority: "1.0", changefreq: "daily" });
   add(`${origin}/shop`, { priority: "0.9", changefreq: "daily" });
-  add(`${origin}/sale`, { priority: "0.8", changefreq: "daily" });
+  if (counts.onSale > 0) add(`${origin}/sale`, { priority: "0.8", changefreq: "daily" });
 
   const cats = await loadCategories(env); // edited from Kanaan POS; hidden ones left out
   for (const cat of cats.list.filter((c) => c.active).map((c) => c.id)) {
+    if (!(counts.counts[cat] > 0)) continue;
     add(`${origin}/shop/${cat}`, { priority: "0.7", changefreq: "daily" });
     for (const sub of cats.subs[cat] || []) {
+      if (!(counts.subCounts[`${cat}/${sub.id}`] > 0)) continue;
       add(`${origin}/shop/${cat}/${sub.id}`, { priority: "0.6", changefreq: "daily" });
     }
   }

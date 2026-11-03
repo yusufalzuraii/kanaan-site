@@ -214,31 +214,41 @@ function coatGeometry(length = 0.78, depth = 0.026) {
   return geo;
 }
 
-/* A window mannequin, the light grey of the ones in the shop's window. */
+/* A window mannequin, the light grey of the ones in the shop's window.
+   It wears three things the page can dress it in (KanaanStore.setWindow):
+   the top, the trousers and the shoes, each its own material, so the
+   window can wear the shop's real pieces in their own colours — and each
+   is a place to tap. */
 function buildMannequin(mats, { top, pants, turn = 0, x = 0, z = 0, tee = false }) {
   const g = new THREE.Group();
   const skin = mats.mannequin;
-  const pantsMat = new THREE.MeshStandardMaterial({ color: pants, roughness: 0.85, map: mats.denimMap });
-  const topMat = new THREE.MeshStandardMaterial({ color: top, roughness: 0.9, map: mats.fabric.map, vertexColors: true });
+  const pantsMat = new THREE.MeshStandardMaterial({ color: pants, roughness: 0.85, map: mats.denimMap, emissive: "#000000" });
+  const topMat = new THREE.MeshStandardMaterial({ color: top, roughness: 0.9, map: mats.fabric.map, vertexColors: true, emissive: "#000000" });
+  const shoeMat = new THREE.MeshStandardMaterial({ color: "#f4f3ef", roughness: 0.55, emissive: "#000000" });
   const base = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.19, 0.025, 28), mats.black);
   base.position.y = 0.012;
   g.add(base);
+  const zones = { top: [], bottom: [], shoes: [] };
   for (const sx of [-1, 1]) {
     const leg = new THREE.Mesh(new THREE.CapsuleGeometry(0.068, 0.72, 4, 12), pantsMat);
     leg.position.set(sx * 0.085, 0.47, 0);
     leg.rotation.z = sx * 0.035;
     g.add(leg);
-    const shoe = new THREE.Mesh(new RoundedBoxGeometry(0.11, 0.07, 0.25, 2, 0.03), mats.shoeWhite);
+    zones.bottom.push(leg);
+    const shoe = new THREE.Mesh(new RoundedBoxGeometry(0.11, 0.07, 0.25, 2, 0.03), shoeMat);
     shoe.position.set(sx * 0.09, 0.06, 0.045);
     g.add(shoe);
+    zones.shoes.push(shoe);
   }
   const hips = new THREE.Mesh(new RoundedBoxGeometry(0.34, 0.2, 0.2, 2, 0.08), pantsMat);
   hips.position.y = 0.92;
   g.add(hips);
+  zones.bottom.push(hips);
   const body = new THREE.Mesh(coatGeometry(tee ? 0.62 : 0.84, 0.16), topMat);
   body.position.y = 1.56;
   if (tee) body.scale.set(1, 1, 0.9);
   g.add(body);
+  zones.top.push(body);
   const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.042, 0.05, 0.14, 16), skin);
   neck.position.y = 1.62;
   g.add(neck);
@@ -248,6 +258,10 @@ function buildMannequin(mats, { top, pants, turn = 0, x = 0, z = 0, tee = false 
   g.add(head);
   g.position.set(x, 0.3, z);
   g.rotation.y = turn;
+  // where a piece's little tag shows when it's pointed at (local, metres):
+  // beside the chest, the knee, the feet
+  const anchors = { top: new THREE.Vector3(0, 1.3, 0.12), bottom: new THREE.Vector3(0, 0.55, 0.1), shoes: new THREE.Vector3(0, 0.1, 0.18) };
+  g.userData.mannequin = { group: g, mats: { top: topMat, bottom: pantsMat, shoes: shoeMat }, zones, anchors, tee };
   return g;
 }
 
@@ -517,9 +531,11 @@ export function buildStore({ tier = "high" } = {}) {
   // the real window (a beige jacket, a white graphic tee, a striped shirt)
   root.add(box(2.5, 0.3, 0.95, mats.white, -0.6, 0.15, -0.8));
   addShadow(root, shadowTex, -0.6, -0.8, 3.0, 1.4, 0.5);
-  root.add(buildMannequin(mats, { top: "#c8b394", pants: "#7790b0", turn: 0.22, x: -1.38, z: -0.85 }));
-  root.add(buildMannequin(mats, { top: "#f1efe9", pants: "#3b5276", turn: -0.05, x: -0.6, z: -0.9, tee: true }));
-  root.add(buildMannequin(mats, { top: "#56657a", pants: "#557092", turn: -0.26, x: 0.2, z: -0.85 }));
+  reg.mannequins = [
+    buildMannequin(mats, { top: "#c8b394", pants: "#7790b0", turn: 0.22, x: -1.38, z: -0.85 }),
+    buildMannequin(mats, { top: "#f1efe9", pants: "#3b5276", turn: -0.05, x: -0.6, z: -0.9, tee: true }),
+    buildMannequin(mats, { top: "#56657a", pants: "#557092", turn: -0.26, x: 0.2, z: -0.85 }),
+  ].map((m) => { root.add(m); return m.userData.mannequin; });
   // a low cactus in a white pot on the plinth, like the window's
   {
     const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.09, 0.2, 20), mats.whiteGloss);
@@ -1178,9 +1194,10 @@ export function buildStore({ tier = "high" } = {}) {
   reg.tagSpots = {
     // a computer's stops look at each wall side-on, the page's words on one side
     wide: {
-      knit: [[-1.84, 1.86, -3.2, 0.05], [-1.84, 2.18, -3.55, 0.05], [-1.84, 1.86, -3.85, 0.05], [-1.84, 2.18, -4.2, 0.05]],
+      // between the two jackets hung out on the cubbies, so neither hides one
+      knit: [[-1.84, 1.86, -3.8, 0.05], [-1.84, 2.18, -4.2, 0.05], [-1.84, 1.86, -4.6, 0.05], [-1.84, 2.18, -5.0, 0.05]],
       hoodies: [[-1.66, 1.02, -3.9, 0.06], [-1.66, 1.02, -4.15, 0.06], [-1.66, 1.02, -4.4, 0.06], [-1.66, 1.02, -4.65, 0.06]],
-      jackets: [[1.6, 1.98, -5.1, 0.06], [1.6, 1.98, -5.3, 0.06], [1.6, 1.98, -5.5, 0.06], [1.6, 1.98, -5.7, 0.06]],
+      jackets: [[1.6, 1.98, -5.0, 0.06], [1.6, 1.98, -5.27, 0.06], [1.6, 1.98, -5.54, 0.06], [1.6, 1.98, -5.81, 0.06]],
       pants: [[-1.86, 1.52, -8.3, 0.03], [-1.86, 1.92, -8.7, 0.03], [-1.86, 1.52, -9.05, 0.03], [-1.86, 1.92, -9.45, 0.03]],
       shoes: [[1.92, 1.2, -9.0, 0.03], [1.92, 1.56, -9.35, 0.03], [1.92, 1.2, -9.7, 0.03], [1.92, 1.56, -10.05, 0.03]],
     },

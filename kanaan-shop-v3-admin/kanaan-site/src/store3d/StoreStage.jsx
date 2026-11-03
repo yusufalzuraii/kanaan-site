@@ -8,14 +8,16 @@
 import React, { useEffect, useRef } from "react";
 import { KanaanStore } from "./KanaanStore.js";
 
-export default function StoreStage({ mode = "walk", theme = "light", tier = "high", tags, safeLeft = 0, safeBottom = 0, onSelect, onStore, onReady, className = "", style }) {
+export default function StoreStage({ mode = "walk", theme = "light", tier = "high", tags, windowSlots, safeLeft = 0, safeBottom = 0, onSelect, onPeek, onStore, onReady, className = "", style }) {
   const canvasRef = useRef(null);
   const storeRef = useRef(null);
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
+  const onPeekRef = useRef(onPeek);
+  onPeekRef.current = onPeek;
   // the latest stock, for a store that is (re)built after it arrived
   const latest = useRef({});
-  latest.current = { tags };
+  latest.current = { tags, windowSlots };
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -28,6 +30,7 @@ export default function StoreStage({ mode = "walk", theme = "light", tier = "hig
         tier,
         safe: { left: safeLeft, bottom: safeBottom },
         onSelect: (p) => onSelectRef.current && onSelectRef.current(p),
+        onPeek: (v) => onPeekRef.current && onPeekRef.current(v),
         onReady: () => onReady && onReady(),
       });
     } catch {
@@ -40,6 +43,7 @@ export default function StoreStage({ mode = "walk", theme = "light", tier = "hig
     const debug = /[?&]tier=/.test(window.location.search);
     if (debug) canvas.kanaanStore = store;
     if (latest.current.tags) store.setTags(latest.current.tags);
+    if (latest.current.windowSlots) store.setWindow(latest.current.windowSlots);
     if (onStore) onStore(store);
 
     const ro = new ResizeObserver(() => store.resize(canvas.clientWidth, canvas.clientHeight));
@@ -59,6 +63,7 @@ export default function StoreStage({ mode = "walk", theme = "light", tier = "hig
 
   useEffect(() => { if (storeRef.current) storeRef.current.setTheme(theme); }, [theme]);
   useEffect(() => { if (storeRef.current && tags) storeRef.current.setTags(tags); }, [tags]);
+  useEffect(() => { if (storeRef.current && windowSlots) storeRef.current.setWindow(windowSlots); }, [windowSlots]);
   useEffect(() => { if (storeRef.current) storeRef.current.setSafe({ left: safeLeft, bottom: safeBottom }); }, [safeLeft, safeBottom]);
 
   return <canvas ref={canvasRef} className={className} style={style} aria-hidden="true" />;

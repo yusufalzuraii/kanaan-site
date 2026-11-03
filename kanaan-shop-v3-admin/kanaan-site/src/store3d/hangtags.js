@@ -25,6 +25,13 @@ const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 // the tag, in metres (a big display tag, so it reads from the aisle)
 const TAG_W = 0.15;
 const TAG_H = TAG_W * (680 / 400);
+// how much bigger they hang on a phone (tall) and a computer (wide)
+const TALL_SCALE = 1.3;
+const WIDE_SCALE = 1.55;
+// the walls seen from further off at their stop on a computer get theirs a
+// size up again (the knitwear cubbies, the jeans wall)
+const WIDE_BONUS = { knit: 1.3, pants: 1.15 };
+const lerpScale = (aspect) => 1.3 + (WIDE_SCALE - 1.3) * clamp((aspect - 1.4) / 0.2, 0, 1);
 
 function loadImage(url) {
   return new Promise((resolve, reject) => {
@@ -75,12 +82,17 @@ function logo() {
 
 /* The swing tag: off-white card with chamfered top corners and an eyelet,
    the photo, the name, the price, the shop's name at the foot. */
-function tagTexture(img, item) {
+function tagTexture(img, item, maxAniso = 8) {
   const W = 400, H = 680;
+  // drawn at 1.5× the layout below: the tags are big on a computer screen,
+  // and the photo and the price stay sharp there
+  const RES = 1.5;
   const c = document.createElement("canvas");
-  c.width = W;
-  c.height = H;
+  c.width = W * RES;
+  c.height = H * RES;
   const g = c.getContext("2d");
+  g.scale(RES, RES);
+  g.imageSmoothingQuality = "high";
   // the card
   const ch = 54; // chamfer
   g.beginPath();
@@ -155,7 +167,7 @@ function tagTexture(img, item) {
   }
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 8;
+  t.anisotropy = maxAniso;
   return t;
 }
 
@@ -209,7 +221,7 @@ export class HangTags {
         this.tags.push(tag);
         fontsReady.then(() => loadImage(item.image)).then((img) => {
           if (this.disposed) return;
-          mat.map = tagTexture(img, item);
+          mat.map = tagTexture(img, item, this.store.renderer ? Math.min(16, this.store.renderer.capabilities.getMaxAnisotropy()) : 8);
           mat.needsUpdate = true;
           tag.ready = true;
           pivot.visible = true;
@@ -276,8 +288,11 @@ export class HangTags {
         }
         const p = t.pivot.position;
         t.yaw = Math.atan2(eye.x - p.x, eye.z - p.z);
-        // a phone shows the shop smaller: its tags are a size up
-        t.pivot.scale.setScalar(tall ? 1.3 : 1);
+        // big enough to read from the stop: a phone shows the shop smaller,
+        // a computer from further off
+        // (a squarer computer screen — a small laptop, a tablet on its
+        // side — shows the walls narrower: a size smaller there)
+        t.pivot.scale.setScalar(tall ? TALL_SCALE : lerpScale(st.camera.aspect) * (WIDE_BONUS[s.id] || 1));
       }
     }
   }

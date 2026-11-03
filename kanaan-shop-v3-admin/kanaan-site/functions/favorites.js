@@ -1,4 +1,4 @@
-import { serveAppShell } from "./_shared/spa.js";
+import { appPage } from "./_shared/spa.js";
 
-/* GET /favorites — صفحة بيعرضها التطبيق نفسه بالمتصفح. */
-export const onRequestGet = serveAppShell;
+/* GET /favorites — a shopper's own saved pieces: kept out of search results. */
+export const onRequestGet = appPage({ title: "Your favourites — Kanaan Shop", description: "The pieces you saved at Kanaan Shop.", path: "/favorites", noindex: true });

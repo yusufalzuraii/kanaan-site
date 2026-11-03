@@ -26,6 +26,8 @@ import { ArrowDown, MapPin, MessageCircle, RotateCcw, ShieldCheck, Truck } from 
 import {
   useApp,
   ProductCard,
+  getImageList,
+  apiBase,
   ScrollProgress,
   AppTeaser,
   CATEGORIES,
@@ -39,6 +41,7 @@ import {
   MAPS_URL,
 } from "../App.jsx";
 import { detectTier } from "../store3d/tier.js";
+import { COLORS as PALETTE } from "../palette.js";
 import { useSiteSettings } from "../lib/siteSettings.js";
 import { OpenNow } from "../components/SiteBits.jsx";
 
@@ -148,6 +151,132 @@ const firstImage = (p) => {
   return url ? thumbUrlFor(url) || url : "";
 };
 
+/* The shop window wears the shop's real pieces (store3d/windowDisplay.js).
+   Each piece is shown in the colour of its first photo (the photo its card
+   opens on), so the mannequin and the picture on its tag agree. */
+function windowPiece(p) {
+  if (!p) return null;
+  const list = getImageList(p);
+  const first = list[0] || null;
+  const key = (first && first.color && PALETTE[first.color] ? first.color : null) || (p.colors || []).find((c) => PALETTE[c]) || null;
+  const shot = (key && list.find((x) => x.color === key)) || first;
+  const url = shot ? shot.url : "";
+  return { product: p, colorKey: key, color: key ? PALETTE[key].hex : null, image: url ? thumbUrlFor(url) || url : "" };
+}
+const newest = (list) => [...list].sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
+
+/* What each of the window's three mannequins wears, in turn (a few outfits
+   each; the window changes one every few seconds). The owner's choice
+   (3 Nov 2026): the middle one wears the pieces opened most on the site
+   this week, the two beside it the newest — and if too few pieces have
+   been looked at yet, the middle one wears new pieces too. Tops come from
+   knitwear, hoodies & sweatshirts and jackets; trousers from pants & jeans;
+   shoes from the shoes (none online yet: the shoes stay white, and tapping
+   them asks on WhatsApp). */
+const WINDOW_OUTFITS = 6;
+function planWindow(sections, popularIds = []) {
+  const tops = newest([...sections.knit.items, ...sections.hoodies.items, ...sections.jackets.items].filter((p) => getImages(p).length));
+  const bottoms = newest(sections.pants.items.filter((p) => getImages(p).length));
+  const shoes = newest(sections.shoes.items.filter((p) => getImages(p).length));
+  if (!tops.length && !bottoms.length) return null;
+  const rank = new Map(popularIds.map((id, i) => [id, i]));
+  const byViews = (list) => list.filter((p) => rank.has(p.id)).sort((a, b) => rank.get(a.id) - rank.get(b.id));
+  const hotTops = byViews(tops), hotBottoms = byViews(bottoms);
+  // the middle mannequin: the most looked at (at least two of them), else
+  // the newest after the ones the two beside it start with
+  const turnFrom = (list, k) => list.slice(k).concat(list.slice(0, k));
+  const midTops = hotTops.length >= 2 ? hotTops : turnFrom(tops, 2);
+  const midBottoms = hotBottoms.length >= 2 ? hotBottoms : turnFrom(bottoms, 2);
+  const at = (list, i) => (list.length ? list[i % list.length] : null);
+  const middle = Array.from({ length: WINDOW_OUTFITS }, (_, i) => ({ top: at(midTops, i), bottom: at(midBottoms, i) }));
+  // the two beside it share out the newest, turn about (never starting in
+  // what the middle one starts in)
+  const first = new Set([middle[0].top && middle[0].top.id, middle[0].bottom && middle[0].bottom.id]);
+  const ft = tops.filter((p) => !first.has(p.id)), fb = bottoms.filter((p) => !first.has(p.id));
+  const side = (k) => Array.from({ length: WINDOW_OUTFITS }, (_, i) => ({ top: at(ft.length ? ft : tops, i * 2 + k), bottom: at(fb.length ? fb : bottoms, i * 2 + k) }));
+  const shoe = (i) => windowPiece(shoes[i % Math.max(1, shoes.length)]) || { product: null, color: null, zone: "shoes" };
+  const dress = (list, k) => list.map((o, i) => ({ top: windowPiece(o.top), bottom: windowPiece(o.bottom), shoes: shoe(i * 3 + k) }));
+  return [dress(side(0), 0), dress(middle, 1), dress(side(1), 2)];
+}
+
+/* The pieces opened most this week (ids, most first), for the window. */
+function usePopular() {
+  const [ids, setIds] = useState([]);
+  useEffect(() => {
+    let alive = true;
+    fetch(`${apiBase}/api/popular`).then((r) => (r.ok ? r.json() : { ids: [] })).then((d) => { if (alive && Array.isArray(d.ids)) setIds(d.ids); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  return ids;
+}
+
+/* The little tag of a piece in the window, by the piece: what it is and
+   its price; a click (or, on a phone, a tap on the tag) opens it. Glass:
+   it floats over the shop like the header. Shoes with nothing online yet
+   ask on WhatsApp instead. Moved by the store as the camera moves (its
+   place is written straight into the style, not through React). */
+const WindowPeek = React.forwardRef(function WindowPeek({ peek, openProduct, onClose, fresh = () => false }, ref) {
+  if (!peek) return <div ref={ref} className="lab-peek" hidden />;
+  const p = peek.product;
+  const label = { top: "On top", bottom: "Trousers", shoes: "Shoes" }[peek.zone];
+  const ask = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent("Hi Kanaan! What shoes do you have in my size?")}`;
+  return (
+    <div ref={ref} className="lab-peek glass" data-testid="window-peek" data-zone={peek.zone} data-id={p ? p.id : ""} style={{ transform: `translate3d(${Math.round(peek.x)}px, ${Math.round(peek.y)}px, 0)` }}>
+      {p ? (
+        <button className="lab-peek-in tap-scale" onClick={() => { if (fresh()) return; onClose(); openProduct(p); }} aria-label={`${p.name}, ${money(effectivePrice(p))}`}>
+          {peek.image ? <img src={peek.image} alt="" decoding="async" /> : <span className="lab-pick-ph" />}
+          <span className="lab-peek-text">
+            <span className="lab-peek-kind">{label}</span>
+            <span className="lab-peek-name">{p.name}</span>
+            <span className="lab-peek-price font-num">{money(effectivePrice(p))}</span>
+          </span>
+        </button>
+      ) : (
+        <a className="lab-peek-in is-ask" href={ask} target="_blank" rel="noopener noreferrer">
+          <span className="lab-peek-text">
+            <span className="lab-peek-kind">Shoes</span>
+            <span className="lab-peek-name">On the shelves in Saida</span>
+            <span className="lab-peek-ask"><MessageCircle className="w-3.5 h-3.5" /> Ask on WhatsApp</span>
+          </span>
+        </a>
+      )}
+    </div>
+  );
+});
+
+/* The window's tag, kept by the page: the piece in state (it re-renders
+   only when another piece is pointed at), its place moved directly. */
+function useWindowPeek() {
+  const [peek, setPeek] = useState(null);
+  const ref = useRef(null);
+  const last = useRef(null);
+  const shownAt = useRef(0);
+  const onPeek = useCallback((v) => {
+    // the tag sits just above its piece (below it when there's no room
+    // under the header), never over it — a finger's next tap must land on
+    // the tag or the piece, not one for the other — and on the screen
+    if (v) {
+      const vw = window.innerWidth, vh = window.innerHeight;
+      const w = Math.min(250, vw - 24), h = 78;
+      const x = Math.max(12, Math.min(v.x - w / 2, vw - w - 12));
+      const above = v.y - h - 26;
+      const y = above >= 76 ? above : Math.min(v.y + 26, vh - h - 12);
+      v = { ...v, x, y };
+    }
+    const key = v ? `${v.index}:${v.zone}:${v.product ? v.product.id : ""}:${v.pinned ? 1 : 0}` : "";
+    if (key !== last.current) {
+      last.current = key;
+      shownAt.current = Date.now();
+      setPeek(v);
+    } else if (v && ref.current) {
+      ref.current.style.transform = `translate3d(${Math.round(v.x)}px, ${Math.round(v.y)}px, 0)`;
+    }
+  }, []);
+  // a tap that arrives as the tag appears belongs to the piece, not the tag
+  const fresh = () => Date.now() - shownAt.current < 350;
+  return { peek, onPeek, ref, fresh, close: () => { last.current = ""; setPeek(null); } };
+}
+
 /* The still of the storefront: the page's first image while the 3D engine
    loads, and the whole hero on devices that don't get 3D. Rendered from
    the same scene, so the hand-over is seamless. */
@@ -209,6 +338,8 @@ export default function HomeLab({ home = false, products, loading, goCatalog, go
     return m;
   }, [products]);
   const sections = useMemo(() => sortIntoSections(products, counts), [products, counts]);
+  const popular = usePopular();
+  const windowSlots = useMemo(() => planWindow(sections, popular), [sections, popular]);
 
   return (
     // lab-is-*, not lab-walk etc.: those name the tall scroll sections, and
@@ -223,6 +354,7 @@ export default function HomeLab({ home = false, products, loading, goCatalog, go
           tall={tall}
           tier={tier}
           sections={sections}
+          windowSlots={windowSlots}
           counts={counts}
           saleCount={saleCount}
           maxDiscount={maxDiscount}
@@ -231,7 +363,7 @@ export default function HomeLab({ home = false, products, loading, goCatalog, go
           openProduct={openProduct}
         />
       )}
-      {mode === "facade" && <FacadeHero theme={theme} tall={tall} tier={tier} goCatalog={goCatalog} openProduct={openProduct} />}
+      {mode === "facade" && <FacadeHero theme={theme} tall={tall} tier={tier} windowSlots={windowSlots} goCatalog={goCatalog} openProduct={openProduct} />}
       {mode === "lite" && <LiteHero theme={theme} tall={tall} goCatalog={goCatalog} />}
 
       <div id="lab-shop" className="lab-page">
@@ -252,7 +384,7 @@ export default function HomeLab({ home = false, products, loading, goCatalog, go
    The 3D stage plus the still behind it. The still is shown first; when the
    live scene has drawn its first frame it fades in on top.
    ------------------------------------------------------------------ */
-function Stage({ mode, theme, tall, tier, tags, safe, onStore, openProduct }) {
+function Stage({ mode, theme, tall, tier, tags, windowSlots, onPeek, safe, onStore, openProduct }) {
   const [ready, setReady] = useState(false);
   const onSelect = useCallback((piece) => piece && piece.product && openProduct(piece.product), [openProduct]);
   return (
@@ -264,6 +396,8 @@ function Stage({ mode, theme, tall, tier, tags, safe, onStore, openProduct }) {
           theme={theme}
           tier={tier}
           tags={tags}
+          windowSlots={windowSlots}
+          onPeek={onPeek}
           safeLeft={safe ? safe.left : 0}
           safeBottom={safe ? safe.bottom : 0}
           onSelect={onSelect}
@@ -363,8 +497,9 @@ function useSectionProgress(ref, onProgress) {
    words at a time, and a bar of the shop's sections sits at the top: tap
    one and the walk carries you there, so nobody has to scroll through the
    whole shop to reach the shoes. */
-function SectionWalk({ theme, tall, tier, sections, counts, saleCount, maxDiscount, goCatalog, goSale, openProduct }) {
+function SectionWalk({ theme, tall, tier, sections, windowSlots, counts, saleCount, maxDiscount, goCatalog, goSale, openProduct }) {
   const site = useSiteSettings();
+  const win = useWindowPeek();
   const sectionRef = useRef(null);
   const storeRef = useRef(null);
   const stationRefs = useRef({});
@@ -426,7 +561,15 @@ function SectionWalk({ theme, tall, tier, sections, counts, saleCount, maxDiscou
     <ul className="lab-picks">
       {list.map((p) => (
         <li key={p.id}>
-          <button onClick={() => openProduct(p)} className="lab-pick tap-scale" aria-label={p.name}>
+          <button
+            onClick={() => openProduct(p)}
+            onMouseEnter={() => storeRef.current && storeRef.current.highlight(p.id)}
+            onMouseLeave={() => storeRef.current && storeRef.current.highlight(null)}
+            onFocus={() => storeRef.current && storeRef.current.highlight(p.id)}
+            onBlur={() => storeRef.current && storeRef.current.highlight(null)}
+            className="lab-pick tap-scale"
+            aria-label={`${p.name}, ${money(effectivePrice(p))}`}
+          >
             {firstImage(p) ? <img src={firstImage(p)} alt="" loading="lazy" decoding="async" /> : <span className="lab-pick-ph" />}
             <span className="lab-pick-name">{p.name}</span>
             <span className="lab-pick-price font-num">{money(effectivePrice(p))}</span>
@@ -464,7 +607,8 @@ function SectionWalk({ theme, tall, tier, sections, counts, saleCount, maxDiscou
   return (
     <section ref={sectionRef} className="lab-walk" aria-label="Kanaan Shop">
       <div className="lab-sticky">
-        <Stage mode="walk" theme={theme} tall={tall} tier={tier} tags={tags} safe={safe} onStore={onStore} openProduct={openProduct} />
+        <Stage mode="walk" theme={theme} tall={tall} tier={tier} tags={tags} windowSlots={windowSlots} onPeek={win.onPeek} safe={safe} onStore={onStore} openProduct={openProduct} />
+        <WindowPeek ref={win.ref} peek={win.peek} fresh={win.fresh} openProduct={openProduct} onClose={() => { win.close(); if (storeRef.current) storeRef.current.setPeek(null); }} />
 
         <nav ref={barRef} className="lab-aisles glass" aria-label="Sections of the shop">
           {SECTIONS.map((sec) => (
@@ -496,10 +640,12 @@ function SectionWalk({ theme, tall, tier, sections, counts, saleCount, maxDiscou
               <div className="lab-card">
                 <h2 className="lab-title">{sec.title}</h2>
                 {shown.length > 0 && <p className="lab-lede lab-hint">Tap a tag to see the piece.</p>}
-                {/* the pieces hang on tags in the 3D; this list is for
-                    keyboards and screen readers, and shows itself when a
-                    keyboard reaches it */}
-                {shown.length > 0 && <div className="lab-sr">{picks(shown)}</div>}
+                {/* the pieces hang on tags in the 3D. On a computer they're
+                    listed here too, photo, name and price, and pointing at
+                    one lights its tag in the shop; on a phone the list is
+                    for keyboards and screen readers (it shows itself when a
+                    keyboard reaches it) */}
+                {shown.length > 0 && <div className="lab-sr lab-picks-wrap">{picks(shown)}</div>}
                 {cats.length > 0 && chips(cats)}
                 {items.length === 0 && (
                   <>
@@ -540,7 +686,8 @@ function SectionWalk({ theme, tall, tier, sections, counts, saleCount, maxDiscou
   );
 }
 
-function FacadeHero({ theme, tall, tier, goCatalog, openProduct }) {
+function FacadeHero({ theme, tall, tier, windowSlots, goCatalog, openProduct }) {
+  const win = useWindowPeek();
   const sectionRef = useRef(null);
   const storeRef = useRef(null);
   const textRef = useRef(null);
@@ -564,7 +711,8 @@ function FacadeHero({ theme, tall, tier, goCatalog, openProduct }) {
   return (
     <section ref={sectionRef} className="lab-facade" aria-label="Kanaan Shop">
       <div className="lab-sticky">
-        <Stage mode="facade" theme={theme} tall={tall} tier={tier} safe={safe} onStore={onStore} openProduct={openProduct} />
+        <Stage mode="facade" theme={theme} tall={tall} tier={tier} windowSlots={windowSlots} onPeek={win.onPeek} safe={safe} onStore={onStore} openProduct={openProduct} />
+        <WindowPeek ref={win.ref} peek={win.peek} fresh={win.fresh} openProduct={openProduct} onClose={() => { win.close(); if (storeRef.current) storeRef.current.setPeek(null); }} />
         <div ref={textRef} className="lab-station lab-side-start lab-hero-station" style={{ opacity: 1, visibility: "visible" }}>
           <div className="lab-scrim" />
           <div ref={cardRef} className="lab-card">
@@ -630,9 +778,9 @@ function NewIn({ featured, loading, goCatalog, openProduct, likes, toggleLike })
       </div>
       <div className="lab-grid">
         {loading && featured.length === 0
-          ? Array.from({ length: 4 }).map((_, i) => <div key={i} className="rounded-2xl glass" style={{ aspectRatio: "4/5", opacity: 0.5 }} />)
-          : featured.map((p, i) => (
-              <div key={p.id} className={i === 0 ? "lab-grid-feature" : ""}>
+          ? Array.from({ length: 8 }).map((_, i) => <div key={i} className="rounded-2xl glass" style={{ aspectRatio: "4/5", opacity: 0.5 }} />)
+          : featured.map((p) => (
+              <div key={p.id}>
                 <ProductCard product={p} onOpen={openProduct} liked={likes.includes(p.id)} onToggleLike={toggleLike} />
               </div>
             ))}
@@ -645,12 +793,17 @@ function NewIn({ featured, loading, goCatalog, openProduct, likes, toggleLike })
 function Shelves({ products, counts, goCatalog }) {
   const cats = CATEGORIES.filter((c) => counts[c.id]);
   if (!cats.length) return null;
+  // on a computer the categories sit in even rows across the page's column:
+  // as many across as there are (up to six), else the number that fills
+  // every row
+  const n = cats.length;
+  const cols = n <= 6 ? n : [6, 5, 4, 3].find((c) => n % c === 0) || 6;
   return (
     <section className="lab-section">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lab-head">
         <h2 className="lab-h2">Shop by category</h2>
       </div>
-      <div className="lab-shelf" role="list">
+      <div className="lab-shelf" role="list" style={{ "--lab-cols": cols }}>
         {cats.map((c) => {
           const lead = products.find((p) => p.category === c.id && firstImage(p));
           return (
@@ -775,6 +928,19 @@ const LAB_CSS = String.raw`
 .lab-station { position: absolute; top: 0; left: 0; right: 0; height: 100%; pointer-events: none; display: flex; align-items: flex-end; will-change: opacity, transform; }
 @supports (height: 100dvh) { .lab-station { height: 100dvh; } }
 .lab-station .lab-card { pointer-events: auto; position: relative; width: 100%; padding: 0 20px calc(28px + env(safe-area-inset-bottom)); }
+/* the little tag of a piece in the window (it floats over the shop) */
+.lab-peek { position: fixed; z-index: 4; left: 0; top: 0; width: min(250px, calc(100vw - 24px)); border-radius: 20px; padding: 6px; pointer-events: auto; will-change: transform; animation: labPeek 0.22s cubic-bezier(0.16, 1, 0.3, 1); }
+.lab-peek[hidden] { display: none; }
+@keyframes labPeek { from { opacity: 0; } to { opacity: 1; } }
+.lab-peek-in { display: grid; grid-template-columns: 52px 1fr; gap: 12px; align-items: center; width: 100%; text-align: left; color: var(--fg); text-decoration: none; }
+.lab-peek-in.is-ask { grid-template-columns: 1fr; padding: 6px 8px; }
+.lab-peek img, .lab-peek .lab-pick-ph { width: 52px; height: 65px; border-radius: 14px; object-fit: cover; background: var(--field-bg); }
+.lab-peek-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.lab-peek-kind { font-family: Inter, system-ui, sans-serif; font-size: 0.72rem; color: var(--fg-muted); }
+.lab-peek-name { font-family: Inter, system-ui, sans-serif; font-size: 0.9rem; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lab-peek-price { font-size: 0.95rem; }
+.lab-peek-ask { display: inline-flex; align-items: center; gap: 5px; font-family: Inter, system-ui, sans-serif; font-size: 0.84rem; color: var(--teal); margin-top: 2px; }
+.lab-peek-in:focus-visible { outline: 2px solid var(--coral); outline-offset: 3px; border-radius: 14px; }
 /* on a phone the words sit at the bottom on a short, soft fade: the shop
    above stays in full view */
 .lab-scrim { position: absolute; inset: 0; background: linear-gradient(to top, rgba(var(--lab-scrim), 0.95) 0%, rgba(var(--lab-scrim), 0.82) 20%, rgba(var(--lab-scrim), 0.38) 34%, rgba(var(--lab-scrim), 0) 46%); }
@@ -784,15 +950,37 @@ const LAB_CSS = String.raw`
 
 @media (min-width: 1024px) {
   .lab-station { align-items: center; }
-  .lab-station .lab-card { width: min(470px, 42vw); padding: 0; }
-  .lab-side-start { justify-content: flex-start; padding-left: max(32px, calc((100vw - 1152px) / 2 + 24px)); }
-  .lab-side-end { justify-content: flex-end; padding-right: max(96px, calc((100vw - 1152px) / 2 + 72px)); }
-  .lab-side-start .lab-scrim { background: linear-gradient(to right, rgba(var(--lab-scrim), 0.95) 0%, rgba(var(--lab-scrim), 0.88) 38%, rgba(var(--lab-scrim), 0.5) 52%, rgba(var(--lab-scrim), 0) 68%); }
-  .lab-side-end .lab-scrim { background: linear-gradient(to left, rgba(var(--lab-scrim), 0.95) 0%, rgba(var(--lab-scrim), 0.88) 38%, rgba(var(--lab-scrim), 0.5) 52%, rgba(var(--lab-scrim), 0) 68%); }
-  /* the opening shot keeps its scrim light: the storefront is the point */
+  /* On a computer a stop's words sit on a glass panel at the edge of the
+     page's column, on the side the camera isn't looking at (a 3D garment
+     can still be behind it: the glass keeps the words clear). It floats
+     over the shop like the header, so it's glass. */
+  .lab-station .lab-card { width: clamp(320px, 31vw, 392px); padding: 26px 28px 24px; border-radius: 28px;
+    background: rgba(var(--lab-scrim), 0.86); border: 1px solid var(--glass-border); box-shadow: var(--glass-shadow);
+    -webkit-backdrop-filter: blur(28px) saturate(160%); backdrop-filter: blur(28px) saturate(160%); }
+  .lab-side-start { justify-content: flex-start; padding-left: max(28px, calc((100vw - 1152px) / 2 + 24px)); }
+  .lab-side-end { justify-content: flex-end; padding-right: max(28px, calc((100vw - 1152px) / 2 + 24px)); }
+  /* only a soft edge on the panel's side now: the shop stays in full view */
+  .lab-side-start .lab-scrim { background: linear-gradient(to right, rgba(var(--lab-scrim), 0.5) 0%, rgba(var(--lab-scrim), 0.18) 24%, rgba(var(--lab-scrim), 0) 40%); }
+  .lab-side-end .lab-scrim { background: linear-gradient(to left, rgba(var(--lab-scrim), 0.5) 0%, rgba(var(--lab-scrim), 0.18) 24%, rgba(var(--lab-scrim), 0) 40%); }
+  /* the opening shot: the headline straight on the street, no panel */
+  .lab-hero-station .lab-card { width: min(470px, 42vw); padding: 0; border-radius: 0; background: none; border: 0; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
   .lab-hero-station .lab-scrim { background: linear-gradient(to right, rgba(var(--lab-scrim), 0.85) 0%, rgba(var(--lab-scrim), 0.55) 30%, rgba(var(--lab-scrim), 0) 50%); }
   .lab-hero-station { align-items: flex-end; padding-bottom: 11vh; }
   .lab-hero-station .lab-lede { max-width: 38ch; }
+  /* the pieces, listed on the panel: photo, name, price */
+  .lab-station .lab-picks-wrap.lab-sr { position: static; width: auto; height: auto; margin: 0; overflow: visible; clip: auto; white-space: normal; }
+  .lab-hint { display: none; }
+  .lab-station .lab-picks { margin-top: 16px; gap: 6px; }
+  .lab-station .lab-pick { grid-template-columns: 48px 1fr auto; padding: 5px 6px; border-radius: 14px; background: rgba(var(--lab-scrim), 0.55); border-color: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; transition: background 0.2s, border-color 0.2s; }
+  .lab-station .lab-pick:hover, .lab-station .lab-pick:focus-visible { background: var(--bg); border-color: var(--border); }
+  .lab-station .lab-pick img, .lab-station .lab-pick-ph { width: 48px; height: 60px; }
+  .lab-station .lab-chips { margin-top: 14px; }
+}
+/* a short laptop: the panel's list stays inside the screen */
+@media (min-width: 1024px) and (max-height: 760px) {
+  .lab-station .lab-card { padding: 20px 24px 18px; }
+  .lab-station .lab-pick img, .lab-station .lab-pick-ph { width: 40px; height: 50px; }
+  .lab-station .lab-picks { margin-top: 12px; gap: 4px; }
 }
 
 .lab-display { font-family: "Space Grotesk", system-ui, sans-serif; font-weight: 700; font-size: clamp(2rem, 4.2vw, 3.6rem); line-height: 1.02; letter-spacing: -0.028em; color: var(--fg); }
@@ -854,13 +1042,20 @@ const LAB_CSS = String.raw`
 .lab-section { padding-top: 40px; padding-bottom: 40px; }
 .lab-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 20px; }
 .lab-h2 { font-family: "Space Grotesk", system-ui, sans-serif; font-weight: 700; font-size: clamp(1.6rem, 2.6vw, 2.2rem); letter-spacing: -0.02em; line-height: 1.1; color: var(--fg); }
-.lab-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
-@media (min-width: 640px) { .lab-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px; } .lab-grid-feature { grid-column: span 2; grid-row: span 2; } }
+/* New in: twelve pieces, the same size, in full rows — 2, 3 or 4 across
+   (twelve fills each) */
+.lab-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px 14px; }
+@media (min-width: 640px) { .lab-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px 20px; } }
+@media (min-width: 1024px) { .lab-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 36px 24px; } }
 
 .lab-shelf { --lab-gutter: max(16px, calc((100vw - 1152px) / 2 + 24px)); display: flex; gap: 14px; overflow-x: auto; scroll-snap-type: x mandatory; scroll-padding-inline: var(--lab-gutter); padding: 4px var(--lab-gutter) 12px; scrollbar-width: none; }
 .lab-shelf::-webkit-scrollbar { display: none; }
 .lab-shelf-item { position: relative; flex: 0 0 auto; width: 168px; aspect-ratio: 4 / 5; border-radius: 22px; overflow: hidden; scroll-snap-align: start; background: var(--field-bg); text-align: left; }
-@media (min-width: 1024px) { .lab-shelf-item { width: 206px; } }
+@media (min-width: 640px) { .lab-shelf { --lab-gutter: max(24px, calc((100vw - 1152px) / 2 + 24px)); } }
+@media (min-width: 1024px) {
+  .lab-shelf { display: grid; grid-template-columns: repeat(var(--lab-cols, 6), minmax(0, 1fr)); gap: 20px; max-width: 1152px; margin: 0 auto; padding: 4px 24px 12px; overflow: visible; }
+  .lab-shelf-item { width: auto; }
+}
 .lab-shelf-item img, .lab-shelf-ph { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1); }
 .lab-shelf-item:hover img { transform: scale(1.04); }
 .lab-shelf-label { position: absolute; left: 0; right: 0; bottom: 0; padding: 40px 14px 12px; display: flex; flex-direction: column; gap: 2px; color: #fff; background: linear-gradient(to top, rgba(10,10,12,0.78), rgba(10,10,12,0)); }

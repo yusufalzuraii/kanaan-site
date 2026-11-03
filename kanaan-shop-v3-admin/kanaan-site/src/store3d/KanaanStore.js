@@ -9,6 +9,7 @@ import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { buildStore } from "./buildStore.js";
 import { scriptNeonTexture } from "./textures.js";
 import { HangTags } from "./hangtags.js";
+import { WindowDisplay } from "./windowDisplay.js";
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const smooth = (a, b, v) => {
@@ -159,13 +160,15 @@ function pathFor(aspect, mode, { left: safeLeft = 0, bottom: safeBottom = 0 } = 
 }
 
 export class KanaanStore {
-  constructor(canvas, { mode = "walk", theme = "light", tier = "high", safe = {}, onSelect, onReady } = {}) {
+  constructor(canvas, { mode = "walk", theme = "light", tier = "high", safe = {}, onSelect, onPeek, onReady } = {}) {
     this.canvas = canvas;
     this.mode = mode;
     this.safe = { left: safe.left || 0, bottom: safe.bottom || 0 };
     this.tier = tier;
     this.onSelect = onSelect;
+    this.onPeek = onPeek;
     this.onReady = onReady;
+    this.peek = null; // the window piece whose little tag the page shows
     this.night = theme === "dark" ? 1 : 0;
     this.nightTarget = this.night;
     this.progress = 0;
@@ -249,6 +252,18 @@ export class KanaanStore {
     this.loadNeonFont(this.reg.neonFont);
     // each section's pieces hang on paper swing tags in the shop (hangtags.js)
     this.hangTags = new HangTags(this, this.reg.tagSpots);
+    // the window's mannequins wear the shop's real pieces (windowDisplay.js)
+    this.windowDisplay = new WindowDisplay(this, this.reg.mannequins);
+    // the window changes outfit every few seconds, even while nothing else
+    // moves (so the store wakes up for it, then sleeps again)
+    // (counted by the clock, not by the timer: a busy phone runs it late)
+    let lastTick = performance.now();
+    this._windowTimer = setInterval(() => {
+      const now = performance.now();
+      const secs = Math.min(4, (now - lastTick) / 1000);
+      lastTick = now;
+      if (this.windowDisplay.tick(secs)) this.wake();
+    }, 1000);
 
     this.raycaster = new THREE.Raycaster();
 
@@ -349,6 +364,42 @@ export class KanaanStore {
     this.wake();
   }
 
+  /* What the window's mannequins wear: for each, a list of outfits (see
+     windowDisplay.js). */
+  setWindow(slots) {
+    this.windowDisplay.setData(slots);
+    this.wake();
+  }
+
+  /* A tag in the shop lit from the page (its piece is pointed at in the
+     page's list), or none. */
+  highlight(id) {
+    const t = id ? this.hangTags.tags.find((x) => x.item.id === id && x.ready) : null;
+    if (t !== this.highlighted) {
+      this.highlighted = t || null;
+      this.wake();
+    }
+  }
+
+  /* the page's little tag for a window piece: shown, moved, hidden */
+  setPeek(hit, pinned = false) {
+    const same = hit && this.peek && this.peek.mannequin === hit.mannequin && this.peek.zone === hit.zone;
+    if (!hit && !this.peek) return;
+    if (same && !!this.peek.pinned === !!pinned) return;
+    this.peek = hit ? { ...hit, pinned } : null;
+    this.windowDisplay.hot = this.peek;
+    this.sendPeek();
+    this.wake();
+  }
+
+  sendPeek() {
+    if (!this.onPeek) return;
+    const h = this.peek;
+    if (!h) { this.onPeek(null); return; }
+    const at = this.windowDisplay.anchor(h);
+    this.onPeek({ product: h.product, zone: h.zone, index: h.index, pinned: !!h.pinned, x: at.x, y: at.y, color: h.piece.color, colorKey: h.piece.colorKey, image: h.piece.image });
+  }
+
   bindInput() {
     const c = this.canvas;
     let down = null;
@@ -360,6 +411,16 @@ export class KanaanStore {
       down = null;
       if (moved > 8 || !quick) return;
       const hit = this.pick(e.clientX, e.clientY);
+      if (hit && hit.window) {
+        // a piece in the window: the mouse opens it (its tag is already up);
+        // a finger first shows its tag, and a second tap on it opens it
+        const mouse = e.pointerType === "mouse";
+        const shown = this.peek && this.peek.mannequin === hit.mannequin && this.peek.zone === hit.zone && this.peek.pinned;
+        if ((mouse || shown) && hit.product && this.onSelect) { this.setPeek(null); this.onSelect({ product: hit.product }); }
+        else this.setPeek(hit, true);
+        return;
+      }
+      if (this.peek) this.setPeek(null);
       if (hit && hit.product && this.onSelect) this.onSelect(hit.product);
     };
     this._onMove = (e) => {
@@ -367,17 +428,31 @@ export class KanaanStore {
         const r = c.getBoundingClientRect();
         this.setPointer(((e.clientX - r.left) / r.width) * 2 - 1, -(((e.clientY - r.top) / r.height) * 2 - 1));
         const hit = this.pick(e.clientX, e.clientY);
-        const next = hit && hit.product ? hit : null;
-        if (next !== this.hovered) {
-          this.hovered = next;
-          c.style.cursor = next ? "pointer" : "";
+        const tag = hit && !hit.window && hit.product ? hit : null;
+        if (tag !== this.hovered) {
+          this.hovered = tag;
           this.wake();
         }
+        c.style.cursor = tag || (hit && hit.window) ? "pointer" : "";
+        if (hit && hit.window) this.setPeek(hit, false);
+        else if (this.peek && !this.peek.pinned) this.setPeek(null);
       }
+    };
+    this._onLeave = (e) => {
+      if (e.pointerType === "mouse" && this.peek && !this.peek.pinned) this.setPeek(null);
+    };
+    // the mouse gone over the page's words (the canvas doesn't hear it
+    // there): the window's tag goes, unless the mouse is on the tag itself
+    this._onDocMove = (e) => {
+      if (e.pointerType !== "mouse" || !this.peek || this.peek.pinned || e.target === c) return;
+      if (e.target && e.target.closest && e.target.closest(".lab-peek")) return;
+      this.setPeek(null);
     };
     c.addEventListener("pointerdown", this._onDown);
     c.addEventListener("pointerup", this._onUp);
     c.addEventListener("pointermove", this._onMove);
+    c.addEventListener("pointerleave", this._onLeave);
+    document.addEventListener("pointermove", this._onDocMove, { passive: true });
     this._onVis = () => this.setVisible(document.visibilityState === "visible");
     document.addEventListener("visibilitychange", this._onVis);
   }
@@ -388,9 +463,17 @@ export class KanaanStore {
     this.raycaster.setFromCamera(v, this.camera);
     const targets = this.hangTags.pickables();
     const hits = this.raycaster.intersectObjects(targets.map((t) => t[0]), false);
-    if (!hits.length || hits[0].distance > 9) return null;
-    const hit = targets.find((t) => t[0] === hits[0].object);
-    return hit ? hit[1] : null;
+    if (hits.length && hits[0].distance <= 9) {
+      const hit = targets.find((t) => t[0] === hits[0].object);
+      if (hit) return hit[1];
+    }
+    // the pieces in the window, seen from the street
+    const win = this.windowDisplay.pickables();
+    if (!win.length) return null;
+    const wh = this.raycaster.intersectObjects(win.map((t) => t[0]), false);
+    if (!wh.length || wh[0].distance > 30) return null;
+    const w = win.find((t) => t[0] === wh[0].object);
+    return w ? w[1] : null;
   }
 
   /* Where the page's words are, as shares of the screen, so the opening
@@ -573,7 +656,14 @@ export class KanaanStore {
     });
     glowAttr.needsUpdate = true;
 
-    if (this.hangTags.update(dt, this.hovered)) active = true;
+    if (this.hangTags.update(dt, this.hovered || this.highlighted)) active = true;
+    if (this.windowDisplay.update(dt)) active = true;
+    // the window's little tag follows its piece as the camera moves, and
+    // goes once you're through the door
+    if (this.peek) {
+      if (!this.windowDisplay.open) this.setPeek(null);
+      else if (active) this.sendPeek();
+    }
     this.applyLook(false);
     if (this._introDone && this.night === this.nightTarget && this._mirrorAt !== this.night) this.captureMirror();
     this.renderer.render(this.scene, this.camera);
@@ -608,10 +698,13 @@ export class KanaanStore {
   dispose() {
     this.disposed = true;
     cancelAnimationFrame(this.raf);
+    clearInterval(this._windowTimer);
     const c = this.canvas;
     c.removeEventListener("pointerdown", this._onDown);
     c.removeEventListener("pointerup", this._onUp);
     c.removeEventListener("pointermove", this._onMove);
+    c.removeEventListener("pointerleave", this._onLeave);
+    document.removeEventListener("pointermove", this._onDocMove);
     document.removeEventListener("visibilitychange", this._onVis);
     this.scene.traverse((o) => {
       if (o.geometry) o.geometry.dispose();

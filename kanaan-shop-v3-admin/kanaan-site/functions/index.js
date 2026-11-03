@@ -10,10 +10,9 @@
    than staring at white. React clears this and takes over on mount, so
    nothing about the live experience changes. */
 
-import { CATEGORY_LABELS, parseImages } from "./_shared/util.js";
-import { renderListingContent, injectContent, esc } from "./_shared/ssr.js";
-
-const jsonLd = (obj) => JSON.stringify(obj).replace(/</g, "\\u003c");
+import { renderListingContent, injectContent, headTags, setHead, jsonLd, storeLd } from "./_shared/ssr.js";
+import { catalogCounts, categoryLinks, categoryWords, cardsFrom, itemList, loadCategories, ONLINE } from "./_shared/seo.js";
+import { loadSettings } from "./_shared/settings.js";
 
 export async function onRequestGet(context) {
   const { request, env, next } = context;
@@ -38,55 +37,27 @@ export async function onRequestGet(context) {
   let rows = [];
   try {
     const result = await env.DB.prepare(
-      "SELECT id, name, price, badge, discount, images, category FROM products WHERE active = 1 AND app_exclusive = 0 AND sold_out = 0 ORDER BY sort_order ASC, created_at DESC LIMIT 12"
+      `SELECT id, name, price, badge, discount, images, category FROM products WHERE ${ONLINE} AND sold_out = 0 ORDER BY sort_order ASC, created_at DESC LIMIT 24`
     ).all();
     rows = result.results || [];
   } catch {
     return res; // no database, no injection — the app still works
   }
+  const [cats, counts, settings] = await Promise.all([loadCategories(env), catalogCounts(env), loadSettings(env).catch(() => null)]);
+  const nav = categoryLinks(cats, counts, origin);
+  const products = cardsFrom(rows, origin);
 
-  const absolute = (u) =>
-    u ? (/^https?:\/\//i.test(u) ? u : `${origin}${u.startsWith("/") ? "" : "/"}${u}`) : "";
-
-  const products = rows.map((r) => ({
-    id: r.id,
-    name: r.name,
-    price: Math.round(Number(r.price) || 0),
-    discount: r.badge === "sale" ? Number(r.discount) || 0 : 0,
-    image: absolute(parseImages(r.images)[0]?.url || ""),
-  }));
+  // the words a search result shows: what the shop sells, from what's online
+  const what = categoryWords(nav) || "menswear";
+  const description = `Kanaan Shop, menswear in Saida, Lebanon: ${what}. ${counts.total ? `${counts.total} pieces online, ` : ""}delivery all over Lebanon, cash on delivery.`;
 
   const content = renderListingContent({
     title: "Kanaan Shop — Everyday wear, refined",
-    intro:
-      "Menswear in heavy fabrics with a youthful edge, from Saida to all of Lebanon. Delivery across Lebanon, cash on delivery.",
+    intro: "Menswear from our shop on Eastern Boulevard in Saida, delivered all over Lebanon. Cash on delivery.",
     products,
     origin,
-  });
-
-  /* An ItemList of what's on the homepage right now, so the products are
-     discoverable from the site's front door rather than only from their
-     own pages. */
-  const listLd = jsonLd({
-    "@context": "https://schema.org",
-    "@type": "ItemList",
-    name: "New in — Kanaan Shop",
-    itemListElement: products.slice(0, 12).map((p, i) => ({
-      "@type": "ListItem",
-      position: i + 1,
-      url: `${origin}/product/${p.id}`,
-      item: {
-        "@type": "Product",
-        name: p.name,
-        image: p.image || undefined,
-        url: `${origin}/product/${p.id}`,
-        offers: {
-          "@type": "Offer",
-          price: p.discount > 0 ? Math.round(p.price * (1 - p.discount / 100)) : p.price,
-          priceCurrency: "USD",
-        },
-      },
-    })),
+    nav,
+    limit: 24,
   });
 
   // Lets Google show a search box for the site directly in results.
@@ -115,12 +86,20 @@ export async function onRequestGet(context) {
     `<link rel="preload" as="image" href="/home/store-day-tall.webp" media="(max-aspect-ratio: 21/20)" fetchpriority="high">\n` +
     `<link rel="preload" as="image" href="/home/store-day-wide.webp" media="(min-aspect-ratio: 21/20)" fetchpriority="high">\n`;
 
-  html = html.replace(
-    /<\/head>/i,
-    preload +
-      `<script type="application/ld+json">${listLd}</script>\n` +
-      `<script type="application/ld+json">${searchLd}</script>\n  </head>`
-  );
+  // the shell's own ClothingStore block is replaced by the full one (hours
+  // from the owner's settings)
+  html = html.replace(/<script type="application\/ld\+json">\{"@context":"https:\/\/schema.org","@type":"ClothingStore"[\s\S]*?<\/script>/, "");
+  html = setHead(html, headTags({
+    title: "Kanaan Shop — Menswear from Saida, Lebanon",
+    description,
+    url: `${origin}/`,
+    image: `${origin}/home/shop-front.webp`,
+    extra:
+      preload +
+      `<script type="application/ld+json">${jsonLd(storeLd(settings))}</script>\n` +
+      (products.length ? `<script type="application/ld+json">${jsonLd(itemList("New in — Kanaan Shop", products, origin))}</script>\n` : "") +
+      `<script type="application/ld+json">${searchLd}</script>`,
+  }));
 
   const headers = new Headers(res.headers);
   // the page is re-checked every visit (like the shell, see public/_headers): a cached copy could point at the

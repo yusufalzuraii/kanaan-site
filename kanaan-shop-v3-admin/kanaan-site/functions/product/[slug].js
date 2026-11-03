@@ -11,20 +11,15 @@
    The page itself still behaves exactly as before for real visitors —
    we only rewrite the tags in <head>. */
 
-const esc = (s) =>
-  String(s == null ? "" : s)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-
 // Safe to drop straight into a <script type="application/ld+json">: escapes
 // the one sequence that would otherwise break out of the tag early.
 const jsonLd = (obj) => JSON.stringify(obj).replace(/</g, "\\u003c");
 
 import { parseImages, rowToProduct } from "../_shared/util.js";
 import { loadCategories } from "../_shared/site.js";
-import { renderProductContent, injectContent } from "../_shared/ssr.js";
+import { loadSettings } from "../_shared/settings.js";
+import { renderProductContent, injectContent, headTags, setHead, productDescription, offerExtras } from "../_shared/ssr.js";
+import { cardsFrom } from "../_shared/seo.js";
 
 export async function onRequestGet(context) {
   const { request, env, params, next } = context;
@@ -64,7 +59,15 @@ export async function onRequestGet(context) {
         return new Response(null, { status: moved ? 301 : 302, headers: { Location: new URL(to, request.url).toString(), "Cache-Control": moved ? "public, max-age=86400" : "no-store" } });
       }
     } catch { /* fall back to the app */ }
-    return res;
+    // never on the site: the app shows its own "not found", and search
+    // engines are told so (404) instead of a copy of the homepage
+    let html = await res.text();
+    html = setHead(html, headTags({ title: "Not found — Kanaan Shop", description: "This piece isn't in the shop. Browse all the pieces at kanaanshop.com/shop.", url: "", noindex: true }));
+    const h404 = new Headers(res.headers);
+    h404.set("Cache-Control", "no-store");
+    h404.delete("ETag");
+    h404.delete("Last-Modified");
+    return new Response(html, { status: 404, headers: h404 });
   }
 
   const origin = new URL(request.url).origin;
@@ -80,16 +83,29 @@ export async function onRequestGet(context) {
   const discount = row.badge === "sale" ? Number(row.discount) || 0 : 0;
   const finalPrice = discount > 0 ? Math.round(price * (1 - discount / 100)) : price;
 
-  const title = `${row.name} — $${finalPrice} | Kanaan Shop`;
-  const descText =
-    (row.description && String(row.description).replace(/\s+/g, " ").trim().slice(0, 200)) ||
-    `${row.name} — available now at Kanaan Shop. Delivery all over Lebanon, cash on delivery.`;
+  const product = rowToProduct(row);
+  const [cats, settings] = await Promise.all([loadCategories(env), loadSettings(env).catch(() => null)]);
+  const categoryLabel = cats.labels[row.category] || "Menswear";
+  const title = `${row.name} — Men's ${categoryLabel.toLowerCase()}, $${finalPrice} | Kanaan Shop`;
+  const descText = productDescription({ name: row.name, categoryLabel, colors: product.colors, sizes: product.sizes, price: finalPrice, desc: row.description });
 
-  // Whether stock tracking has this fully sold out isn't knowable from the
-  // products row alone (that lives in `variants`) — sold_out is the
-  // explicit owner override, which is what search results should reflect.
-  const availability = row.sold_out ? "https://schema.org/OutOfStock" : "https://schema.org/InStock";
-  const categoryLabel = (await loadCategories(env)).labels[row.category] || "Menswear";
+  // Sold out: the owner's switch, or — when the piece's stock is counted —
+  // nothing left in any colour or size
+  let soldOut = !!row.sold_out;
+  if (!soldOut) {
+    try {
+      const v = await env.DB.prepare("SELECT COUNT(*) AS n, COALESCE(SUM(MAX(quantity - reserved, 0)), 0) AS left FROM variants WHERE product_id = ?").bind(row.id).first();
+      if (v && Number(v.n) > 0 && Number(v.left) <= 0) soldOut = true;
+    } catch { /* not counted: in stock */ }
+  }
+  const availability = soldOut ? "https://schema.org/OutOfStock" : "https://schema.org/InStock";
+
+  // a few more pieces from the same category, linked from the page
+  let related = [];
+  try {
+    const rr = (await env.DB.prepare("SELECT id, name, price, badge, discount, images FROM products WHERE active = 1 AND app_exclusive = 0 AND sold_out = 0 AND category = ? AND id != ? ORDER BY created_at DESC LIMIT 8").bind(row.category, row.id).all()).results || [];
+    related = cardsFrom(rr, origin).map((c) => ({ ...c, price: c.finalPrice }));
+  } catch { related = []; }
 
   const productLd = jsonLd({
     "@context": "https://schema.org",
@@ -99,16 +115,22 @@ export async function onRequestGet(context) {
     image: allImagesAbsolute.length ? allImagesAbsolute : [image],
     sku: row.id,
     category: categoryLabel,
+    color: product.colors.join(", "),
+    size: product.sizes.join(", "),
+    audience: { "@type": "PeopleAudience", suggestedGender: "male" },
     brand: { "@type": "Brand", name: "Kanaan Shop" },
     offers: {
       "@type": "Offer",
       url,
       priceCurrency: "USD",
       price: finalPrice,
+      // prices hold until the owner changes them; Google asks for a date
+      priceValidUntil: `${new Date().getUTCFullYear() + 1}-12-31`,
       availability,
       itemCondition: "https://schema.org/NewCondition",
       areaServed: { "@type": "Country", name: "Lebanon" },
-      seller: { "@type": "Organization", name: "Kanaan Shop" },
+      seller: { "@type": "Organization", name: "Kanaan Shop", "@id": "https://kanaanshop.com/#store" },
+      ...offerExtras(settings),
     },
   });
 
@@ -122,27 +144,20 @@ export async function onRequestGet(context) {
     ],
   });
 
-  const tags = `
-    <title>${esc(title)}</title>
-    <meta name="description" content="${esc(descText)}" />
-    <link rel="canonical" href="${esc(url)}" />
-    <meta property="og:type" content="product" />
-    <meta property="og:site_name" content="Kanaan Shop" />
-    <meta property="og:title" content="${esc(title)}" />
-    <meta property="og:description" content="${esc(descText)}" />
-    <meta property="og:url" content="${esc(url)}" />
-    <meta property="og:image" content="${esc(image)}" />
-    <meta property="og:image:width" content="800" />
-    <meta property="og:image:height" content="1000" />
-    <meta property="product:price:amount" content="${finalPrice}" />
+  const tags = headTags({
+    title,
+    description: descText,
+    url,
+    image,
+    imageW: 800,
+    imageH: 1000,
+    type: "product",
+    extra: `<meta property="product:price:amount" content="${finalPrice}" />
     <meta property="product:price:currency" content="USD" />
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="${esc(title)}" />
-    <meta name="twitter:description" content="${esc(descText)}" />
-    <meta name="twitter:image" content="${esc(image)}" />
+    <meta property="product:availability" content="${soldOut ? "out of stock" : "in stock"}" />
     <script type="application/ld+json">${productLd}</script>
-    <script type="application/ld+json">${breadcrumbLd}</script>
-  `;
+    <script type="application/ld+json">${breadcrumbLd}</script>`,
+  });
 
   let html = await res.text();
 
@@ -154,23 +169,19 @@ export async function onRequestGet(context) {
     html = injectContent(
       html,
       renderProductContent({
-        product: rowToProduct(row),
+        product,
         origin,
         categoryLabel,
         images: allImagesAbsolute.length ? allImagesAbsolute : [image],
-        inStock: !row.sold_out,
+        inStock: !soldOut,
+        description: descText,
+        related,
       })
     );
   } catch { /* the meta tags below still apply even if this part fails */ }
 
   // Drop the generic tags, then insert the product-specific ones.
-  html = html
-    .replace(/<title>[\s\S]*?<\/title>/i, "")
-    .replace(/<meta\s+name="description"[^>]*>/gi, "")
-    .replace(/<link\s+rel="canonical"[^>]*>/gi, "")
-    .replace(/<meta\s+property="og:[^"]*"[^>]*>/gi, "")
-    .replace(/<meta\s+name="twitter:[^"]*"[^>]*>/gi, "")
-    .replace(/<\/head>/i, `${tags}\n  </head>`);
+  html = setHead(html, tags);
 
   const headers = new Headers(res.headers);
   // the page is re-checked every visit (like the shell, see public/_headers): a cached copy could point at the

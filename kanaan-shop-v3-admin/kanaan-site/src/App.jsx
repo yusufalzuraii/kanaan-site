@@ -3311,9 +3311,11 @@ function Header({ cartCount, likesCount = 0, onHome, onCart, onSearch, onSale, o
     <div className="sticky top-0 z-40 px-3 sm:px-6 pt-3 header-layer">
       <AnnounceBar navigate={navigate} />
       <header className="glass max-w-6xl mx-auto rounded-2xl transition-all duration-300" style={{ paddingTop: scrolled ? 8 : 12, paddingBottom: scrolled ? 8 : 12, transform: "translateZ(0)", willChange: "transform" }}>
-        <div className="flex items-center justify-between px-4 sm:px-5">
-          <button onClick={onHome} className="flex items-center tap-scale" aria-label={STORE_NAME}>
-            <LogoMark variant="compact" className="h-6 sm:h-8 w-auto" />
+        {/* a narrow phone: the logo a size down and the icons closer, so the
+            logo never runs into the day/night switch */}
+        <div className="flex items-center justify-between gap-3 px-4 sm:px-5">
+          <button onClick={onHome} className="flex items-center tap-scale shrink-0" aria-label={STORE_NAME}>
+            <LogoMark variant="compact" className="h-5 min-[400px]:h-6 sm:h-8 w-auto" />
           </button>
 
           <nav className="hidden lg:flex items-center gap-5 font-body text-sm">
@@ -3324,7 +3326,7 @@ function Header({ cartCount, likesCount = 0, onHome, onCart, onSearch, onSale, o
             </button>
           </nav>
 
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-1 min-[400px]:gap-2.5">
             <SegmentedToggle />
             <button onClick={onSearch} className="p-2 tap-scale hover:text-coral transition-colors" aria-label="Search products">
               <Search className="w-5 h-5" />
@@ -6062,6 +6064,8 @@ function Footer({ goCatalog, goSale }) {
 export {
   useApp,
   ProductCard,
+  getImageList,
+  apiBase,
   ScrollProgress,
   AppTeaser,
   CATEGORIES,

@@ -62,7 +62,7 @@ import { COLORS as PALETTE, swatchBackground } from "./palette.js";
 /* Set from Kanaan POS (Website → Site): the bar at the top, delivery, exchanges, opening hours */
 import { applySettings, useSiteSettings, deliveryFor, welcomeNow, welcomeFits, welcomeOn, markOrdered } from "./lib/siteSettings.js";
 import { parsePhone } from "./lib/phone.js";
-import { AnnounceBar, FreeDeliveryMeter, WelcomeNote, SITE_BITS_CSS } from "./components/SiteBits.jsx";
+import { AnnounceBar, FreeDeliveryMeter, WelcomeNote, PieceWords, SITE_BITS_CSS } from "./components/SiteBits.jsx";
 /* The shopper's own sizes (learnt from the bag, kept on the device) and what to wear a piece with */
 import { rememberSize, mySizeFor, sizeKind, useMySizes, sizeNorm, sizeOrder } from "./lib/mySize.js";
 import { completeTheLook } from "./lib/look.js";
@@ -2629,6 +2629,14 @@ function GlobalStyles() {
       .text-muted { color: var(--fg-muted); }
       .border-app { border-color: var(--border); }
       .text-coral { color: var(--coral); }
+      .piece-words .pw-lead { margin: 0 0 14px; font-size: 15px; line-height: 1.7; color: var(--fg); white-space: pre-line; }
+      .piece-words .pw-rows { margin: 0; padding: 4px 16px; border-radius: 22px; background: var(--bg-soft); border: 1px solid var(--border); }
+      .piece-words .pw-row { display: grid; grid-template-columns: 28px 104px minmax(0, 1fr); gap: 10px; align-items: start; padding: 11px 0; border-top: 1px solid var(--border); }
+      .piece-words .pw-row:first-child { border-top: 0; }
+      .piece-words .pw-ic { width: 28px; height: 28px; border-radius: 999px; display: grid; place-items: center; color: var(--teal-text); background: color-mix(in srgb, var(--teal) 14%, transparent); }
+      .piece-words dt { font-size: 12.5px; font-weight: 600; letter-spacing: .01em; color: var(--fg-muted); padding-top: 5px; }
+      .piece-words dd { margin: 0; font-size: 14px; line-height: 1.55; color: var(--fg); padding-top: 4px; min-width: 0; overflow-wrap: anywhere; }
+      @media (max-width: 640px) { .piece-words .pw-row { grid-template-columns: 28px minmax(0, 1fr); column-gap: 12px; row-gap: 2px; } .piece-words .pw-ic { grid-row: span 2; } .piece-words dt { padding-top: 1px; font-size: 12px; } .piece-words dd { grid-column: 2; padding-top: 0; } }
       .bg-coral { background-color: var(--coral); }
       .text-teal { color: var(--teal); }
       .bg-teal { background-color: var(--teal); }
@@ -4991,7 +4999,7 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
           </div>
           {!outOfStock && welcomeFits(welcomeNow(site), isOnSale(product)) && <WelcomeNote className="-mt-3 mb-6" />}
 
-          <p className="font-body text-sm text-muted leading-7 mb-8" style={{ whiteSpace: "pre-line" }}>{product.desc}</p>
+          <PieceWords text={product.desc} className="mb-8" />
 
           {/* On desktop the picker sits with the rest of the details.
               On mobile it's rendered right under the gallery instead. */}

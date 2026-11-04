@@ -10,7 +10,7 @@
    OpenNow            "Open now · until 10 pm", in Saida's own time
    ============================================================ */
 import React, { useEffect, useState } from "react";
-import { ArrowUpRight, Gift, Truck, X } from "lucide-react";
+import { ArrowUpRight, Gift, Truck, X, Ruler, Palette, Scissors, Shirt, Info } from "lucide-react";
 import { useSiteSettings, welcomeNow, welcomeWords } from "../lib/siteSettings.js";
 import { openLine } from "../lib/hours.js";
 
@@ -142,3 +142,39 @@ export const SITE_BITS_CSS = `
 @keyframes openPulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--teal) 55%, transparent); } 80%, 100% { box-shadow: 0 0 0 9px transparent; } }
 @media (prefers-reduced-motion: reduce) { .open-now.is-open i, .announce-bar, .announce-bar .ab-turn { animation: none; } .free-meter-track i { transition: none; } }
 `;
+
+/* A piece's words (written in Kanaan POS → Website → the piece, or Site words): the first lines are the opening;
+   lines "Fit: …", "Look: …", "Details: …", "Wear it with: …" (and "Fabric:", "Care:") become rows with an icon.
+   The program's preview (kanaan-pos phone/src/ui/wordsview.jsx) reads them the same way. */
+const WORD_KEYS = { fit: ["Fit", Ruler], look: ["Look", Palette], details: ["Details", Scissors], "wear it with": ["Wear it with", Shirt], fabric: ["Fabric", Palette], care: ["Care", Info] };
+const WORD_RX = /^\s*(fit|look|details|wear it with|fabric|care)\s*[:：]\s*(.+?)\s*$/i;
+export function parseWords(text) {
+  const lead = []; const rows = []; const rest = [];
+  for (const l of String(text || "").replace(/\r\n/g, "\n").split("\n")) {
+    const m = l.match(WORD_RX);
+    if (m) { const [label, Icon] = WORD_KEYS[m[1].toLowerCase()]; rows.push({ label, Icon, text: m[2] }); }
+    else if (!rows.length) lead.push(l); else rest.push(l);
+  }
+  return { lead: lead.join("\n").trim(), rows, rest: rest.join("\n").trim() };
+}
+export function PieceWords({ text, className = "" }) {
+  const w = parseWords(text);
+  if (!w.lead && !w.rows.length && !w.rest) return null;
+  return (
+    <div className={`piece-words ${className}`} data-testid="piece-words">
+      {w.lead && <p className="pw-lead font-body">{w.lead}</p>}
+      {w.rows.length > 0 && (
+        <dl className="pw-rows">
+          {w.rows.map((r, i) => (
+            <div className="pw-row" key={i}>
+              <span className="pw-ic" aria-hidden="true"><r.Icon size={14} strokeWidth={2} /></span>
+              <dt className="font-num">{r.label}</dt>
+              <dd className="font-body">{r.text}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {w.rest && <p className="pw-lead font-body">{w.rest}</p>}
+    </div>
+  );
+}

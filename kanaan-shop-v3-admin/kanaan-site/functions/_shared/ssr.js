@@ -192,8 +192,15 @@ function sizeRange(sizes) {
 /** The words a search result shows for a piece, when the owner hasn't
     written any: what it is, its colours and sizes, its price, and how the
     shop sells. Under 160 characters where it can be. */
+/** The opening of a piece's words: the lines before "Fit: …", "Look: …" and the like (see src/components/SiteBits.jsx). */
+export function leadOf(desc) {
+  const lines = String(desc || "").replace(/\r\n/g, "\n").split("\n");
+  const i = lines.findIndex((l) => /^\s*(fit|look|details|wear it with|fabric|care)\s*[:：]/i.test(l));
+  return (i < 0 ? lines : lines.slice(0, i)).join(" ").replace(/\s+/g, " ").trim();
+}
+
 export function productDescription({ name, categoryLabel, colors = [], sizes = [], price, desc }) {
-  const own = String(desc || "").replace(/\s+/g, " ").trim();
+  const own = leadOf(desc) || String(desc || "").replace(/\s+/g, " ").trim();
   if (own) return own.slice(0, 200);
   const kind = categoryLabel ? `Men's ${String(categoryLabel).toLowerCase()}` : "Menswear";
   const cols = colors.slice(0, 4).map(colorName);

@@ -174,7 +174,8 @@ export async function onRequestGet(context) {
         categoryLabel,
         images: allImagesAbsolute.length ? allImagesAbsolute : [image],
         inStock: !soldOut,
-        description: descText,
+        // the whole words for the page itself (the meta description above has the opening only)
+        description: row.description ? String(row.description).replace(/\s*\n+\s*/g, " · ").replace(/^ · | · $/g, "") : descText,
         related,
       })
     );

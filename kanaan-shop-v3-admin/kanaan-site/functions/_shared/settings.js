@@ -3,12 +3,14 @@
    ------------------------------------------------------------
    The bar at the top of every page, delivery (the fee, free delivery
    from an amount), the exchange window the site promises, and the
-   shop's opening hours ("Open now · until 10 pm"). One JSON row in
+   shop's opening hours ("Open now · until 10 pm"), and the welcome offer
+   (a first website order gets N% off — on by the shop's switch, with its
+   own line in the bar and on the pages). One JSON row in
    app_config ('site_settings'); the storefront gets the public part
    with the products (one request, always in step).
    ============================================================ */
 
-export const DEFAULTS = { announce: null, deliveryFee: 5, freeOver: 0, exchangeDays: 3, hours: null };
+export const DEFAULTS = { announce: null, deliveryFee: 5, freeOver: 0, exchangeDays: 3, hours: null, welcome: null };
 const TONES = ["coral", "teal", "ink"];
 const int = (v, lo, hi, d) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -43,8 +45,24 @@ export function clean(input) {
     const days = s.hours.days.map((d) => (Array.isArray(d) && TIME.test(String(d[0])) && TIME.test(String(d[1])) && d[0] < d[1] ? [String(d[0]), String(d[1])] : null));
     if (days.some(Boolean)) hours = { days };
   }
+  // the welcome offer: N% off a first website order (by phone number), on the pieces without their own offer
+  let welcome = null;
+  if (s.welcome && typeof s.welcome === "object") {
+    const w = s.welcome;
+    welcome = {
+      on: !!w.on,
+      pct: int(w.pct, 1, 50, 10),
+      min: int(w.min, 0, 5000, 0), // from an order of $min (0: any order)
+      until: Math.max(0, Math.round(Number(w.until) || 0)), // ends by itself then (0: until it is switched off)
+      sale: !!w.sale, // also on pieces that already have an offer
+      bar: w.bar !== false, // said in the bar at the top of the site
+      text: String(w.text || "").replace(/\s+/g, " ").trim().slice(0, 90), // the shop's own words for it (else the site's)
+      since: Math.max(0, Math.round(Number(w.since) || 0)), // switched on at
+    };
+  }
   return {
     announce,
+    welcome,
     deliveryFee: int(s.deliveryFee, 0, 50, DEFAULTS.deliveryFee),
     freeOver: int(s.freeOver, 0, 2000, 0),
     exchangeDays: int(s.exchangeDays, 0, 60, DEFAULTS.exchangeDays),
@@ -70,6 +88,11 @@ export async function saveSettings(env, patch) {
     const sameWords = a && cur.announce && String(a.text || "").trim() === cur.announce.text;
     next.announce = a ? { ...a, id: sameWords ? cur.announce.id : Date.now().toString(36) } : null;
   }
+  if (patch && "welcome" in patch) {
+    const w = patch.welcome;
+    const wasOn = !!(cur.welcome && cur.welcome.on && (!cur.welcome.until || cur.welcome.until > Date.now()));
+    next.welcome = w ? { ...w, since: w.on && !wasOn ? Date.now() : (cur.welcome && cur.welcome.since) || (w.on ? Date.now() : 0) } : null;
+  }
   const out = clean(next);
   await env.DB.prepare("INSERT INTO app_config (key, value) VALUES ('site_settings', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(JSON.stringify(out)).run();
   return out;
@@ -79,7 +102,33 @@ export async function saveSettings(env, patch) {
 export function publicSettings(s, now = Date.now()) {
   const a = s.announce;
   const announce = a && a.on && a.text && (!a.until || a.until > now) ? { text: a.text, link: a.link, tone: a.tone, id: a.id } : null;
-  return { announce, deliveryFee: s.deliveryFee, freeOver: s.freeOver, exchangeDays: s.exchangeDays, hours: s.hours };
+  const welcome = activeWelcome(s, now);
+  return {
+    announce, deliveryFee: s.deliveryFee, freeOver: s.freeOver, exchangeDays: s.exchangeDays, hours: s.hours,
+    welcome: welcome ? { pct: welcome.pct, min: welcome.min, sale: welcome.sale, bar: welcome.bar, text: welcome.text, until: welcome.until } : null,
+  };
+}
+
+/** The welcome offer if it is on now (switched on, not past its end), else null. */
+export function activeWelcome(s, now = Date.now()) {
+  const w = s && s.welcome;
+  return w && w.on && (!w.until || w.until > now) ? w : null;
+}
+
+/**
+ * The welcome offer on these lines ([{ price, qty, onSale }], whole dollars): the pieces it is on, their amount,
+ * and the discount — pct of that amount, to the nearest dollar — when the order reaches the minimum (by its
+ * subtotal, before any discount). { pct, eligible, discount, lines: [indices] } or null when it does not apply.
+ */
+export function welcomeOn(w, lines) {
+  if (!w) return null;
+  const subtotal = lines.reduce((a, l) => a + l.price * l.qty, 0);
+  if (w.min && subtotal < w.min) return null;
+  const idx = lines.map((l, i) => (w.sale || !l.onSale ? i : -1)).filter((i) => i >= 0);
+  const eligible = idx.reduce((a, i) => a + lines[i].price * lines[i].qty, 0);
+  const discount = Math.round((eligible * w.pct) / 100);
+  if (!(discount > 0)) return null;
+  return { pct: w.pct, eligible, discount, lines: idx };
 }
 
 /** The delivery an order pays, by these settings. */

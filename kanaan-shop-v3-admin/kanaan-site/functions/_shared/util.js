@@ -361,6 +361,8 @@ export function rowToOrder(r) {
     notes: r.notes || "",
     items,
     subtotal: Number(r.subtotal) || 0,
+    discount: Number(r.discount) || 0,
+    promo: r.promo || "",
     delivery: Number(r.delivery) || 0,
     total: Number(r.total) || 0,
     createdAt: Number(r.created_at) || 0,

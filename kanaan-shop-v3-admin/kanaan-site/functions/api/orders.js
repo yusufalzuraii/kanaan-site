@@ -1,7 +1,9 @@
 import { json, releaseExpiredOrders, releaseReservation, rateLimit, tooManyRequests } from "../_shared/util.js";
 import { notifyShop } from "../_shared/webpush.js";
-import { loadSettings, deliveryFor } from "../_shared/settings.js";
+import { loadSettings, deliveryFor, activeWelcome, welcomeOn } from "../_shared/settings.js";
 import { parsePhone } from "../_shared/phone.js";
+import { ensureSchema } from "../_shared/site.js";
+import { orderedBefore } from "../_shared/welcome.js";
 
 /* POST /api/orders
    ------------------------------------------------------------
@@ -17,6 +19,12 @@ import { parsePhone } from "../_shared/phone.js";
    Delivery: the website (pricing: 2) charges what Kanaan POS set (the fee,
    free from an amount); an app installed before that showed $5 and pays $5,
    so every shopper pays exactly what their screen said.
+
+   The welcome offer (when the shop switched it on): a first website order —
+   no order before from that phone number, apart from ones rejected,
+   cancelled or never taken — gets N% off the pieces without an offer of
+   their own, to the nearest dollar. Free delivery still counts from the
+   amount before it. The invoice in Kanaan POS carries the same discount.
    ============================================================ */
 
 const LEGACY_DELIVERY = 5;
@@ -107,6 +115,7 @@ export async function onRequestPost(context) {
     items.push({
       productId: w.productId, name: p.name, colorKey: w.colorKey,
       color: w.color || w.colorKey, size: w.size, qty: w.qty, price,
+      ...(disc > 0 && price < base ? { was: base, off: disc } : {}), // a piece with its own offer (the welcome offer leaves it)
     });
     subtotal += price * w.qty;
   }
@@ -164,14 +173,26 @@ export async function onRequestPost(context) {
 
   const now = Date.now();
   let delivery = LEGACY_DELIVERY;
-  if (Number(body.pricing) >= 2) { try { delivery = deliveryFor(await loadSettings(env), subtotal); } catch { delivery = LEGACY_DELIVERY; } }
-  const total = subtotal + delivery;
+  let settings = null;
+  try { settings = await loadSettings(env); } catch { settings = null; }
+  if (Number(body.pricing) >= 2 && settings) delivery = deliveryFor(settings, subtotal);
+  // the welcome offer on a first order (the lines it is on are marked, so the invoice spreads it on them only)
+  let welcome = null;
+  try {
+    const w = activeWelcome(settings, now);
+    if (w && !(await orderedBefore(env, ph))) welcome = welcomeOn(w, items.map((it) => ({ price: it.price, qty: it.qty, onSale: !!it.off })));
+  } catch { welcome = null; }
+  if (welcome) for (const i of welcome.lines) items[i].welcome = 1;
+  const discount = welcome ? welcome.discount : 0;
+  const promo = welcome ? `welcome:${welcome.pct}` : "";
+  const total = subtotal - discount + delivery;
 
   try {
+    await ensureSchema(env);
     await env.DB.prepare(
-      `INSERT INTO orders (id, status, customer_name, phone, area, address, notes, items, subtotal, delivery, total, created_at, updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`
-    ).bind(id, "pending", name, phone, area, address, notes, JSON.stringify(items), subtotal, delivery, total, now, now).run();
+      `INSERT INTO orders (id, status, customer_name, phone, area, address, notes, items, subtotal, discount, promo, delivery, total, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+    ).bind(id, "pending", name, phone, area, address, notes, JSON.stringify(items), subtotal, discount, promo, delivery, total, now, now).run();
   } catch {
     // Stock was reserved but the order record didn't save — release it
     // rather than leaving pieces held by an order that doesn't exist.
@@ -183,9 +204,9 @@ export async function onRequestPost(context) {
   const pieces = items.reduce((a, it) => a + it.qty, 0);
   const job = (async () => {
     const w = await env.DB.prepare("SELECT COUNT(*) AS n FROM orders WHERE status IN ('pending','processing')").first().catch(() => null);
-    await notifyShop(env, { title: `🛍 New order #${id}`, body: `${name} · ${pieces} ${pieces === 1 ? "piece" : "pieces"} · $${total}${area ? ` · ${area}` : ""}`, tag: `order-${id}`, url: "/pos/#orders", badge: w ? w.n : 1 });
+    await notifyShop(env, { title: `🛍 New order #${id}`, body: `${name} · ${pieces} ${pieces === 1 ? "piece" : "pieces"} · $${total}${discount ? ` (first order −$${discount})` : ""}${area ? ` · ${area}` : ""}`, tag: `order-${id}`, url: "/pos/#orders", badge: w ? w.n : 1 });
   })();
   if (context.waitUntil) context.waitUntil(job); else await job;
 
-  return json({ ok: true, orderNumber: id, subtotal, delivery, total, items, phone });
+  return json({ ok: true, orderNumber: id, subtotal, discount, welcome: welcome ? { pct: welcome.pct, discount } : null, delivery, total, items, phone });
 }

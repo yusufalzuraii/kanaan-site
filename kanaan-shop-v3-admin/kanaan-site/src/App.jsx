@@ -42,6 +42,7 @@ import {
   Flame,
   Home as HomeIcon,
   Expand,
+  Gift,
 } from "lucide-react";
 /* The admin panel is a third of the front-end code — product editor,
    stock grid, order management, image optimizer — and no
@@ -59,12 +60,13 @@ import HomeLab from "./home/HomeLab.jsx";
 const HOME_3D = true;
 import { COLORS as PALETTE, swatchBackground } from "./palette.js";
 /* Set from Kanaan POS (Website → Site): the bar at the top, delivery, exchanges, opening hours */
-import { applySettings, useSiteSettings, deliveryFor } from "./lib/siteSettings.js";
+import { applySettings, useSiteSettings, deliveryFor, welcomeNow, welcomeFits, welcomeOn, markOrdered } from "./lib/siteSettings.js";
 import { parsePhone } from "./lib/phone.js";
-import { AnnounceBar, FreeDeliveryMeter, SITE_BITS_CSS } from "./components/SiteBits.jsx";
+import { AnnounceBar, FreeDeliveryMeter, WelcomeNote, SITE_BITS_CSS } from "./components/SiteBits.jsx";
 /* The shopper's own sizes (learnt from the bag, kept on the device) and what to wear a piece with */
 import { rememberSize, mySizeFor, sizeKind, useMySizes, sizeNorm, sizeOrder } from "./lib/mySize.js";
 import { completeTheLook } from "./lib/look.js";
+import { startInsight, insightView, insightPiece, insight, insightCart, flush as flushInsight } from "./lib/insight.js";
 /* The product photos full screen: pinch / double-tap to zoom, swipe between them */
 import PhotoViewer, { PHOTO_VIEWER_CSS } from "./components/PhotoViewer.jsx";
 import {
@@ -190,16 +192,8 @@ function applyCategories(list, remember = true) {
 }
 try { const saved = JSON.parse(localStorage.getItem("kanaan-cats") || "null"); if (saved) applyCategories(saved, false); } catch { /* first visit */ }
 
-/* A tiny visit counter for the shop's statistics in Kanaan POS: page seen, product seen, added to cart,
-   checkout, order, search. No cookies, nothing personal: the server only counts. Never slows a page. */
-function track(kind, data = {}) {
-  try {
-    const body = JSON.stringify({ kind, app: isNativeApp ? 1 : 0, ...data });
-    const url = `${apiBase}/api/hit`;
-    if (!isNativeApp && navigator.sendBeacon) navigator.sendBeacon(url, new Blob([body], { type: "text/plain" }));
-    else fetch(url, { method: "POST", body, keepalive: true, headers: { "Content-Type": "text/plain" } }).catch(() => {});
-  } catch { /* never break the shop */ }
-}
+/* What a visit does (pages, time, pieces, sizes, likes, the bag, the order) goes to the shop's program —
+   Kanaan POS → Website → Visitors. Anonymous, batched, never slows a page: see lib/insight.js. */
 const COLORS = FALLBACK_COLORS;
 
 const LEBANON_GOVERNORATES = [
@@ -1093,6 +1087,7 @@ function ProductGallery({ product, liked, onToggleLike, activeColor }) {
 
   // full screen: a step in the browser's history, so the way back (Android's button, a swipe) closes the photos first
   const openViewer = (k) => {
+    insight("photo", { id: product.id, q: k + 1, c: activeColor || "" });
     try { window.history.pushState({ ...(window.history.state || {}), depth: (window.history.state?.depth || 0) + 1, viewer: 1 }, ""); } catch { /* fine */ }
     setViewer(k);
   };
@@ -1319,7 +1314,7 @@ function SearchOverlay({ open, onClose, products, openProduct, goCatalog, goSale
   useEffect(() => {
     const t = q.trim();
     if (!open || t.length < 2) return undefined;
-    const timer = setTimeout(() => track("search", { key: t.slice(0, 60) }), 1400);
+    const timer = setTimeout(() => insight("search", { x: t.slice(0, 60), v: results.length }), 1400);
     return () => clearTimeout(timer);
   }, [q, open]);
 
@@ -2036,21 +2031,17 @@ function KanaanShop() {
   const { theme } = useApp();
   const [path, navigate, navDirection, canGoBack] = useRouter();
   const route = parseRoute(path);
-  const firstView = useRef(true);
   useEffect(() => {
     if (route.type === "admin") return;
-    const extra = {};
-    if (firstView.current) {
-      firstView.current = false;
-      try { extra.ref = document.referrer || ""; const q = new URLSearchParams(window.location.search); extra.utm = q.get("utm_source") || q.get("ref") || ""; } catch { /* ignore */ }
-    }
-    track("pv", { path, ...extra });
-    if (route.type === "checkout") track("checkout");
+    startInsight({ base: apiBase, app: isNativeApp });
+    insightView(path);
+    if (route.type === "checkout") insight("checkout", { q: cartCount, v: cartTotal });
   }, [path]);
 
   const [cart, setCart] = useState([]);
   const [likes, setLikes] = useState([]);
   const [cartOpen, setCartOpen] = useState(false);
+  useEffect(() => { if (cartOpen) insight("cart_open", { q: cartCount, v: cartTotal }); }, [cartOpen]); // eslint-disable-line
   const [menuOpen, setMenuOpen] = useState(false);
   const [storageReady, setStorageReady] = useState(false);
   const [lastOrder, setLastOrder] = useState(null);
@@ -2172,6 +2163,7 @@ function KanaanShop() {
     try {
       localStorage.setItem("kanaan-cart", JSON.stringify(cart));
     } catch {}
+    insightCart(cart);
   }, [cart, storageReady]);
 
   useEffect(() => {
@@ -2246,9 +2238,11 @@ function KanaanShop() {
   const openProduct = useCallback((product) => navigate(`/product/${product.slug}`), [navigate]);
   const goCheckout = () => { setCartOpen(false); setOrderPlaced(false); navigate("/checkout"); };
 
+  const likesNow = useRef(likes); likesNow.current = likes;
   const toggleLike = useCallback((id) => {
     hapticLight();
     playTapChime();
+    insight(likesNow.current.includes(id) ? "unlike" : "like", { id });
     setLikes((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   }, []);
 
@@ -2282,7 +2276,7 @@ function KanaanShop() {
   // colorKey = the palette key we track stock against ("black")
   // colorLabel = what the shopper reads ("Black")
   const addToCart = (product, size, colorKey, colorLabel, qty) => {
-    track("cart", { key: product.id });
+    insight("add", { id: product.id, c: colorKey, s: size, q: qty, v: effectivePrice(product) });
     rememberSize(product, size); // "you usually take L" next time
     setCart((prev) => {
       const key = cartKey(product.id, size, colorKey);
@@ -2302,7 +2296,10 @@ function KanaanShop() {
     setCartOpen(true);
   };
 
+  const cartNow = useRef(cart); cartNow.current = cart;
   const updateQty = (key, delta) => {
+    const was = cartNow.current.find((i) => i.key === key);
+    if (was) insight("qty", { id: was.productId, c: was.colorKey, s: was.size, q: delta, v: was.price });
     setCart((prev) => prev.map((i) => {
       if (i.key !== key) return i;
       const product = products.find((p) => p.id === i.productId);
@@ -2311,7 +2308,11 @@ function KanaanShop() {
       return { ...i, qty: next };
     }).filter((i) => i.qty > 0));
   };
-  const removeFromCart = (key) => setCart((prev) => prev.filter((i) => i.key !== key));
+  const removeFromCart = (key) => {
+    const was = cartNow.current.find((i) => i.key === key);
+    if (was) insight("remove", { id: was.productId, c: was.colorKey, s: was.size, q: was.qty, v: was.price });
+    setCart((prev) => prev.filter((i) => i.key !== key));
+  };
   // a piece kept in the bag since another day shows today's price and name: what the checkout will charge
   useEffect(() => {
     if (!products.length) return;
@@ -2368,7 +2369,7 @@ function KanaanShop() {
   const currentProduct = route.type === "product" ? products.find((p) => p.slug === route.slug) : null;
   const seenProduct = useRef("");
   useEffect(() => {
-    if (currentProduct && seenProduct.current !== currentProduct.id) { seenProduct.current = currentProduct.id; track("product", { key: currentProduct.id }); }
+    if (currentProduct && seenProduct.current !== currentProduct.id) { seenProduct.current = currentProduct.id; insightPiece(currentProduct.id); insight("product", { id: currentProduct.id, v: effectivePrice(currentProduct) }); }
     if (!currentProduct) seenProduct.current = "";
   }, [currentProduct && currentProduct.id]);
 
@@ -2496,10 +2497,12 @@ function KanaanShop() {
         {route.type === "checkout" && !orderPlaced && (
           <CheckoutView
             cart={cart}
+            products={products}
             total={cartTotal}
             goCatalog={goCatalog}
             onSubmitted={(orderInfo) => {
-              track("order", { key: String(orderInfo && orderInfo.orderNumber || "") });
+              insight("order", { x: String((orderInfo && orderInfo.orderNumber) || ""), v: orderInfo && orderInfo.total, q: cart.reduce((a, i) => a + i.qty, 0) });
+              flushInsight(false);
               setLastOrder(orderInfo);
               setCart([]);
               setOrderPlaced(true);
@@ -4352,6 +4355,7 @@ function CatalogView({ activeCategory, activeSub, loading, error, onRetry, goCat
   }, [shown]);
 
   const setFilter = (patch) => {
+    insight("filter", { x: Object.entries(patch).map(([k, v]) => `${k}:${v || "any"}`).join(" ") });
     setQuery((q) => ({ ...q, ...patch }));
     writeCatalogQuery(patch);
     setShown(PAGE_SIZE);
@@ -4877,10 +4881,19 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
   // Switching colour: if the chosen size isn't available in it, the size
   // is cleared rather than silently swapped for another one.
   const pickColor = (key) => {
+    if (key !== color) insight("color", { id: product.id, c: key });
     setColor(key);
     if (size && stockFor(product, key, size) <= 0) setSize(null);
     setQty(1);
   };
+
+  // a size picked (with how many are left of it in that colour)
+  const pickSize = (sz) => {
+    setSize(sz); setQty(1);
+    if (sz && sz !== size) insight("size", { id: product.id, c: color, s: sz, v: stockFor(product, color, sz) });
+  };
+  const openSheet = () => { setSheetOpen(true); insight("size_open", { id: product.id, c: color }); };
+  const openGuide = () => { setShowSizeGuide(true); insight("guide", { id: product.id }); };
 
   const handleAdd = () => {
     if (!canAdd) return;
@@ -4911,6 +4924,7 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
   };
 
   const shareWhatsApp = () => {
+    insight("share", { id: product.id, x: "whatsapp" });
     const text = `${product.name} — ${money(effectivePrice(product))}\n${productUrl}`;
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
   };
@@ -4918,6 +4932,7 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
   const copyLink = async () => {
     try {
       await navigator.clipboard.writeText(productUrl);
+      insight("share", { id: product.id, x: "copy" });
       setCopied(true);
       setTimeout(() => setCopied(false), 1600);
     } catch (e) {
@@ -4936,6 +4951,7 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
   };
 
   const handleShare = async () => {
+    insight("share", { id: product.id, x: "share" });
     if (isNativeApp) {
       const ok = await nativeShare({ title: product.name, text: product.desc, url: productUrl });
       if (!ok) handleWebShare(); // Capacitor unavailable/cancelled — fall back to the web sheet
@@ -4973,6 +4989,7 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
               <span className="font-num text-2xl">{money(product.price)}</span>
             )}
           </div>
+          {!outOfStock && welcomeFits(welcomeNow(site), isOnSale(product)) && <WelcomeNote className="-mt-3 mb-6" />}
 
           <p className="font-body text-sm text-muted leading-7 mb-8" style={{ whiteSpace: "pre-line" }}>{product.desc}</p>
 
@@ -4985,9 +5002,9 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
           <div className="mb-8" ref={sizeRowRef}>
             <div className="flex items-center justify-between mb-2">
               <p className="font-body text-sm font-medium">{size ? <>Size <span className="text-coral">{size}</span></> : "Pick your size"}</p>
-              <button onClick={() => setShowSizeGuide(true)} className="font-body text-xs text-coral hover:underline">Size guide</button>
+              <button onClick={openGuide} className="font-body text-xs text-coral hover:underline">Size guide</button>
             </div>
-            <MySizeHint product={product} color={color} size={size} mine={mine} onSize={(s) => { setSize(s); setQty(1); }} onColor={pickColor} className="mb-2.5" />
+            <MySizeHint product={product} color={color} size={size} mine={mine} onSize={pickSize} onColor={pickColor} className="mb-2.5" />
             <div key={sizeNudge} className={`flex flex-wrap gap-2 p-0.5 ${sizeNudge ? "size-nudge" : ""}`} role="radiogroup" aria-label="Size">
               {product.sizes.map((sz) => {
                 const left = stockFor(product, color, sz);
@@ -4999,7 +5016,7 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
                     role="radio"
                     aria-checked={size === sz && inStock}
                     aria-label={`Size ${sz}${isMine ? ", your size" : ""}${inStock ? "" : ", sold out"}`}
-                    onClick={() => { if (inStock) { setSize(sz); setQty(1); } }}
+                    onClick={() => { if (inStock) pickSize(sz); }}
                     disabled={!inStock}
                     className="font-num text-sm px-4 py-2 rounded-full tap-scale transition-all relative"
                     style={
@@ -5158,7 +5175,7 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
               Sold out
             </button>
           ) : (
-            <button onClick={() => setSheetOpen(true)} className="pick-open glass-btn rounded-full font-body font-medium px-5 py-2.5 tap-scale flex items-center gap-2 flex-shrink-0" style={{ background: "var(--coral)", color: "#fff" }}>
+            <button onClick={openSheet} className="pick-open glass-btn rounded-full font-body font-medium px-5 py-2.5 tap-scale flex items-center gap-2 flex-shrink-0" style={{ background: "var(--coral)", color: "#fff" }}>
               {added ? <Check className="w-4 h-4" /> : <ShoppingCart className="w-4 h-4" />}
               {added ? "Added" : size ? "Add to cart" : "Choose size"}
             </button>
@@ -5172,12 +5189,12 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
           color={color}
           onColor={pickColor}
           size={size}
-          onSize={setSize}
+          onSize={(s) => { if (s !== size && s) insight("size", { id: product.id, c: color, s, v: stockFor(product, color, s) }); setSize(s); }}
           qty={qty}
           setQty={setQty}
           onAdd={addFromSheet}
           onClose={() => setSheetOpen(false)}
-          onSizeGuide={() => setShowSizeGuide(true)}
+          onSizeGuide={openGuide}
         />
       )}
       {showSizeGuide && <SizeGuideModal category={product.category} onClose={() => setShowSizeGuide(false)} />}
@@ -5216,9 +5233,15 @@ function CartItemThumb({ item }) {
   );
 }
 
+/** The cart's lines for the welcome offer: their price, how many, and whether the piece has its own offer. */
+function welcomeLines(cart, products) {
+  return cart.map((i) => { const p = products.find((x) => x.id === i.productId); return { price: i.price, qty: i.qty, onSale: !!(p && isOnSale(p)) }; });
+}
+
 function CartDrawer({ open, onClose, cart, products = [], updateQty, removeFromCart, total, onCheckout }) {
   const site = useSiteSettings();
   const delivery = deliveryFor(site, total);
+  const welcome = welcomeOn(welcomeNow(site), welcomeLines(cart, products));
   // a piece that sold out or left the shop since it went in the bag says so here, not at the last step
   const gone = (item) => {
     if (!products.length) return false;
@@ -5303,6 +5326,7 @@ function CartDrawer({ open, onClose, cart, products = [], updateQty, removeFromC
         {cart.length > 0 && (
           <div className="p-5 border-t space-y-1" style={{ borderColor: "var(--border)" }}>
             <FreeDeliveryMeter subtotal={total} money={money} />
+            {welcome && (welcome.discount > 0 || welcome.short > 0) && <WelcomeNote amount={welcome.discount} short={welcome.short} money={money} className="mb-3" />}
             <div className="flex items-center justify-between font-body text-sm">
               <span className="text-muted">Subtotal</span>
               <span className="font-num text-lg">{money(total)}</span>
@@ -5321,7 +5345,7 @@ function CartDrawer({ open, onClose, cart, products = [], updateQty, removeFromC
 /* ============================================================
    CHECKOUT
    ============================================================ */
-function CheckoutView({ cart, total, onSubmitted, goCatalog }) {
+function CheckoutView({ cart, products = [], total, onSubmitted, goCatalog }) {
   // the delivery details of the last order (kept on this device when the
   // shopper said so), so the next checkout is two taps
   const [saved] = useState(() => loadCheckoutInfo());
@@ -5343,8 +5367,29 @@ function CheckoutView({ cart, total, onSubmitted, goCatalog }) {
 
   const set = (k) => (e) => { setForm((f) => ({ ...f, [k]: e.target.value })); if (bad === k) { setBad(""); setError(""); } };
   const delivery = deliveryFor(site, total);
-  const grandTotal = total + delivery;
   const phoneOk = parsePhone(form.phone);
+  // the welcome offer: once the number is in, the shop says whether it is a first order (then it comes off here)
+  const wOffer = welcomeNow(site, { any: true });
+  const wSum = welcomeOn(wOffer, welcomeLines(cart, products));
+  const [firstOrder, setFirstOrder] = useState(null); // { phone, first } once asked
+  const askPhone = phoneOk ? phoneOk.e164 : "";
+  useEffect(() => {
+    if (!wOffer || !askPhone) return undefined;
+    if (firstOrder && firstOrder.phone === askPhone) return undefined;
+    let gone = false;
+    const t = setTimeout(async () => {
+      try {
+        const r = await fetchWithTimeout(`${apiBase}/api/welcome`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone: `+${askPhone}` }) }, 8000);
+        const d = await r.json().catch(() => ({}));
+        if (!gone && r.ok && d.on) { setFirstOrder({ phone: askPhone, first: !!d.first }); insight("promo", { x: d.first ? "first" : "not-first", v: wSum ? wSum.discount : 0 }); }
+      } catch { /* worked out when the order goes in */ }
+    }, 500);
+    return () => { gone = true; clearTimeout(t); };
+  }, [askPhone, !!wOffer]); // eslint-disable-line
+  const isFirst = !!(firstOrder && firstOrder.phone === askPhone && firstOrder.first);
+  const notFirst = !!(firstOrder && firstOrder.phone === askPhone && !firstOrder.first);
+  const discount = wSum && isFirst ? wSum.discount : 0;
+  const grandTotal = total - discount + delivery;
 
   /* The WhatsApp message: the server's own lines and totals when the order
      was saved (what the shop's program shows), the cart's otherwise. */
@@ -5355,6 +5400,7 @@ function CheckoutView({ cart, total, onSubmitted, goCatalog }) {
       ...o.items.map((i) => `• ${i.name} — ${i.color} / ${i.size} × ${i.qty} = ${money(i.price * i.qty)}`),
       "",
       `Subtotal: ${money(o.subtotal)}`,
+      o.discount ? `Welcome offer (first order${o.welcomePct ? `, ${o.welcomePct}%` : ""}): −${money(o.discount)}` : null,
       `Delivery: ${o.delivery ? money(o.delivery) : "free"}`,
       `Total: ${money(o.total)}`,
       "",
@@ -5423,8 +5469,10 @@ function CheckoutView({ cart, total, onSubmitted, goCatalog }) {
     const order = {
       ...form, phone: data.phone || phone, orderNumber: data.orderNumber,
       items: data.items || cart, subtotal: data.subtotal ?? total, delivery: data.delivery ?? delivery, total: data.total ?? grandTotal,
+      discount: Number(data.discount) || 0, welcomePct: data.welcome ? data.welcome.pct : 0,
       count: cart.reduce((sum, i) => sum + i.qty, 0),
     };
+    markOrdered(); // this device has ordered: the pages stop offering a first-order discount
     order.waUrl = waLink(order);
     if (remember) saveCheckoutInfo({ name: form.name.trim(), phone: order.phone, area: form.area, address: form.address.trim() }); else forgetCheckoutInfo();
     // the sound and the buzz before WhatsApp takes over the screen (in the app it would be cut short)
@@ -5503,7 +5551,7 @@ function CheckoutView({ cart, total, onSubmitted, goCatalog }) {
 
         {/* the total right above the button, on a phone too: no surprise at the door */}
         <div className="md:hidden glass rounded-2xl px-4 py-3 flex items-center justify-between font-body text-sm">
-          <span className="text-muted">{(() => { const n = cart.reduce((a, i) => a + i.qty, 0); return `${n} ${n === 1 ? "piece" : "pieces"}`; })()} · {delivery ? `${money(delivery)} delivery` : "free delivery"}</span>
+          <span className="text-muted">{(() => { const n = cart.reduce((a, i) => a + i.qty, 0); return `${n} ${n === 1 ? "piece" : "pieces"}`; })()}{discount ? <> · <span className="welcome-line">−{money(discount)} welcome</span></> : null} · {delivery ? `${money(delivery)} delivery` : "free delivery"}</span>
           <span className="font-num text-lg">{money(grandTotal)}</span>
         </div>
 
@@ -5532,6 +5580,7 @@ function CheckoutView({ cart, total, onSubmitted, goCatalog }) {
           .field { width: 100%; border: 1px solid var(--border); background: var(--field-bg); color: var(--fg); border-radius: 14px; padding: 0.7rem 1rem; font-family: 'Inter', sans-serif; font-size: 16px; }
           .field:focus { outline: none; border-color: var(--coral); box-shadow: 0 0 0 3px rgba(255,69,34,0.15); }
           .field-bad { border-color: var(--coral); box-shadow: 0 0 0 3px rgba(255,69,34,0.12); }
+          .welcome-line { color: var(--teal-text); font-weight: 600; }
         `}</style>
       </form>
 
@@ -5552,6 +5601,18 @@ function CheckoutView({ cart, total, onSubmitted, goCatalog }) {
               <span>Subtotal</span>
               <span className="font-num">{money(total)}</span>
             </div>
+            {wOffer && wSum && (discount > 0 ? (
+              <div className="flex justify-between font-body text-sm welcome-line" data-testid="checkout-welcome">
+                <span className="flex items-center gap-1.5"><Gift className="w-3.5 h-3.5" aria-hidden="true" /> Welcome · first order <span className="font-num">{wSum.pct}%</span></span>
+                <span className="font-num">−{money(discount)}</span>
+              </div>
+            ) : notFirst ? (
+              <p className="font-body text-xs text-muted" data-testid="checkout-welcome-used">This number has ordered before — the welcome offer is for a first order.</p>
+            ) : wSum.short > 0 ? (
+              <p className="font-body text-xs text-muted" data-testid="checkout-welcome-short">Add {money(wSum.short)} more for {wSum.pct}% off a first order.</p>
+            ) : wSum.discount > 0 ? (
+              <p className="font-body text-xs welcome-line" data-testid="checkout-welcome-hint">First order? {wSum.pct}% off (−{money(wSum.discount)}) {phoneOk ? "comes off when your order goes in." : "comes off once your number is in."}</p>
+            ) : null)}
             <div className="flex justify-between font-body text-sm text-muted">
               <span>Delivery</span>
               <span className="font-num">{delivery ? money(delivery) : "Free"}</span>
@@ -5598,6 +5659,12 @@ function ConfirmationView({ order, goHome }) {
               ? "Send the message in WhatsApp and we'll confirm your order there."
               : <>We'll call {order.phone} to confirm, then deliver to {order.area || "you"}. Pay <b className="font-num" style={{ color: "var(--fg)" }}>{money(order.total)}</b> in cash at your door.</>}
           </p>
+          {order.discount > 0 && !order.viaWhatsApp && (
+            <p className="welcome-note justify-center mx-auto mb-5" style={{ maxWidth: 340 }} data-testid="thanks-welcome">
+              <Gift className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
+              <span>Welcome to Kanaan — your first order saved you <b className="font-num">{money(order.discount)}</b></span>
+            </p>
+          )}
           {order.orderNumber && (
             <div className="glass inline-flex flex-col items-center rounded-2xl px-6 py-4 mb-5">
               <span className="font-body text-xs text-muted">Your order number</span>

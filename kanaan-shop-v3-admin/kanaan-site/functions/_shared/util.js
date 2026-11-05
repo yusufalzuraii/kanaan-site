@@ -367,6 +367,10 @@ export function rowToOrder(r) {
     total: Number(r.total) || 0,
     createdAt: Number(r.created_at) || 0,
     updatedAt: Number(r.updated_at) || 0,
+    track: r.track || "",
+    confirmedAt: Number(r.confirmed_at) || 0,
+    shippedAt: Number(r.shipped_at) || 0,
+    deliveredAt: Number(r.delivered_at) || 0,
   };
 }
 

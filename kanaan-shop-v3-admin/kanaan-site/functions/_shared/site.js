@@ -11,6 +11,7 @@
      - visit statistics: a tiny, cookie-free counter (no personal data kept)
    ============================================================ */
 import { CATEGORY_IDS, CATEGORY_LABELS, SUBCATEGORIES } from "./util.js";
+import { ensureReviewTables } from "./reviews.js";
 
 let schemaReady = false;
 export async function ensureSchema(env) {
@@ -36,6 +37,8 @@ export async function ensureSchema(env) {
     `CREATE INDEX IF NOT EXISTS idx_orders_created ON orders (created_at)`,
   ];
   for (const s of stmts) await env.DB.prepare(s).run();
+  // real reviews: the invites and the reviews (functions/_shared/reviews.js)
+  await ensureReviewTables(env);
   // products published by the POS are marked, so the storefront and the old admin treat their stock right
   let cols = [];
   try { cols = ((await env.DB.prepare("PRAGMA table_info(products)").all()).results || []).map((c) => c.name); } catch { /* ignore */ }

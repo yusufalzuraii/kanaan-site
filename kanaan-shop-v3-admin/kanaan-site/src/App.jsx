@@ -43,6 +43,7 @@ import {
   Home as HomeIcon,
   Expand,
   Gift,
+  User,
 } from "lucide-react";
 /* The admin panel is a third of the front-end code — product editor,
    stock grid, order management, image optimizer — and no
@@ -63,6 +64,8 @@ import { COLORS as PALETTE, swatchBackground } from "./palette.js";
 import { applySettings, useSiteSettings, deliveryFor, welcomeNow, welcomeFits, welcomeOn, markOrdered } from "./lib/siteSettings.js";
 import { parsePhone } from "./lib/phone.js";
 import { AnnounceBar, FreeDeliveryMeter, WelcomeNote, PieceWords, SITE_BITS_CSS } from "./components/SiteBits.jsx";
+import { ReviewPage, ProductReviews, RatingLine, CardStars, REVIEWS_CSS } from "./components/Reviews.jsx";
+import { AccountPage, TrackPage, BackInStock, AccountLink, useMemberSync, useMe, MEMBERS_CSS } from "./components/Members.jsx";
 /* The shopper's own sizes (learnt from the bag, kept on the device) and what to wear a piece with */
 import { rememberSize, mySizeFor, sizeKind, useMySizes, sizeNorm, sizeOrder } from "./lib/mySize.js";
 import { completeTheLook } from "./lib/look.js";
@@ -340,6 +343,15 @@ function parseRoute(path) {
   }
   if (path.startsWith("/product/")) return { type: "product", slug: path.slice(9) };
   if (path === "/checkout") return { type: "checkout" };
+  // a buyer's own review page (the link the shop sends after an order)
+  if (path.startsWith("/review/")) return { type: "review", token: path.slice(8).split("/")[0] };
+  // "My Kanaan", and an order's own page (the link in the shop's WhatsApp messages)
+  if (path === "/account") return { type: "account" };
+  if (path.startsWith("/order/")) {
+    const [p, q = ""] = path.split("?");
+    const t = new URLSearchParams(q).get("t") || (typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("t") : "") || "";
+    return { type: "order", id: p.slice(7).split("/")[0], t };
+  }
   return { type: "home" };
 }
 
@@ -1255,6 +1267,7 @@ const ProductCard = memo(function ProductCard({ product, onOpen, liked, onToggle
           {product.colors.map((key) => (
             <span key={key} className="w-3 h-3 rounded-full border" style={{ background: swatchBackground(key), borderColor: "var(--border)" }} />
           ))}
+          <CardStars reviews={product.reviews} />
         </div>
       </div>
     </button>
@@ -2032,7 +2045,7 @@ function KanaanShop() {
   const [path, navigate, navDirection, canGoBack] = useRouter();
   const route = parseRoute(path);
   useEffect(() => {
-    if (route.type === "admin") return;
+    if (route.type === "admin" || route.type === "review" || route.type === "order" || route.type === "account") return; // private pages: not in the visits
     startInsight({ base: apiBase, app: isNativeApp });
     insightView(path);
     if (route.type === "checkout") insight("checkout", { q: cartCount, v: cartTotal });
@@ -2040,6 +2053,8 @@ function KanaanShop() {
 
   const [cart, setCart] = useState([]);
   const [likes, setLikes] = useState([]);
+  // signed in to My Kanaan (the website): the hearts and the bag reach the shop's customer file
+  useMemberSync(likes, cart, !isNativeApp);
   const [cartOpen, setCartOpen] = useState(false);
   useEffect(() => { if (cartOpen) insight("cart_open", { q: cartCount, v: cartTotal }); }, [cartOpen]); // eslint-disable-line
   const [menuOpen, setMenuOpen] = useState(false);
@@ -2511,12 +2526,15 @@ function KanaanShop() {
           />
         )}
         {route.type === "checkout" && orderPlaced && <ConfirmationView order={lastOrder} goHome={goHome} />}
+        {route.type === "review" && <ReviewPage token={route.token} apiBase={apiBase} goHome={goHome} />}
+        {route.type === "account" && <AccountPage navigate={navigate} />}
+        {route.type === "order" && <TrackPage id={route.id} t={route.t} navigate={navigate} />}
         </PageTransition>
       </main>
 
       {isNativeApp ? <AppFootnote /> : <Footer goCatalog={goCatalog} goSale={goSale} />}
       {/* the checkout has its own WhatsApp step: the round button would sit on the total */}
-      {route.type !== "checkout" && <WhatsAppFab raised={route.type === "product"} product={route.type === "product" ? currentProduct : null} />}
+      {route.type !== "checkout" && route.type !== "review" && <WhatsAppFab raised={route.type === "product"} product={route.type === "product" ? currentProduct : null} />}
       <SearchOverlay
         open={searchOpen}
         onClose={() => setSearchOpen(false)}
@@ -2931,6 +2949,8 @@ function GlobalStyles() {
       @media (min-width: 640px) { :root { --header-h: calc(84px + var(--announce-h, 0px)); } }
       ${SITE_BITS_CSS}
       ${PHOTO_VIEWER_CSS}
+      ${REVIEWS_CSS}
+      ${MEMBERS_CSS}
 
       /* Loading ring for the admin panel while its bundle downloads.
          Plain CSS rather than a lucide icon on purpose — the icon set
@@ -3349,6 +3369,8 @@ function Header({ cartCount, likesCount = 0, onHome, onCart, onSearch, onSale, o
                 <span className="absolute -top-1 -right-1 text-white text-[10px] font-num rounded-full flex items-center justify-center" style={{ minWidth: 18, height: 18, background: "var(--fg)", color: "var(--bg)" }}>{likesCount}</span>
               </button>
             )}
+            {/* My Kanaan (the website): from tablets up here, on a phone in the menu */}
+            {!isNativeApp && <AccountLink navigate={navigate} className="hidden sm:inline-flex" />}
             <button onClick={onCart} className="relative p-2 tap-scale hover:text-coral transition-colors" aria-label="Cart">
               <ShoppingBag className="w-5 h-5" />
               {cartCount > 0 && (
@@ -3373,6 +3395,11 @@ function Header({ cartCount, likesCount = 0, onHome, onCart, onSearch, onSale, o
             <button onClick={onFavorites} className="text-left flex items-center gap-1.5 hover:text-coral">
               <Heart className="w-3.5 h-3.5" /> Saved pieces{likesCount ? ` (${likesCount})` : ""}
             </button>
+            {!isNativeApp && (
+              <button onClick={() => { setMenuOpen(false); navigate("/account"); }} className="text-left flex items-center gap-1.5 hover:text-coral" data-testid="menu-account">
+                <User className="w-3.5 h-3.5" /> My Kanaan — orders &amp; sizes
+              </button>
+            )}
             <div className="border-t pt-2.5 mt-0.5 flex flex-col gap-2.5" style={{ borderColor: "var(--border)" }}>
               {CATEGORIES.map((c) => {
                 const subs = subsFor(c.id);
@@ -4849,6 +4876,14 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sizeNudge, setSizeNudge] = useState(0);
   const sizeRowRef = useRef(null);
+  // a sold-out size tapped (the website): "Tell me when it's back" under the sizes
+  const [want, setWant] = useState(null);
+  useEffect(() => { setWant(null); }, [product.id, color]);
+  const askBack = () => {
+    if (product.sizes.length === 1) { setWant(product.sizes[0]); return; }
+    setSizeNudge((n) => n + 1);
+    if (sizeRowRef.current) sizeRowRef.current.scrollIntoView({ block: "center", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  };
 
   useEffect(() => {
     // Start on a colour that's actually in stock where possible; the size
@@ -4997,6 +5032,7 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
               <span className="font-num text-2xl">{money(product.price)}</span>
             )}
           </div>
+          <RatingLine reviews={product.reviews} />
           {!outOfStock && welcomeFits(welcomeNow(site), isOnSale(product)) && <WelcomeNote className="-mt-3 mb-6" />}
 
           <PieceWords text={product.desc} className="mb-8" />
@@ -5009,7 +5045,7 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
 
           <div className="mb-8" ref={sizeRowRef}>
             <div className="flex items-center justify-between mb-2">
-              <p className="font-body text-sm font-medium">{size ? <>Size <span className="text-coral">{size}</span></> : "Pick your size"}</p>
+              <p className="font-body text-sm font-medium">{size ? <>Size <span className="text-coral">{size}</span></> : outOfStock && !isNativeApp ? "Tap your size — we'll tell you when it's back" : "Pick your size"}</p>
               <button onClick={openGuide} className="font-body text-xs text-coral hover:underline">Size guide</button>
             </div>
             <MySizeHint product={product} color={color} size={size} mine={mine} onSize={pickSize} onColor={pickColor} className="mb-2.5" />
@@ -5023,9 +5059,10 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
                     key={sz}
                     role="radio"
                     aria-checked={size === sz && inStock}
-                    aria-label={`Size ${sz}${isMine ? ", your size" : ""}${inStock ? "" : ", sold out"}`}
-                    onClick={() => { if (inStock) pickSize(sz); }}
-                    disabled={!inStock}
+                    aria-label={`Size ${sz}${isMine ? ", your size" : ""}${inStock ? "" : isNativeApp ? ", sold out" : ", sold out — tap to hear when it's back"}`}
+                    onClick={() => { if (inStock) { setWant(null); pickSize(sz); } else if (!isNativeApp) setWant(sz); }}
+                    disabled={!inStock && isNativeApp}
+                    data-testid={`size-${sz}`}
                     className="font-num text-sm px-4 py-2 rounded-full tap-scale transition-all relative"
                     style={
                       size === sz && inStock
@@ -5033,9 +5070,10 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
                         : {
                             background: "var(--glass-bg)",
                             border: "1px solid var(--glass-border)",
-                            opacity: inStock ? 1 : 0.4,
+                            opacity: inStock ? 1 : want === sz ? 0.85 : 0.4,
                             textDecoration: inStock ? "none" : "line-through",
-                            cursor: inStock ? "pointer" : "not-allowed",
+                            cursor: inStock || !isNativeApp ? "pointer" : "not-allowed",
+                            boxShadow: !inStock && want === sz ? "0 0 0 2px var(--fg)" : undefined,
                           }
                     }
                     title={inStock ? (isMine ? "Your size" : undefined) : "Out of stock"}
@@ -5048,6 +5086,9 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
             </div>
             {size && product.tracked && available > 0 && available <= 3 && (
               <p className="font-body text-xs text-coral mt-2">Only {available} left in this size</p>
+            )}
+            {!isNativeApp && want && stockFor(product, color, want) <= 0 && (
+              <BackInStock product={product} colorKey={color} size={want} photo={getImagesForColor(product, color)[0]?.url} onClose={() => setWant(null)} />
             )}
           </div>
 
@@ -5069,8 +5110,8 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
                   )}
                 </button>
               ) : (
-                <button disabled className="w-full rounded-full font-body font-medium py-3 flex items-center justify-center gap-2 cursor-not-allowed" style={{ background: "var(--glass-bg)", border: "1px solid var(--glass-border)", color: "var(--fg-muted)" }}>
-                  Sold out
+                <button onClick={askBack} className="w-full rounded-full font-body font-medium py-3 flex items-center justify-center gap-2 tap-scale" style={{ background: "var(--glass-bg)", border: "1px solid var(--glass-border)" }} data-testid="sold-out-ask">
+                  <Bell className="w-5 h-5" /> Sold out — tell me when it's back
                 </button>
               )
             ) : !size ? (
@@ -5134,6 +5175,8 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
         </div>
       </div>
 
+      <ProductReviews product={product} apiBase={apiBase} />
+
       {look.length > 0 && <Reveal><CompleteTheLook product={product} color={color} look={look} openProduct={openProduct} /></Reveal>}
 
       {related.length > 0 && (
@@ -5179,8 +5222,8 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
               {notifyState === "done" ? "Notified" : notifyState === "loading" ? "..." : "Notify me"}
             </button>
           ) : outOfStock ? (
-            <button disabled className="rounded-full font-body font-medium px-5 py-2.5 flex items-center gap-2 flex-shrink-0 cursor-not-allowed" style={{ border: "1px solid var(--glass-border)", color: "var(--fg-muted)" }}>
-              Sold out
+            <button onClick={askBack} className="rounded-full font-body font-medium px-5 py-2.5 flex items-center gap-2 flex-shrink-0 tap-scale" style={{ border: "1px solid var(--glass-border)" }}>
+              <Bell className="w-4 h-4" /> Tell me
             </button>
           ) : (
             <button onClick={openSheet} className="pick-open glass-btn rounded-full font-body font-medium px-5 py-2.5 tap-scale flex items-center gap-2 flex-shrink-0" style={{ background: "var(--coral)", color: "#fff" }}>
@@ -5362,6 +5405,12 @@ function CheckoutView({ cart, products = [], total, onSubmitted, goCatalog }) {
     ...(saved || {}),
   }));
   const [remember, setRemember] = useState(true);
+  // signed in to My Kanaan: the name and the proven number are already there
+  const member = useMe(!isNativeApp);
+  useEffect(() => {
+    if (!member || !member.signedIn) return;
+    setForm((f) => ({ ...f, name: f.name || member.name || "", phone: f.phone || member.pretty || "" }));
+  }, [member && member.signedIn]); // eslint-disable-line react-hooks/exhaustive-deps
   const [error, setError] = useState("");
   const [bad, setBad] = useState(""); // the field to fix
   const [sending, setSending] = useState(false);
@@ -5475,7 +5524,7 @@ function CheckoutView({ cart, products = [], total, onSubmitted, goCatalog }) {
       return;
     }
     const order = {
-      ...form, phone: data.phone || phone, orderNumber: data.orderNumber,
+      ...form, phone: data.phone || phone, orderNumber: data.orderNumber, track: data.track || "",
       items: data.items || cart, subtotal: data.subtotal ?? total, delivery: data.delivery ?? delivery, total: data.total ?? grandTotal,
       discount: Number(data.discount) || 0, welcomePct: data.welcome ? data.welcome.pct : 0,
       count: cart.reduce((sum, i) => sum + i.qty, 0),
@@ -5679,6 +5728,14 @@ function ConfirmationView({ order, goHome }) {
               <span className="font-num text-2xl mt-1" style={{ color: "var(--coral-text)" }}>#{order.orderNumber}</span>
             </div>
           )}
+          {order.orderNumber && order.track && !isNativeApp && (
+            <div className="mb-6 flex flex-col items-center gap-2">
+              <a href={`/order/${order.orderNumber}?t=${encodeURIComponent(order.track)}`} className="glass inline-flex items-center gap-2 rounded-full font-body text-sm font-semibold px-5 py-3 tap-scale" data-testid="thanks-track">
+                <Truck className="w-4 h-4" style={{ color: "var(--coral-text)" }} /> Follow your order
+              </a>
+              <span className="font-body text-xs text-muted">Every step comes on WhatsApp too</span>
+            </div>
+          )}
           {order.waUrl && (
             <div className="mb-8">
               <a href={order.waUrl} target="_blank" rel="noopener noreferrer" className={`${order.waOpened ? "glass" : "glass-btn"} inline-flex items-center justify-center gap-2 rounded-full font-body font-semibold px-6 py-3 tap-scale`} style={order.waOpened ? undefined : { background: "var(--teal)", color: "#062420" }}>
@@ -5794,6 +5851,7 @@ function routeTitle(route, currentProduct) {
   if (route.type === "sale") return "On Sale";
   if (route.type === "product") return currentProduct?.name || "";
   if (route.type === "checkout") return "Checkout";
+  if (route.type === "review") return "Your review";
   return "";
 }
 

@@ -1,6 +1,7 @@
 import { json, rowToProduct, loadStock, releaseExpiredOrders } from "../_shared/util.js";
 import { loadCategories } from "../_shared/site.js";
 import { loadSettings, publicSettings } from "../_shared/settings.js";
+import { summaries as reviewSummaries } from "../_shared/reviews.js";
 
 // GET /api/products — public list of visible products, with stock info.
 //
@@ -44,6 +45,8 @@ export async function onRequestGet(context) {
     // the bar at the top, delivery, exchanges, opening hours (set from Kanaan POS)
     let settings = null;
     try { settings = publicSettings(await loadSettings(env)); } catch { settings = null; }
+    // real reviews: each piece with approved ones carries its stars, { avg, count } (the cards show them)
+    try { const sums = await reviewSummaries(env); for (const p of products) { const r = sums.get(p.id); if (r) p.reviews = r; } } catch { /* no reviews yet */ }
     return json({ products, appExclusiveCount: exclusiveCount, categories, settings }, 200, { "Cache-Control": "no-store" });
   } catch (err) {
     return json({ products: [], error: String((err && err.message) || err) }, 200);

@@ -3,6 +3,7 @@ import { json, posAuthed, rowToProduct } from "./util.js";
 import { ensureSchema } from "./site.js";
 import { sendPushToTokens } from "./fcm.js";
 import { deviceFor, ensureHub } from "./hub.js";
+import { ensureMembers } from "./members.js";
 
 /**
  * Every bridge call. Who may manage the site: any device connected to the shop's Kanaan Cloud (the computer, the
@@ -20,6 +21,7 @@ export async function guard(context) {
   if (!device) return json({ error: "This device is not connected to the shop's Kanaan Cloud." }, 401);
   context.device = device;
   await ensureSchema(env);
+  await ensureMembers(env);
   return null;
 }
 

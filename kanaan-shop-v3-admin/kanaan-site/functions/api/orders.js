@@ -4,6 +4,7 @@ import { loadSettings, deliveryFor, activeWelcome, welcomeOn } from "../_shared/
 import { parsePhone } from "../_shared/phone.js";
 import { ensureSchema } from "../_shared/site.js";
 import { orderedBefore } from "../_shared/welcome.js";
+import { ensureMembers, randomToken } from "../_shared/members.js";
 
 /* POST /api/orders
    ------------------------------------------------------------
@@ -200,12 +201,14 @@ export async function onRequestPost(context) {
   const promo = welcome ? `welcome:${welcome.pct}` : "";
   const total = subtotal - discount + delivery;
 
+  const track = randomToken(12); // the order's own page: /order/<number>?t=<track>
   try {
     await ensureSchema(env);
+    await ensureMembers(env);
     await env.DB.prepare(
-      `INSERT INTO orders (id, status, customer_name, phone, area, address, notes, items, subtotal, discount, promo, delivery, total, created_at, updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
-    ).bind(id, "pending", name, phone, area, address, notes, JSON.stringify(items), subtotal, discount, promo, delivery, total, now, now).run();
+      `INSERT INTO orders (id, status, customer_name, phone, area, address, notes, items, subtotal, discount, promo, delivery, total, created_at, updated_at, track)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+    ).bind(id, "pending", name, phone, area, address, notes, JSON.stringify(items), subtotal, discount, promo, delivery, total, now, now, track).run();
   } catch {
     // Stock was reserved but the order record didn't save — release it
     // rather than leaving pieces held by an order that doesn't exist.
@@ -221,5 +224,5 @@ export async function onRequestPost(context) {
   })();
   if (context.waitUntil) context.waitUntil(job); else await job;
 
-  return json({ ok: true, orderNumber: id, subtotal, discount, welcome: welcome ? { pct: welcome.pct, discount } : null, delivery, total, items, phone });
+  return json({ ok: true, orderNumber: id, track, subtotal, discount, welcome: welcome ? { pct: welcome.pct, discount } : null, delivery, total, items, phone });
 }

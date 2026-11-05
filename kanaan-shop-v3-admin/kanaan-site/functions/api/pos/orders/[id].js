@@ -1,5 +1,6 @@
 import { json, rowToOrder, releaseStatements, confirmStatements } from "../../../_shared/util.js";
 import { guard, setStockMany, withPosInfo } from "../../../_shared/pos.js";
+import { ensureTrack } from "../../../_shared/members.js";
 
 /* POST /api/pos/orders/:id
    { action: "claim" }     one device takes the order (atomic: two devices can never both take it). A claim older
@@ -11,6 +12,10 @@ import { guard, setStockMany, withPosInfo } from "../../../_shared/pos.js";
                            page (stock kept by the site) has its pieces taken out of the site's own numbers.
    { action: "reject", reason }
                            the order is cancelled; a pending one gives its pieces back.
+   { action: "shipped" | "delivered", undo? }
+                           a confirmed order left with the driver / reached the customer (undo: a mistake, back a step);
+                           the order's own page and the WhatsApp messages follow it.
+   { action: "track" }     the key of the order's own page (made once), for the link in the messages.
    Each action changes the status first, and only if it is still what it was: a retry, a double tap or the 24h
    expiry at the same moment can never release a hold twice or take pieces twice. */
 const STALE = 10 * 60 * 1000;
@@ -50,9 +55,9 @@ export async function onRequestPost(context) {
   if (body.action === "accept") {
     if (row.status === "confirmed") return back({ already: true });
     // confirmed first, and only from where it was (pending, or being handled by this device / a stale claim)
-    const won = await env.DB.prepare(`UPDATE orders SET status = 'confirmed', pos_sale = ?, claimed_by = ?, updated_at = ?
+    const won = await env.DB.prepare(`UPDATE orders SET status = 'confirmed', pos_sale = ?, claimed_by = ?, updated_at = ?, confirmed_at = ?
         WHERE id = ? AND (status = 'pending' OR (status = 'processing' AND (claimed_by = ? OR claimed_at < ?))) RETURNING id`)
-      .bind(String(body.sale || "").slice(0, 40), device.no, now, row.id, device.no, now - STALE).first();
+      .bind(String(body.sale || "").slice(0, 40), device.no, now, now, row.id, device.no, now - STALE).first();
     if (!won) {
       const cur = await env.DB.prepare("SELECT status FROM orders WHERE id = ?").bind(row.id).first();
       if (cur && cur.status === "confirmed") return back({ already: true });
@@ -92,6 +97,22 @@ export async function onRequestPost(context) {
     const done = await env.DB.prepare("UPDATE orders SET status = 'cancelled', pos_note = ?, updated_at = ? WHERE id = ? AND status = 'confirmed' RETURNING id")
       .bind(String(body.reason || "").slice(0, 200), now, row.id).first();
     if (!done) return back({ already: true });
+    return back();
+  }
+  if (body.action === "track") return back({ track: await ensureTrack(env, row.id) });
+  if (body.action === "shipped" || body.action === "delivered") {
+    if (row.status !== "confirmed") return json({ error: `This order is ${row.status} — only a confirmed order goes out.` }, 409);
+    await ensureTrack(env, row.id);
+    if (body.undo) {
+      if (body.action === "delivered") await env.DB.prepare("UPDATE orders SET delivered_at = 0, updated_at = ? WHERE id = ?").bind(now, row.id).run();
+      else await env.DB.prepare("UPDATE orders SET shipped_at = 0, delivered_at = 0, updated_at = ? WHERE id = ?").bind(now, row.id).run();
+      return back();
+    }
+    const col = body.action === "shipped" ? "shipped_at" : "delivered_at";
+    const cur = Number(row[col]) || 0;
+    if (cur) return back({ already: true });
+    if (body.action === "delivered") await env.DB.prepare("UPDATE orders SET delivered_at = ?, shipped_at = CASE WHEN shipped_at = 0 THEN ? ELSE shipped_at END, updated_at = ? WHERE id = ?").bind(now, now, now, row.id).run();
+    else await env.DB.prepare("UPDATE orders SET shipped_at = ?, updated_at = ? WHERE id = ?").bind(now, now, row.id).run();
     return back();
   }
   return json({ error: "unknown action" }, 400);

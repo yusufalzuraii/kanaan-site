@@ -20,6 +20,8 @@ import { loadCategories } from "../_shared/site.js";
 import { loadSettings } from "../_shared/settings.js";
 import { renderProductContent, injectContent, headTags, setHead, productDescription, offerExtras } from "../_shared/ssr.js";
 import { cardsFrom } from "../_shared/seo.js";
+import { summaryOf, approvedOf } from "../_shared/reviews.js";
+import { esc } from "../_shared/ssr.js";
 
 export async function onRequestGet(context) {
   const { request, env, params, next } = context;
@@ -107,6 +109,24 @@ export async function onRequestGet(context) {
     related = cardsFrom(rr, origin).map((c) => ({ ...c, price: c.finalPrice }));
   } catch { related = []; }
 
+  // real reviews (approved by the shop): the stars in search results, and the reviews on the page itself
+  let rev = null;
+  try {
+    const summary = await summaryOf(env, row.id);
+    if (summary.count > 0) rev = { summary, list: await approvedOf(env, row.id, 10) };
+  } catch { rev = null; }
+  const day = (ms) => new Date(Number(ms) || Date.now()).toISOString().slice(0, 10);
+  const reviewLd = rev ? {
+    aggregateRating: { "@type": "AggregateRating", ratingValue: rev.summary.avg, reviewCount: rev.summary.count, ratingCount: rev.summary.count, bestRating: 5, worstRating: 1 },
+    review: rev.list.map((r) => ({
+      "@type": "Review",
+      reviewRating: { "@type": "Rating", ratingValue: r.rating, bestRating: 5, worstRating: 1 },
+      author: { "@type": "Person", name: r.name },
+      datePublished: day(r.date),
+      ...(r.text ? { reviewBody: r.text } : {}),
+    })),
+  } : {};
+
   const productLd = jsonLd({
     "@context": "https://schema.org",
     "@type": "Product",
@@ -132,7 +152,8 @@ export async function onRequestGet(context) {
       seller: { "@type": "Organization", name: "Kanaan Shop", "@id": "https://kanaanshop.com/#store" },
       ...offerExtras(settings),
     },
-  });
+    ...reviewLd,
+  }).replace(/\$/g, "\\u0024"); // "$" written the JSON way: a "$&" in someone's words must not be read as a pattern when the head is put in
 
   const breadcrumbLd = jsonLd({
     "@context": "https://schema.org",
@@ -177,7 +198,7 @@ export async function onRequestGet(context) {
         // the whole words for the page itself (the meta description above has the opening only)
         description: row.description ? String(row.description).replace(/\s*\n+\s*/g, " · ").replace(/^ · | · $/g, "") : descText,
         related,
-      })
+      }).replace(/<\/div><\/div>\s*$/, () => `${reviewsHtml(rev)}</div></div>`)
     );
   } catch { /* the meta tags below still apply even if this part fails */ }
 
@@ -200,4 +221,15 @@ function fresh(request) {
   h.delete("If-None-Match");
   h.delete("If-Modified-Since");
   return new Request(request.url, { method: "GET", headers: h });
+}
+
+/* The approved reviews written into the page for crawlers that don't run JavaScript (the same ones the page shows). */
+function reviewsHtml(rev) {
+  if (!rev) return "";
+  const stars = (n) => "★".repeat(n) + "☆".repeat(5 - n);
+  const h2 = "font-family:'Space Grotesk',Inter,sans-serif;font-size:18px;font-weight:700;margin:24px 0 10px;";
+  const item = "margin:0 0 14px;max-width:600px;font-size:14px;line-height:1.6;color:rgba(20,20,26,0.75);";
+  return `<section aria-label="Reviews"><h2 style="${h2}">Reviews · ${rev.summary.avg} out of 5 (${rev.summary.count})</h2>
+      ${rev.list.map((r) => `<div style="${item}"><b>${stars(r.rating)}</b> ${esc(r.name)} · Verified buyer${r.bought ? ` · bought ${esc(r.bought)}` : ""}${r.text ? `<br />${esc(r.text)}` : ""}${r.reply ? `<br /><i>Kanaan Shop: ${esc(r.reply)}</i>` : ""}</div>`).join("\n      ")}
+    </section>`.replace(/\$/g, "&#36;"); // a "$&" in someone's words must stay words when the page is put together
 }

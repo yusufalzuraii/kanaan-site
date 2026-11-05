@@ -132,7 +132,7 @@ export function renderListingContent({ title, intro, products, origin, nav = [],
 export function injectContent(html, content) {
   return html.replace(
     /<div id="root"><\/div>/,
-    `<div id="root">${content}</div>`
+    () => `<div id="root">${content}</div>` // a function: "$&" in the words stays as it is
   );
 }
 
@@ -173,7 +173,7 @@ export function setHead(html, tags) {
     .replace(/<link\s+rel="canonical"[^>]*>/gi, "")
     .replace(/<meta\s+property="og:[^"]*"[^>]*>/gi, "")
     .replace(/<meta\s+name="twitter:[^"]*"[^>]*>/gi, "")
-    .replace(/<\/head>/i, `${tags}\n  </head>`);
+    .replace(/<\/head>/i, () => `${tags}\n  </head>`); // a function: "$&" or "$'" in a description stays as it is
 }
 
 export const jsonLd = (obj) => JSON.stringify(obj).replace(/</g, "\\u003c");

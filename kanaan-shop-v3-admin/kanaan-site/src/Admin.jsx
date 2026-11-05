@@ -1111,6 +1111,8 @@ const STATUS_STYLE = {
   confirmed: { label: "Confirmed", color: "var(--teal)" },
   cancelled: { label: "Cancelled", color: "var(--fg-muted)" },
   expired: { label: "Expired", color: "var(--fg-muted)" },
+  processing: { label: "Being handled", color: "var(--fg-muted)" },
+  paying: { label: "Waiting for Whish", color: "var(--fg-muted)" },
 };
 
 function timeAgo(ts) {

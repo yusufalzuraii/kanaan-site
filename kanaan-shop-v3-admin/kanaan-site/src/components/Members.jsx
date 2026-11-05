@@ -214,7 +214,7 @@ const STAGES = [
   { key: "shipped", word: "On its way", Icon: Truck },
   { key: "delivered", word: "Delivered", Icon: HomeIcon },
 ];
-const stageWord = (s) => (s === "cancelled" ? "Cancelled" : (STAGES.find((x) => x.key === s) || STAGES[0]).word);
+const stageWord = (s) => (s === "cancelled" ? "Cancelled" : s === "paying" ? "Waiting for payment" : (STAGES.find((x) => x.key === s) || STAGES[0]).word);
 const orderLink = (o) => `/order/${o.id}?t=${encodeURIComponent(o.track || "")}`;
 
 export function AccountPage({ navigate }) {
@@ -340,14 +340,59 @@ function AskRow({ a, go }) {
 
 /* ============================================================
    THE ORDER'S OWN PAGE — /order/<number>?t=…
+   Paid with Whish: while the payment is not in ('paying'), the page sends
+   them to Whish (after checkout: &go=1), asks every 3 s whether it came in
+   (the server asks Whish itself — the way back from Whish proves nothing),
+   and offers "Pay with Whish" again or "Pay cash at the door instead".
    ============================================================ */
-export function TrackPage({ id, t, navigate }) {
+const clockLeft = (until, now) => { const m = Math.max(0, Math.ceil((until - now) / 60000)); return m <= 1 ? "a minute" : `${m} minutes`; };
+const openPay = (url) => {
+  if (!url) return;
+  // the app: Whish opens beside it (this page shows the payment come in); the website: Whish's page, then back here
+  if (typeof window !== "undefined" && window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()) window.open(url, "_blank");
+  else window.location.assign(url);
+};
+export function TrackPage({ id, t, navigate, api = API }) {
   const [o, setO] = useState(null);
-  const load = useCallback(() => fetch(`${API}/api/track?id=${encodeURIComponent(id)}&t=${encodeURIComponent(t || "")}`, { cache: "no-store" })
-    .then(async (r) => { const d = await r.json().catch(() => ({})); setO(r.ok ? d : { error: d.error || "We couldn't find this order." }); })
-    .catch(() => setO((x) => x || { error: "No connection — check the internet and open the link again.", offline: true })), [id, t]);
-  useEffect(() => { document.title = `Order #${id} — Kanaan Shop`; load(); const k = setInterval(load, 60000); return () => clearInterval(k); }, [load, id]);
+  const [act, setAct] = useState(""); // 'pay' | 'cash' while one is going
+  const [actErr, setActErr] = useState("");
+  const paying = !!(o && o.stage === "paying");
+  const load = useCallback(() => fetch(`${api}/api/track?id=${encodeURIComponent(id)}&t=${encodeURIComponent(t || "")}${paying ? "&pay=1" : ""}`, { cache: "no-store" })
+    .then(async (r) => { const d = await r.json().catch(() => ({})); if (r.status === 429) return; setO(r.ok ? d : { error: d.error || "We couldn't find this order." }); })
+    .catch(() => setO((x) => x || { error: "No connection — check the internet and open the link again.", offline: true })), [id, t, api, paying]);
+  useEffect(() => { document.title = `Order #${id} — Kanaan Shop`; load(); const k = setInterval(load, paying ? 3000 : 60000); return () => clearInterval(k); }, [load, id, paying]);
+  // straight from checkout (&go=1): to Whish once, and the address is cleaned (the way back doesn't send them again)
+  const went = useRef(false);
+  useEffect(() => {
+    if (!o || went.current || typeof window === "undefined") return;
+    const q = new URLSearchParams(window.location.search);
+    if (!q.has("go") && !q.has("w")) return;
+    went.current = true;
+    const go = q.get("go") === "1";
+    q.delete("go"); q.delete("w");
+    try { window.history.replaceState(window.history.state, "", `${window.location.pathname}?${q.toString()}`); } catch { /* ignore */ }
+    if (go && o.stage === "paying" && o.pay && o.pay.status === "waiting" && o.pay.url) openPay(o.pay.url);
+  }, [o]);
   const go = (to) => (e) => { if (e) e.preventDefault(); if (navigate) navigate(to); else window.location.href = to; };
+  const post = async (path) => {
+    const r = await fetch(`${api}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, t }) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || "Something went wrong — try again.");
+    return d;
+  };
+  const payAgain = async () => {
+    setActErr("");
+    // the link Whish gave is still open: straight there; failed or old → a new one
+    if (o.pay && o.pay.status === "waiting" && o.pay.url && act !== "retry") { openPay(o.pay.url); setAct("retry"); setTimeout(() => setAct((a) => (a === "retry" ? "" : a)), 4000); return; }
+    setAct("pay");
+    try { const d = await post("/api/whish/pay"); if (d.paid) { await load(); } else if (d.url) openPay(d.url); } catch (e) { setActErr(e.message); }
+    setAct("");
+  };
+  const cashInstead = async () => {
+    setActErr(""); setAct("cash");
+    try { await post("/api/whish/cash"); await load(); } catch (e) { setActErr(e.message); await load(); }
+    setAct("");
+  };
   if (!o) return <div className="mk" data-testid="track"><div className="mk-wait"><i /><i /><i /></div></div>;
   if (o.error) {
     return (
@@ -361,56 +406,103 @@ export function TrackPage({ id, t, navigate }) {
       </div>
     );
   }
+  const pay = o.pay || { method: "cod" };
+  const paid = pay.method === "whish" && pay.status === "paid";
+  const unpaid = pay.method === "whish" && pay.status === "expired"; // the 30 minutes went by without the payment
   const cancelled = o.stage === "cancelled";
   const at = STAGES.findIndex((s) => s.key === o.stage);
-  const big = cancelled ? "Cancelled" : o.stage === "delivered" ? "Delivered" : o.stage === "shipped" ? "On its way to you" : o.stage === "confirmed" ? "Confirmed — we're getting it ready" : "We got your order";
-  const line = cancelled ? "This order didn't go ahead. Message us and we'll find you another size or colour." : o.stage === "delivered" ? "Enjoy your pieces — the right size or not, tell us on WhatsApp." : o.stage === "shipped" ? "The driver calls before arriving. Pay in cash at your door." : o.stage === "confirmed" ? "It leaves with the driver soon — we'll message you on WhatsApp." : "We'll confirm it on WhatsApp very soon.";
   const ask = `https://wa.me/${o.shop}?text=${encodeURIComponent(`Hi Kanaan Shop, about my order #${o.id}`)}`;
+  if (paying) {
+    const failed = pay.status === "failed";
+    return (
+      <div className="mk" data-testid="track">
+        <header className="mk-hero">
+          <p className="mk-eyebrow">Order <span className="font-num">#{o.id}</span>{o.name ? ` · ${o.name}` : ""}</p>
+          <h1 className="font-display" data-testid="track-stage">{failed ? "The payment didn't go through" : "Finish paying with Whish"}</h1>
+          <p className="mk-lead">{failed ? "Nothing was taken from your Whish. Try again, or pay cash at your door — your pieces are still held for you." : "Confirm it in Whish with your number and the code Whish sends you. This page shows it the moment it's paid."}</p>
+        </header>
+        <section className="mk-card trk-pay" data-testid="track-pay" data-state={pay.status}>
+          <div className="trk-pay-top">
+            <span className="trk-pay-amt"><small>To pay with Whish</small><b className="font-num">{money(o.total)}</b></span>
+            {!failed && <span className="trk-pay-wait" data-testid="track-pay-wait"><span className="wp-dots" aria-hidden="true"><i /><i /><i /></span>Waiting for Whish</span>}
+          </div>
+          <p className="trk-pay-held"><Clock3 size={14} aria-hidden="true" /> Your pieces are held for {clockLeft(pay.until, pay.now || Date.now())}.</p>
+          <div className="trk-pay-acts">
+            <button type="button" className="wp-btn is-coral tap-scale" onClick={payAgain} disabled={!!act && act !== "retry"} data-testid="track-pay-whish">
+              {act === "pay" ? <LoaderCircle size={18} className="mb-spin" /> : null}{failed ? "Try Whish again" : `Pay ${money(o.total)} with Whish`}
+            </button>
+            <button type="button" className="mk-out-btn tap-scale" onClick={cashInstead} disabled={!!act && act !== "retry"} data-testid="track-pay-cash">
+              {act === "cash" ? <LoaderCircle size={15} className="mb-spin" /> : null}Pay cash at the door instead
+            </button>
+          </div>
+          {actErr && <p className="wp-err" role="alert" data-testid="track-pay-error">{actErr}</p>}
+        </section>
+        <TrackItems o={o} go={go} label="To pay with Whish" />
+        <div className="trk-acts">
+          <a className="wp-btn tap-scale" href={ask} target="_blank" rel="noopener noreferrer"><MessageCircle size={18} /> Ask about this order</a>
+        </div>
+      </div>
+    );
+  }
+  const big = unpaid ? "Not paid — the order didn't go ahead" : cancelled ? "Cancelled" : o.stage === "delivered" ? "Delivered" : o.stage === "shipped" ? "On its way to you" : o.stage === "confirmed" ? "Confirmed — we're getting it ready" : paid ? "Paid — we got your order" : "We got your order";
+  const line = unpaid ? "The Whish payment didn't come in within the time, so the pieces went back on the shelf. Put them in your bag again any time." : cancelled ? (paid ? "This order didn't go ahead. The amount you paid with Whish comes back to you — message us if you have a question." : "This order didn't go ahead. Message us and we'll find you another size or colour.")
+    : o.stage === "delivered" ? "Enjoy your pieces — the right size or not, tell us on WhatsApp."
+    : o.stage === "shipped" ? (paid ? "The driver calls before arriving. It's paid — nothing to pay at the door." : "The driver calls before arriving. Pay in cash at your door.")
+    : o.stage === "confirmed" ? "It leaves with the driver soon — we'll message you on WhatsApp."
+    : paid ? `Paid ${money(o.total)} with Whish. We'll confirm it on WhatsApp very soon.` : "We'll confirm it on WhatsApp very soon.";
   return (
     <div className="mk" data-testid="track">
       <header className="mk-hero">
         <p className="mk-eyebrow">Order <span className="font-num">#{o.id}</span>{o.name ? ` · ${o.name}` : ""}</p>
         <h1 className="font-display" data-testid="track-stage">{big}</h1>
         <p className="mk-lead">{line}</p>
+        {paid && <p className="trk-paid" data-testid="track-paid"><CheckCheck size={16} aria-hidden="true" /> Paid with Whish{pay.paidAt ? ` · ${day(pay.paidAt)}, ${time(pay.paidAt)}` : ""}</p>}
       </header>
-      <ol className={`trk ${cancelled ? "is-cancelled" : ""}`} data-testid="track-steps">
-        {STAGES.map((s, i) => {
-          const when = o.at[s.key];
-          const state = cancelled ? (when ? "done" : "off") : i < at || o.stage === "delivered" ? "done" : i === at ? "now" : "next";
-          return (
-            <li key={s.key} className={`trk-step is-${state}`} data-testid={`track-${s.key}`} data-state={state}>
-              <span className="trk-dot"><s.Icon size={16} /></span>
-              <span className="trk-txt"><b>{s.word}</b><small className="font-num">{when ? `${day(when)} · ${time(when)}` : state === "next" ? " " : ""}</small></span>
+      {!unpaid && (
+        <ol className={`trk ${cancelled ? "is-cancelled" : ""}`} data-testid="track-steps">
+          {STAGES.map((s, i) => {
+            const when = o.at[s.key];
+            const state = cancelled ? (when ? "done" : "off") : i < at || o.stage === "delivered" ? "done" : i === at ? "now" : "next";
+            return (
+              <li key={s.key} className={`trk-step is-${state}`} data-testid={`track-${s.key}`} data-state={state}>
+                <span className="trk-dot"><s.Icon size={16} /></span>
+                <span className="trk-txt"><b>{s.word}</b><small className="font-num">{when ? `${day(when)} · ${time(when)}` : state === "next" ? " " : ""}</small></span>
+              </li>
+            );
+          })}
+          {cancelled && (
+            <li className="trk-step is-stop" data-testid="track-cancelled">
+              <span className="trk-dot"><Ban size={16} /></span>
+              <span className="trk-txt"><b>Cancelled</b><small className="font-num">{o.at.cancelled ? `${day(o.at.cancelled)} · ${time(o.at.cancelled)}` : ""}</small></span>
             </li>
-          );
-        })}
-        {cancelled && (
-          <li className="trk-step is-stop" data-testid="track-cancelled">
-            <span className="trk-dot"><Ban size={16} /></span>
-            <span className="trk-txt"><b>Cancelled</b><small className="font-num">{o.at.cancelled ? `${day(o.at.cancelled)} · ${time(o.at.cancelled)}` : ""}</small></span>
-          </li>
-        )}
-      </ol>
-      <section className="mk-card trk-items">
-        {o.items.map((i, n) => (
-          <a key={n} className="trk-item" href={`/product/${i.productId}`} onClick={go(`/product/${i.productId}`)}>
-            {i.image ? <img src={i.image} alt="" /> : <span className="mk-piece-ph"><Package size={16} /></span>}
-            <span className="trk-item-mid"><b>{i.name}</b><small>{[i.color, i.size && `Size ${i.size}`, i.qty > 1 && `× ${i.qty}`].filter(Boolean).join(" · ")}</small></span>
-            <span className="font-num trk-price">{money(i.price * i.qty)}</span>
-          </a>
-        ))}
-        <div className="trk-sum">
-          <span>Pieces</span><span className="font-num">{money(o.subtotal)}</span>
-          {o.discount > 0 && <><span>First order</span><span className="font-num" style={{ color: "var(--teal-text)" }}>−{money(o.discount)}</span></>}
-          <span>Delivery{o.area ? ` · ${o.area}` : ""}</span><span className="font-num">{o.delivery ? money(o.delivery) : "Free"}</span>
-          <b>{cancelled ? "Total" : o.stage === "delivered" ? "Paid at the door" : "To pay at the door"}</b><b className="font-num">{money(o.total)}</b>
-        </div>
-      </section>
+          )}
+        </ol>
+      )}
+      <TrackItems o={o} go={go} label={unpaid || cancelled ? "Total" : paid ? "Paid with Whish" : o.stage === "delivered" ? "Paid at the door" : "To pay at the door"} />
       <div className="trk-acts">
         <a className="wp-btn tap-scale" href={ask} target="_blank" rel="noopener noreferrer"><MessageCircle size={18} /> Ask about this order</a>
         <a className="mk-out-btn tap-scale" href="/account" onClick={go("/account")}><Heart size={15} /> My Kanaan</a>
       </div>
     </div>
+  );
+}
+function TrackItems({ o, go, label }) {
+  return (
+    <section className="mk-card trk-items">
+      {o.items.map((i, n) => (
+        <a key={n} className="trk-item" href={`/product/${i.productId}`} onClick={go(`/product/${i.productId}`)}>
+          {i.image ? <img src={i.image} alt="" /> : <span className="mk-piece-ph"><Package size={16} /></span>}
+          <span className="trk-item-mid"><b>{i.name}</b><small>{[i.color, i.size && `Size ${i.size}`, i.qty > 1 && `× ${i.qty}`].filter(Boolean).join(" · ")}</small></span>
+          <span className="font-num trk-price">{money(i.price * i.qty)}</span>
+        </a>
+      ))}
+      <div className="trk-sum">
+        <span>Pieces</span><span className="font-num">{money(o.subtotal)}</span>
+        {o.discount > 0 && <><span>First order</span><span className="font-num" style={{ color: "var(--teal-text)" }}>−{money(o.discount)}</span></>}
+        <span>Delivery{o.area ? ` · ${o.area}` : ""}</span><span className="font-num">{o.delivery ? money(o.delivery) : "Free"}</span>
+        <b data-testid="track-sum-label">{label}</b><b className="font-num">{money(o.total)}</b>
+      </div>
+    </section>
   );
 }
 
@@ -574,6 +666,20 @@ export const MEMBERS_CSS = `
 .trk-acts { display: flex; flex-wrap: wrap; gap: 10px; }
 .trk-acts .wp-btn { flex: 1 1 220px; }
 .trk-acts .mk-out-btn { flex: 0 1 auto; min-height: 50px; }
+.wp-btn.is-coral { background: var(--coral); color: #fff; }
+.wp-btn:disabled, .mk-out-btn:disabled { opacity: .6; cursor: default; }
+.trk-pay { display: flex; flex-direction: column; gap: 14px; }
+.trk-pay[data-state="failed"] { border-color: color-mix(in srgb, var(--coral) 35%, var(--border)); }
+.trk-pay-top { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.trk-pay-amt { display: flex; flex-direction: column; line-height: 1.1; }
+.trk-pay-amt small { font-size: 13px; color: var(--fg-muted); margin-bottom: 4px; }
+.trk-pay-amt b { font-size: 34px; font-weight: 700; }
+.trk-pay-wait { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border-radius: 999px; font-size: 13px; font-weight: 500; color: var(--teal-text); background: color-mix(in srgb, var(--teal) 12%, transparent); }
+.trk-pay-held { margin: 0; display: flex; align-items: center; gap: 6px; font-size: 13.5px; color: var(--fg-muted); }
+.trk-pay-acts { display: flex; flex-direction: column; gap: 10px; }
+.trk-pay-acts .mk-out-btn { min-height: 48px; }
+.trk-paid { margin: 12px 0 0; display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 999px; font-size: 13.5px; font-weight: 600; color: var(--teal-text); background: color-mix(in srgb, var(--teal) 14%, transparent); }
+@media (prefers-reduced-motion: reduce) { .wp-dots i { animation: none; opacity: .7; } }
 @media (max-width: 380px) { .trk { padding: 16px 8px; } .trk-dot { width: 36px; height: 36px; } .trk-step + .trk-step::before { top: 17px; right: calc(50% + 22px); left: calc(-50% + 22px); } .trk-txt b { font-size: 11.5px; } }
 @media (prefers-reduced-motion: reduce) { .wp-dots i, .mk-wait i, .trk-step.is-now .trk-dot, .mb-spin { animation: none !important; } .wp-bubble { transition: none; } }
 `;

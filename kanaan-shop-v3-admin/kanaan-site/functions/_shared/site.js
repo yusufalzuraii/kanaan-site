@@ -12,6 +12,7 @@
    ============================================================ */
 import { CATEGORY_IDS, CATEGORY_LABELS, SUBCATEGORIES } from "./util.js";
 import { ensureReviewTables } from "./reviews.js";
+import { WHISH_COLUMNS } from "./whish.js";
 
 let schemaReady = false;
 export async function ensureSchema(env) {
@@ -53,7 +54,9 @@ export async function ensureSchema(env) {
   try { ocols = ((await env.DB.prepare("PRAGMA table_info(orders)").all()).results || []).map((c) => c.name); } catch { /* ignore */ }
   // discount / promo: the welcome offer on a first order (whole dollars off; promo = "welcome:10")
   for (const [c, def] of [["claimed_by", "INTEGER"], ["claimed_at", "INTEGER NOT NULL DEFAULT 0"], ["pos_sale", "TEXT NOT NULL DEFAULT ''"], ["pos_note", "TEXT NOT NULL DEFAULT ''"],
-    ["discount", "REAL NOT NULL DEFAULT 0"], ["promo", "TEXT NOT NULL DEFAULT ''"]]) {
+    ["discount", "REAL NOT NULL DEFAULT 0"], ["promo", "TEXT NOT NULL DEFAULT ''"],
+    // paid with Whish Money (functions/_shared/whish.js): how it is paid, where the payment stands, Whish's numbers
+    ...WHISH_COLUMNS]) {
     if (!ocols.includes(c)) { try { await env.DB.prepare(`ALTER TABLE orders ADD COLUMN ${c} ${def}`).run(); } catch { /* parallel */ } }
   }
   schemaReady = true;

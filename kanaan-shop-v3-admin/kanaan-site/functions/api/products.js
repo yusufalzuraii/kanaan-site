@@ -44,7 +44,7 @@ export async function onRequestGet(context) {
     try { categories = (await loadCategories(env)).list.filter((c) => c.active); } catch { categories = null; }
     // the bar at the top, delivery, exchanges, opening hours (set from Kanaan POS)
     let settings = null;
-    try { settings = publicSettings(await loadSettings(env)); } catch { settings = null; }
+    try { settings = publicSettings(await loadSettings(env), Date.now(), env); } catch { settings = null; }
     // real reviews: each piece with approved ones carries its stars, { avg, count } (the cards show them)
     try { const sums = await reviewSummaries(env); for (const p of products) { const r = sums.get(p.id); if (r) p.reviews = r; } } catch { /* no reviews yet */ }
     return json({ products, appExclusiveCount: exclusiveCount, categories, settings }, 200, { "Cache-Control": "no-store" });

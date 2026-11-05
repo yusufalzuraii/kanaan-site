@@ -195,6 +195,7 @@ export function sameKey(a, b) {
 
 /** Where an order stands, in the shopper's words: received → confirmed → on its way → delivered (or cancelled). */
 export function stageOf(o) {
+  if (o.status === "paying") return "paying"; // waiting for its Whish payment
   if (o.status === "cancelled" || o.status === "expired") return "cancelled";
   if (Number(o.delivered_at)) return "delivered";
   if (Number(o.shipped_at)) return "shipped";

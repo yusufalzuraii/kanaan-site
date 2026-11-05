@@ -5,6 +5,7 @@ import { parsePhone } from "../_shared/phone.js";
 import { ensureSchema } from "../_shared/site.js";
 import { orderedBefore } from "../_shared/welcome.js";
 import { ensureMembers, randomToken } from "../_shared/members.js";
+import { whishOn, whishConfig, createPayment, HOLD_MIN } from "../_shared/whish.js";
 
 /* POST /api/orders
    ------------------------------------------------------------
@@ -26,6 +27,11 @@ import { ensureMembers, randomToken } from "../_shared/members.js";
    cancelled or never taken — gets N% off the pieces without an offer of
    their own, to the nearest dollar. Free delivery still counts from the
    amount before it. The invoice in Kanaan POS carries the same discount.
+
+   Paid with Whish Money (pay: "whish", when the shop switched it on and its keys are in Cloudflare): the same
+   order, held as 'paying' — not shown to the shop until Whish says it is paid — and a payment at Whish for its
+   total; the answer carries Whish's page (payUrl) for the shopper. Whish not answering: nothing is kept, the
+   shopper is told and can pay cash instead. Same prices either way. (functions/_shared/whish.js)
    ============================================================ */
 
 const LEGACY_DELIVERY = 5;
@@ -65,6 +71,7 @@ export async function onRequestPost(context) {
 
   let body = {};
   try { body = await request.json(); } catch { return json({ error: "bad json" }, 400); }
+  const byWhish = body.pay === "whish";
 
   const clean = (s, max = 300) => String(s == null ? "" : s).trim().slice(0, max);
   const name = clean(body.name, 120);
@@ -189,6 +196,10 @@ export async function onRequestPost(context) {
   let delivery = LEGACY_DELIVERY;
   let settings = null;
   try { settings = await loadSettings(env); } catch { settings = null; }
+  if (byWhish && !whishOn(env, settings)) {
+    await rollback();
+    return json({ error: "Whish isn't available right now — choose cash on delivery.", field: "pay", whishOff: true }, 409);
+  }
   if (Number(body.pricing) >= 2 && settings) delivery = deliveryFor(settings, subtotal);
   // the welcome offer on a first order (the lines it is on are marked, so the invoice spreads it on them only)
   let welcome = null;
@@ -202,27 +213,49 @@ export async function onRequestPost(context) {
   const total = subtotal - discount + delivery;
 
   const track = randomToken(12); // the order's own page: /order/<number>?t=<track>
+  // Whish: the order is kept first (as 'paying', unseen by the shop), then the payment is made at Whish — a checkout
+  // cut off half way leaves an order that lets go of its pieces by itself, never pieces held by nothing
+  const payKey = byWhish ? randomToken(18) : "";
+  const cfg = byWhish ? whishConfig(env) : null;
   try {
     await ensureSchema(env);
     await ensureMembers(env);
     await env.DB.prepare(
-      `INSERT INTO orders (id, status, customer_name, phone, area, address, notes, items, subtotal, discount, promo, delivery, total, created_at, updated_at, track)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
-    ).bind(id, "pending", name, phone, area, address, notes, JSON.stringify(items), subtotal, discount, promo, delivery, total, now, now, track).run();
+      `INSERT INTO orders (id, status, customer_name, phone, area, address, notes, items, subtotal, discount, promo, delivery, total, created_at, updated_at, track,
+         pay, pay_status, pay_key, pay_until, whish_mode)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+    ).bind(id, byWhish ? "paying" : "pending", name, phone, area, address, notes, JSON.stringify(items), subtotal, discount, promo, delivery, total, now, now, track,
+      byWhish ? "whish" : "cod", byWhish ? "waiting" : "", payKey, byWhish ? now + HOLD_MIN * 60000 : 0, cfg ? (cfg.sandbox ? "sandbox" : "live") : "").run();
   } catch {
     // Stock was reserved but the order record didn't save — release it
     // rather than leaving pieces held by an order that doesn't exist.
     await rollback();
     return json({ error: "Could not save your order. Please try again." }, 500);
   }
+  let whish = null;
+  if (byWhish) {
+    try {
+      whish = await createPayment(env, request, { id, total, track, payKey });
+      await env.DB.prepare("UPDATE orders SET whish_ext = ?, whish_url = ?, whish_link_at = ? WHERE id = ? AND status = 'paying'").bind(whish.ext, whish.url, Date.now(), id).run();
+    } catch {
+      // Whish not answering: the order goes (never shown to the shop) and its pieces are free again
+      const gone = await env.DB.prepare("UPDATE orders SET status = 'expired', updated_at = ? WHERE id = ? AND status = 'paying' AND whish_ext = '' RETURNING id").bind(Date.now(), id).first().catch(() => null);
+      if (gone) await rollback();
+      return json({ error: "Whish isn't answering right now. Try again in a minute, or choose cash on delivery.", field: "pay", whishDown: true }, 502);
+    }
+  }
 
   // the shop's iPhones (Kanaan POS on the phone) hear about it at once — after the answer, never delaying it
-  const pieces = items.reduce((a, it) => a + it.qty, 0);
-  const job = (async () => {
-    const w = await env.DB.prepare("SELECT COUNT(*) AS n FROM orders WHERE status IN ('pending','processing')").first().catch(() => null);
-    await notifyShop(env, { title: `🛍 New order #${id}`, body: `${name} · ${pieces} ${pieces === 1 ? "piece" : "pieces"} · $${total}${discount ? ` (first order −$${discount})` : ""}${area ? ` · ${area}` : ""}`, tag: `order-${id}`, url: "/pos/#orders", badge: w ? w.n : 1 });
-  })();
-  if (context.waitUntil) context.waitUntil(job); else await job;
+  // (a Whish order once it is paid: functions/_shared/whish.js)
+  if (!whish) {
+    const pieces = items.reduce((a, it) => a + it.qty, 0);
+    const job = (async () => {
+      const w = await env.DB.prepare("SELECT COUNT(*) AS n FROM orders WHERE status IN ('pending','processing')").first().catch(() => null);
+      await notifyShop(env, { title: `🛍 New order #${id}`, body: `${name} · ${pieces} ${pieces === 1 ? "piece" : "pieces"} · $${total}${discount ? ` (first order −$${discount})` : ""}${area ? ` · ${area}` : ""}`, tag: `order-${id}`, url: "/pos/#orders", badge: w ? w.n : 1 });
+    })();
+    if (context.waitUntil) context.waitUntil(job); else await job;
+  }
 
-  return json({ ok: true, orderNumber: id, track, subtotal, discount, welcome: welcome ? { pct: welcome.pct, discount } : null, delivery, total, items, phone });
+  return json({ ok: true, orderNumber: id, track, subtotal, discount, welcome: welcome ? { pct: welcome.pct, discount } : null, delivery, total, items, phone,
+    pay: whish ? "whish" : "cod", ...(whish ? { payUrl: whish.url, until: now + HOLD_MIN * 60000 } : {}) });
 }

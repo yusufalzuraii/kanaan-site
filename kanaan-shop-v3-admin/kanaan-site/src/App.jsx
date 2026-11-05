@@ -44,6 +44,7 @@ import {
   Expand,
   Gift,
   User,
+  Banknote,
 } from "lucide-react";
 /* The admin panel is a third of the front-end code — product editor,
    stock grid, order management, image optimizer — and no
@@ -2523,18 +2524,25 @@ function KanaanShop() {
               setOrderPlaced(true);
               window.scrollTo({ top: 0, behavior: "smooth" });
             }}
+            onPaying={(o) => {
+              // a Whish order: its own page sends them to Whish and shows the payment come in
+              insight("order", { x: String(o.orderNumber || ""), v: o.total, q: cart.reduce((a, i) => a + i.qty, 0) });
+              flushInsight(false);
+              setCart([]);
+              navigate(`/order/${o.orderNumber}?t=${encodeURIComponent(o.track)}&go=1`);
+            }}
           />
         )}
         {route.type === "checkout" && orderPlaced && <ConfirmationView order={lastOrder} goHome={goHome} />}
         {route.type === "review" && <ReviewPage token={route.token} apiBase={apiBase} goHome={goHome} />}
         {route.type === "account" && <AccountPage navigate={navigate} />}
-        {route.type === "order" && <TrackPage id={route.id} t={route.t} navigate={navigate} />}
+        {route.type === "order" && <TrackPage id={route.id} t={route.t} navigate={navigate} api={apiBase} />}
         </PageTransition>
       </main>
 
       {isNativeApp ? <AppFootnote /> : <Footer goCatalog={goCatalog} goSale={goSale} />}
-      {/* the checkout has its own WhatsApp step: the round button would sit on the total */}
-      {route.type !== "checkout" && route.type !== "review" && <WhatsAppFab raised={route.type === "product"} product={route.type === "product" ? currentProduct : null} />}
+      {/* the checkout has its own WhatsApp step, the order's page its own "Ask about this order": the round button would sit on them */}
+      {route.type !== "checkout" && route.type !== "review" && route.type !== "order" && <WhatsAppFab raised={route.type === "product"} product={route.type === "product" ? currentProduct : null} />}
       <SearchOverlay
         open={searchOpen}
         onClose={() => setSearchOpen(false)}
@@ -4174,7 +4182,7 @@ function PrivacyPolicyView() {
       </Section>
 
       <Section title="What we don't collect">
-        <p>We don't require an account, a password, or an email address to shop. We don't process online payments — all orders are cash on delivery — so we never see or store card details.</p>
+        <p>We don't require an account, a password, or an email address to shop. Orders are paid cash on delivery, or in the Whish Money app when Whish is offered at checkout. A Whish payment happens on Whish's own page: we only learn that it went through (and the Whish number it came from), never a password, a code or any card.</p>
       </Section>
 
       <Section title="Who we share information with">
@@ -5396,7 +5404,7 @@ function CartDrawer({ open, onClose, cart, products = [], updateQty, removeFromC
 /* ============================================================
    CHECKOUT
    ============================================================ */
-function CheckoutView({ cart, products = [], total, onSubmitted, goCatalog }) {
+function CheckoutView({ cart, products = [], total, onSubmitted, onPaying, goCatalog }) {
   // the delivery details of the last order (kept on this device when the
   // shopper said so), so the next checkout is two taps
   const [saved] = useState(() => loadCheckoutInfo());
@@ -5416,6 +5424,10 @@ function CheckoutView({ cart, products = [], total, onSubmitted, goCatalog }) {
   const [sending, setSending] = useState(false);
   const [offline, setOffline] = useState(false); // the shop's server couldn't be reached: WhatsApp instead
   const site = useSiteSettings();
+  // how it is paid: cash at the door, or Whish Money now (only when the shop switched it on)
+  const [payPick, setPayPick] = useState("cod");
+  const [whishDown, setWhishDown] = useState(false); // Whish didn't answer: cash is offered in one tap
+  const payBy = site.whish && payPick === "whish" ? "whish" : "cod";
   const refs = { name: useRef(null), phone: useRef(null), area: useRef(null), address: useRef(null) };
 
   useEffect(() => {
@@ -5482,8 +5494,8 @@ function CheckoutView({ cart, products = [], total, onSubmitted, goCatalog }) {
     return null;
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const handleSubmit = async (e, by = payBy) => {
+    if (e) e.preventDefault();
     const problem = check();
     if (problem) {
       setBad(problem[0]); setError(problem[1]);
@@ -5491,7 +5503,7 @@ function CheckoutView({ cart, products = [], total, onSubmitted, goCatalog }) {
       if (el) { el.focus(); el.scrollIntoView({ block: "center", behavior: "smooth" }); }
       return;
     }
-    setError(""); setBad(""); setOffline(false);
+    setError(""); setBad(""); setOffline(false); setWhishDown(false);
     setSending(true);
     const phone = phoneOk.pretty;
     let res = null; let data = {};
@@ -5503,7 +5515,7 @@ function CheckoutView({ cart, products = [], total, onSubmitted, goCatalog }) {
         body: JSON.stringify({
           name: form.name.trim(), phone, area: form.area,
           address: form.address.trim(), notes: form.notes.trim(),
-          pricing: 2,
+          pricing: 2, pay: by,
           items: cart.map((i) => ({
             productId: i.productId, colorKey: i.colorKey, color: i.color,
             size: i.size, qty: i.qty,
@@ -5521,6 +5533,8 @@ function CheckoutView({ cart, products = [], total, onSubmitted, goCatalog }) {
       setSending(false);
       setError(data.error || "Something went wrong. Please try again.");
       if (data.field && refs[data.field]) setBad(data.field);
+      if (data.whishOff) setPayPick("cod"); // switched off a moment ago: cash it is (the shopper sees why)
+      if (data.whishDown) setWhishDown(true);
       return;
     }
     const order = {
@@ -5530,8 +5544,14 @@ function CheckoutView({ cart, products = [], total, onSubmitted, goCatalog }) {
       count: cart.reduce((sum, i) => sum + i.qty, 0),
     };
     markOrdered(); // this device has ordered: the pages stop offering a first-order discount
-    order.waUrl = waLink(order);
     if (remember) saveCheckoutInfo({ name: form.name.trim(), phone: order.phone, area: form.area, address: form.address.trim() }); else forgetCheckoutInfo();
+    // Whish: the order's page takes over (it sends them to Whish, then shows the payment come in)
+    if (data.pay === "whish" && data.payUrl && onPaying) {
+      setSending(false);
+      onPaying({ ...order, pay: "whish", payUrl: data.payUrl });
+      return;
+    }
+    order.waUrl = waLink(order);
     // the sound and the buzz before WhatsApp takes over the screen (in the app it would be cut short)
     hapticSuccess();
     playSuccessChime();
@@ -5601,6 +5621,24 @@ function CheckoutView({ cart, products = [], total, onSubmitted, goCatalog }) {
         <Field label="Notes (optional)" id="co-notes">
           <textarea id="co-notes" value={form.notes} onChange={set("notes")} rows={3} className="field resize-none" placeholder="A time that suits you, a size question…" />
         </Field>
+        {site.whish && (
+          <fieldset className="pay-pick" data-testid="pay-pick">
+            <legend className="font-body text-sm mb-1.5">Payment</legend>
+            <div className="pay-opts" role="radiogroup" aria-label="Payment">
+              {[
+                ["cod", Banknote, "Cash on delivery", "Pay the driver at your door"],
+                ["whish", Smartphone, "Whish Money", "Pay now in the Whish app"],
+              ].map(([k, Icon, title, line]) => (
+                <button key={k} type="button" role="radio" aria-checked={payBy === k} onClick={() => { setPayPick(k); setWhishDown(false); if (error && !bad) setError(""); }}
+                  className={`pay-opt tap-scale ${payBy === k ? "is-on" : ""}`} data-testid={`pay-${k}`}>
+                  <span className="pay-ic" aria-hidden="true"><Icon className="w-[18px] h-[18px]" /></span>
+                  <span className="pay-txt"><b>{title}</b><small>{line}</small></span>
+                  <span className="pay-dot" aria-hidden="true" />
+                </button>
+              ))}
+            </div>
+          </fieldset>
+        )}
         <label className="flex items-center gap-2.5 font-body text-sm text-muted cursor-pointer select-none">
           <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} className="w-4 h-4 accent-[var(--coral)]" />
           Remember my details on this device
@@ -5612,7 +5650,12 @@ function CheckoutView({ cart, products = [], total, onSubmitted, goCatalog }) {
           <span className="font-num text-lg">{money(grandTotal)}</span>
         </div>
 
-        {error && <p role="alert" className="font-body text-sm" style={{ color: "var(--coral-text)" }}>{error}</p>}
+        {error && <p role="alert" className="font-body text-sm" style={{ color: "var(--coral-text)" }} data-testid="checkout-error">{error}</p>}
+        {whishDown && !sending && (
+          <button type="button" onClick={() => { setPayPick("cod"); handleSubmit(null, "cod"); }} className="w-full glass rounded-full font-body text-sm font-semibold py-3 tap-scale flex items-center justify-center gap-2" data-testid="pay-cash-instead">
+            <Banknote className="w-4 h-4" /> Place it with cash on delivery instead
+          </button>
+        )}
 
         {offline ? (
           <div role="alert" className="glass rounded-2xl p-4 space-y-3">
@@ -5625,11 +5668,15 @@ function CheckoutView({ cart, products = [], total, onSubmitted, goCatalog }) {
         ) : (
           <>
             <Magnetic strength={8} className="block w-full">
-              <button type="submit" disabled={sending} className="glass-btn w-full font-body font-semibold py-3.5 rounded-full tap-scale flex items-center justify-center gap-2" style={{ background: "var(--coral)", color: "#fff", opacity: sending ? 0.7 : 1 }}>
-                {sending ? "Placing your order…" : <>Place order · {money(grandTotal)}</>}
+              <button type="submit" disabled={sending} className="glass-btn w-full font-body font-semibold py-3.5 rounded-full tap-scale flex items-center justify-center gap-2" style={{ background: "var(--coral)", color: "#fff", opacity: sending ? 0.7 : 1 }} data-testid="place-order">
+                {payBy === "whish"
+                  ? (sending ? "Opening Whish…" : <><Smartphone className="w-[18px] h-[18px]" aria-hidden="true" /> Pay {money(grandTotal)} with Whish</>)
+                  : (sending ? "Placing your order…" : <>Place order · {money(grandTotal)}</>)}
               </button>
             </Magnetic>
-            <p className="font-body text-xs text-muted text-center">Pay cash at your door. WhatsApp opens with your order so you can message us about it.</p>
+            <p className="font-body text-xs text-muted text-center" data-testid="pay-note">{payBy === "whish"
+              ? "Whish opens: your Whish number, then the code Whish sends you. Your pieces are held for you while you pay."
+              : "Pay cash at your door. WhatsApp opens with your order so you can message us about it."}</p>
           </>
         )}
 
@@ -5638,6 +5685,20 @@ function CheckoutView({ cart, products = [], total, onSubmitted, goCatalog }) {
           .field:focus { outline: none; border-color: var(--coral); box-shadow: 0 0 0 3px rgba(255,69,34,0.15); }
           .field-bad { border-color: var(--coral); box-shadow: 0 0 0 3px rgba(255,69,34,0.12); }
           .welcome-line { color: var(--teal-text); font-weight: 600; }
+          .pay-pick { border: 0; margin: 0; padding: 0; min-width: 0; }
+          .pay-opts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+          @media (min-width: 768px) { .pay-opts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+          .pay-opt { position: relative; display: flex; align-items: center; gap: 10px; min-height: 64px; padding: 12px 34px 12px 12px; border-radius: 20px; border: 1px solid var(--border); background: var(--field-bg); color: var(--fg); text-align: left; transition: border-color .2s, box-shadow .2s, background-color .2s; }
+          .pay-opt:focus-visible { outline: 2px solid var(--coral); outline-offset: 2px; }
+          .pay-opt.is-on { border-color: var(--coral); box-shadow: 0 0 0 3px rgba(255,69,34,0.14); background: color-mix(in srgb, var(--coral) 6%, var(--field-bg)); }
+          .pay-ic { width: 36px; height: 36px; border-radius: 999px; display: grid; place-items: center; flex-shrink: 0; color: var(--fg-muted); background: color-mix(in srgb, var(--fg) 6%, transparent); }
+          .pay-opt.is-on .pay-ic { color: #fff; background: var(--coral); }
+          .pay-txt { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+          .pay-txt b { font-family: 'Space Grotesk', sans-serif; font-size: 14.5px; font-weight: 600; }
+          .pay-txt small { font-family: 'Inter', sans-serif; font-size: 12.5px; color: var(--fg-muted); }
+          .pay-dot { position: absolute; top: 50%; right: 12px; width: 16px; height: 16px; margin-top: -8px; border-radius: 999px; border: 2px solid var(--border); }
+          .pay-opt.is-on .pay-dot { border-color: var(--coral); background: radial-gradient(circle, var(--coral) 0 4px, transparent 4.5px); }
+          @media (prefers-reduced-motion: reduce) { .pay-opt { transition: none; } }
         `}</style>
       </form>
 
@@ -5675,7 +5736,7 @@ function CheckoutView({ cart, products = [], total, onSubmitted, goCatalog }) {
               <span className="font-num">{delivery ? money(delivery) : "Free"}</span>
             </div>
             <div className="flex justify-between items-center pt-1.5">
-              <span className="font-body text-sm font-medium">Total · cash on delivery</span>
+              <span className="font-body text-sm font-medium">Total · {payBy === "whish" ? "Whish Money" : "cash on delivery"}</span>
               <span className="font-num text-xl">{money(grandTotal)}</span>
             </div>
           </div>

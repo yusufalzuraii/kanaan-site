@@ -18,9 +18,10 @@ export async function onRequestGet(context) {
   const pretty = (parsePhone(`+${phone}`) || {}).pretty || `+${phone}`;
   const q = ordersOfPhone(phone);
   const rows = ((await env.DB.prepare(`SELECT * FROM orders WHERE ${q.where} ORDER BY created_at DESC LIMIT 30`).bind(...q.binds).all()).results) || [];
-  const orders = rows.map((o) => {
+  // a Whish order never paid (its pieces went back) is not one of theirs
+  const orders = rows.filter((o) => !(o.pay === "whish" && o.pay_status !== "paid" && o.status === "expired")).map((o) => {
     let items = []; try { items = JSON.parse(o.items || "[]"); } catch { items = []; }
-    return { id: o.id, stage: stageOf(o), total: Number(o.total) || 0, at: Number(o.created_at) || 0, track: o.track || "",
+    return { id: o.id, stage: stageOf(o), paid: o.pay === "whish" && o.pay_status === "paid", total: Number(o.total) || 0, at: Number(o.created_at) || 0, track: o.track || "",
       pieces: items.reduce((a, i) => a + (Number(i.qty) || 1), 0), items: items.slice(0, 8).map((i) => ({ productId: i.productId, colorKey: i.colorKey, name: i.name, size: i.size, color: i.color, qty: i.qty })) };
   });
   await withPosInfo(env, orders);

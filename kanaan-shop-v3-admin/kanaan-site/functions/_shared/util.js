@@ -298,19 +298,25 @@ export async function loadVariantsForAdmin(env, productId) {
 // Release stock held by pending orders that were never confirmed.
 // Called lazily (no cron needed on the free plan).
 export async function releaseExpiredOrders(env, hours = RESERVATION_HOURS) {
+  // orders waiting for their Whish payment hold their pieces 30 minutes only (functions/_shared/whish.js)
+  let unpaid = 0;
+  try { const w = await import("./whish.js"); unpaid = await w.expireUnpaid(env, releaseReservation); } catch { /* next time */ }
   const cutoff = Date.now() - hours * 3600 * 1000;
   let results;
   try {
+    // an order already paid (with Whish) is never let go by itself — the shop takes it or rejects it (and refunds)
     const res = await env.DB.prepare(
-      "SELECT id, items FROM orders WHERE status = 'pending' AND created_at < ?"
-    ).bind(cutoff).all();
+      "SELECT id, items FROM orders WHERE status = 'pending' AND created_at < ? AND pay_status NOT IN ('paid','late')"
+    ).bind(cutoff).all().catch(() => env.DB.prepare(
+      "SELECT id, items FROM orders WHERE status = 'pending' AND created_at < ?" // (a site whose orders have no Whish columns yet)
+    ).bind(cutoff).all());
     results = res.results;
   } catch {
-    return 0;
+    return unpaid;
   }
-  if (!results || results.length === 0) return 0;
+  if (!results || results.length === 0) return unpaid;
 
-  let n = 0;
+  let n = unpaid;
   for (const o of results) {
     // the status first, and only if it is still pending: a device may have taken it in between
     const won = await env.DB.prepare("UPDATE orders SET status = 'expired', updated_at = ? WHERE id = ? AND status = 'pending' RETURNING id")
@@ -327,7 +333,8 @@ export async function releaseExpiredOrders(env, hours = RESERVATION_HOURS) {
 /* The statements that let go of an order's hold (and, for a confirmed sale of a product the site keeps the stock
    of, take the pieces out too) — one batch, so it happens all at once or not at all. */
 export function releaseStatements(env, items) {
-  return (items || []).filter((it) => it.productId && it.colorKey && it.size).map((it) => env.DB.prepare(
+  // (a line marked unheld holds nothing: an order paid late whose piece was gone by then)
+  return (items || []).filter((it) => it.productId && it.colorKey && it.size && !it.unheld).map((it) => env.DB.prepare(
     "UPDATE variants SET reserved = MAX(0, reserved - ?) WHERE product_id = ? AND color = ? AND size = ?"
   ).bind(Math.max(0, Number(it.qty) || 0), it.productId, it.colorKey, it.size));
 }
@@ -336,7 +343,7 @@ export function confirmStatements(env, items) {
     const qty = Math.max(0, Number(it.qty) || 0);
     return env.DB.prepare(
       "UPDATE variants SET quantity = MAX(0, quantity - ?), reserved = MAX(0, reserved - ?) WHERE product_id = ? AND color = ? AND size = ?"
-    ).bind(qty, qty, it.productId, it.colorKey, it.size);
+    ).bind(qty, it.unheld ? 0 : qty, it.productId, it.colorKey, it.size);
   });
 }
 export async function releaseReservation(env, items) {
@@ -371,6 +378,16 @@ export function rowToOrder(r) {
     confirmedAt: Number(r.confirmed_at) || 0,
     shippedAt: Number(r.shipped_at) || 0,
     deliveredAt: Number(r.delivered_at) || 0,
+    // paid with Whish before it reached the shop: the delivery invoice is paid (the driver collects nothing)
+    pay: r.pay === "whish" ? "whish" : "cod",
+    paid: r.pay === "whish" && r.pay_status === "paid",
+    paidAt: Number(r.paid_at) || 0,
+    payer: r.pay === "whish" && r.pay_status === "paid" ? String(r.payer || "") : "",
+    payRef: r.pay === "whish" ? String(r.whish_paid_ext || "") : "",
+    payTest: r.whish_mode === "sandbox", // paid in Whish's test mode: not real money
+    latePaid: r.pay_status === "late", // a Whish payment came in after it was accepted as cash or cancelled (posNote says)
+    latePayer: r.pay_status === "late" ? String(r.payer || "") : "",
+    paidTwice: !!r.whish_extra, // two links of it paid: one to send back (posNote says)
   };
 }
 

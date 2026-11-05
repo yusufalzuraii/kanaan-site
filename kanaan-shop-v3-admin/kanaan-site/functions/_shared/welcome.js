@@ -6,7 +6,7 @@
 export async function orderedBefore(env, ph) {
   const tail = String(ph.e164 || "").slice(-8);
   const row = await env.DB.prepare(
-    `SELECT COUNT(*) AS n FROM orders WHERE status NOT IN ('cancelled','rejected','expired')
+    `SELECT COUNT(*) AS n FROM orders WHERE status NOT IN ('cancelled','rejected','expired','paying')
        AND (phone = ? OR REPLACE(REPLACE(REPLACE(REPLACE(phone,' ',''),'-',''),'+',''),'.','') LIKE ?)`
   ).bind(ph.pretty, `%${tail}`).first();
   return !!(row && Number(row.n) > 0);
@@ -17,7 +17,7 @@ export async function orderedBefore(env, ph) {
 export async function welcomeStats(env, since = 0) {
   const q = (from) => env.DB.prepare(
     `SELECT COUNT(*) AS n, IFNULL(SUM(discount), 0) AS given, IFNULL(SUM(total), 0) AS sales FROM orders
-     WHERE promo LIKE 'welcome:%' AND status NOT IN ('cancelled','rejected','expired') AND created_at >= ?`
+     WHERE promo LIKE 'welcome:%' AND status NOT IN ('cancelled','rejected','expired','paying') AND created_at >= ?`
   ).bind(from).first();
   try {
     const [all, now] = await Promise.all([q(0), q(since || 0)]);

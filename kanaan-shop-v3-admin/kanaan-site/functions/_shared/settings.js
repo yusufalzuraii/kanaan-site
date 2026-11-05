@@ -5,12 +5,13 @@
    from an amount), the exchange window the site promises, and the
    shop's opening hours ("Open now · until 10 pm"), and the welcome offer
    (a first website order gets N% off — on by the shop's switch, with its
-   own line in the bar and on the pages). One JSON row in
+   own line in the bar and on the pages), and Whish Money at checkout (the shop's
+   switch — it shows only once the keys are in Cloudflare too). One JSON row in
    app_config ('site_settings'); the storefront gets the public part
    with the products (one request, always in step).
    ============================================================ */
 
-export const DEFAULTS = { announce: null, deliveryFee: 5, freeOver: 0, exchangeDays: 3, hours: null, welcome: null, shut: null };
+export const DEFAULTS = { announce: null, deliveryFee: 5, freeOver: 0, exchangeDays: 3, hours: null, welcome: null, shut: null, whish: null };
 const TONES = ["coral", "teal", "ink"];
 const int = (v, lo, hi, d) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -72,10 +73,13 @@ export function clean(input) {
       since: Math.max(0, Math.round(Number(sh.since) || 0)),
     };
   }
+  // Whish Money at checkout (functions/_shared/whish.js): on by the shop's switch
+  const whish = s.whish && typeof s.whish === "object" && s.whish.on ? { on: true, since: Math.max(0, Math.round(Number(s.whish.since) || 0)) } : null;
   return {
     announce,
     welcome,
     shut,
+    whish,
     deliveryFee: int(s.deliveryFee, 0, 50, DEFAULTS.deliveryFee),
     freeOver: int(s.freeOver, 0, 2000, 0),
     exchangeDays: int(s.exchangeDays, 0, 60, DEFAULTS.exchangeDays),
@@ -105,6 +109,10 @@ export async function saveSettings(env, patch) {
     const sh = patch.shut;
     next.shut = sh && sh.on ? { ...sh, since: cur.shut && cur.shut.on ? cur.shut.since : Date.now() } : null;
   }
+  if (patch && "whish" in patch) {
+    const w = patch.whish;
+    next.whish = w && w.on ? { on: true, since: cur.whish && cur.whish.on ? cur.whish.since : Date.now() } : null;
+  }
   if (patch && "welcome" in patch) {
     const w = patch.welcome;
     const wasOn = !!(cur.welcome && cur.welcome.on && (!cur.welcome.until || cur.welcome.until > Date.now()));
@@ -115,8 +123,8 @@ export async function saveSettings(env, patch) {
   return out;
 }
 
-/** What every visitor gets: the bar only while it is on and not past its end. */
-export function publicSettings(s, now = Date.now()) {
+/** What every visitor gets: the bar only while it is on and not past its end. Whish at checkout: env (the keys) too. */
+export function publicSettings(s, now = Date.now(), env = null) {
   const a = s.announce;
   const announce = a && a.on && a.text && (!a.until || a.until > now) ? { text: a.text, link: a.link, tone: a.tone, id: a.id } : null;
   const welcome = activeWelcome(s, now);
@@ -124,6 +132,7 @@ export function publicSettings(s, now = Date.now()) {
     announce, deliveryFee: s.deliveryFee, freeOver: s.freeOver, exchangeDays: s.exchangeDays, hours: s.hours,
     welcome: welcome ? { pct: welcome.pct, min: welcome.min, sale: welcome.sale, bar: welcome.bar, text: welcome.text, until: welcome.until } : null,
     shut: s.shut && s.shut.on ? { words: s.shut.words, title: s.shut.title, text: s.shut.text, since: s.shut.since } : null,
+    whish: !!(s.whish && s.whish.on && env && env.WHISH_CHANNEL && env.WHISH_SECRET && env.WHISH_WEBSITE_URL),
   };
 }
 

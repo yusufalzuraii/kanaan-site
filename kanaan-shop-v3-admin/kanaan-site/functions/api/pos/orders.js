@@ -1,19 +1,24 @@
 import { json, rowToOrder, releaseExpiredOrders } from "../../_shared/util.js";
 import { guard, withPosInfo } from "../../_shared/pos.js";
+import { ensureSchema } from "../../_shared/site.js";
 
 /* GET /api/pos/orders?since=<ms>   website orders created or changed after `since` (oldest first), each with the
    photo and the program's model of every line, so the program shows and matches them without asking again.
+   One still waiting for its Whish payment ('paying') is left out: it reaches the shop once paid (its updated_at
+   moves then, so the next look brings it as new) — with pay: 'whish', paid: true. One never paid (its pieces went
+   back) never reaches it either.
    GET /api/pos/orders?open=1        every order still waiting (pending / being handled). */
 export async function onRequestGet(context) {
   const denied = await guard(context); if (denied) return denied;
   const { request, env } = context;
+  try { await ensureSchema(env); } catch { /* the queries say */ }
   try { await releaseExpiredOrders(env); } catch { /* non-fatal */ }
   const u = new URL(request.url);
   if (u.searchParams.get("history") === "1") return history(env, u);
   const since = Math.max(0, Number(u.searchParams.get("since")) || 0);
   const { results } = u.searchParams.get("open") === "1"
     ? await env.DB.prepare("SELECT * FROM orders WHERE status IN ('pending','processing') ORDER BY created_at ASC LIMIT 200").all()
-    : await env.DB.prepare("SELECT * FROM orders WHERE updated_at > ? ORDER BY updated_at ASC LIMIT 200").bind(since).all();
+    : await env.DB.prepare("SELECT * FROM orders WHERE updated_at > ? AND status <> 'paying' AND NOT (status = 'expired' AND pay = 'whish' AND pay_status NOT IN ('paid','late')) ORDER BY updated_at ASC LIMIT 200").bind(since).all();
   const orders = (results || []).map((r) => ({ ...rowToOrder(r), claimedBy: r.claimed_by ?? null, claimedAt: Number(r.claimed_at) || 0, posSale: r.pos_sale || "", posNote: r.pos_note || "" }));
   await withPosInfo(env, orders);
   // "the program checked the orders" (shown to the old admin) — written at most every 5 minutes (free plan writes)
@@ -28,7 +33,8 @@ async function history(env, u) {
   const q = String(u.searchParams.get("q") || "").trim().slice(0, 60);
   const before = Math.max(0, Number(u.searchParams.get("before")) || 0);
   const limit = Math.min(50, Math.max(1, Number(u.searchParams.get("limit")) || 30));
-  const where = []; const binds = [];
+  // an order still waiting for its Whish payment is not one yet (the shop sees it once paid)
+  const where = ["status <> 'paying' AND NOT (status = 'expired' AND pay = 'whish' AND pay_status NOT IN ('paid','late'))"]; const binds = [];
   if (before) { where.push("created_at < ?"); binds.push(before); }
   if (q) {
     const digits = q.replace(/[٠-٩]/g, (c) => String("٠١٢٣٤٥٦٧٨٩".indexOf(c))).replace(/\D/g, "").replace(/^(00)?961/, "").replace(/^0+/, "");

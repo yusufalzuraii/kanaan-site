@@ -10,7 +10,7 @@
    with the products (one request, always in step).
    ============================================================ */
 
-export const DEFAULTS = { announce: null, deliveryFee: 5, freeOver: 0, exchangeDays: 3, hours: null, welcome: null };
+export const DEFAULTS = { announce: null, deliveryFee: 5, freeOver: 0, exchangeDays: 3, hours: null, welcome: null, shut: null };
 const TONES = ["coral", "teal", "ink"];
 const int = (v, lo, hi, d) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -60,9 +60,22 @@ export function clean(input) {
       since: Math.max(0, Math.round(Number(w.since) || 0)), // switched on at
     };
   }
+  // the website shut by hand (Kanaan POS → Website → Site → The website): the shutter stays down until it is opened
+  let shut = null;
+  if (s.shut && typeof s.shut === "object" && s.shut.on) {
+    const sh = s.shut;
+    shut = {
+      on: true,
+      words: String(sh.words || "SOON").toUpperCase().replace(/[^A-Z ]/g, "").replace(/\s+/g, " ").trim().slice(0, 8) || "SOON", // lit in the shutter's holes
+      title: String(sh.title || "").replace(/\s+/g, " ").trim().slice(0, 60),
+      text: String(sh.text || "").replace(/\s+/g, " ").trim().slice(0, 160),
+      since: Math.max(0, Math.round(Number(sh.since) || 0)),
+    };
+  }
   return {
     announce,
     welcome,
+    shut,
     deliveryFee: int(s.deliveryFee, 0, 50, DEFAULTS.deliveryFee),
     freeOver: int(s.freeOver, 0, 2000, 0),
     exchangeDays: int(s.exchangeDays, 0, 60, DEFAULTS.exchangeDays),
@@ -88,6 +101,10 @@ export async function saveSettings(env, patch) {
     const sameWords = a && cur.announce && String(a.text || "").trim() === cur.announce.text;
     next.announce = a ? { ...a, id: sameWords ? cur.announce.id : Date.now().toString(36) } : null;
   }
+  if (patch && "shut" in patch) {
+    const sh = patch.shut;
+    next.shut = sh && sh.on ? { ...sh, since: cur.shut && cur.shut.on ? cur.shut.since : Date.now() } : null;
+  }
   if (patch && "welcome" in patch) {
     const w = patch.welcome;
     const wasOn = !!(cur.welcome && cur.welcome.on && (!cur.welcome.until || cur.welcome.until > Date.now()));
@@ -106,6 +123,7 @@ export function publicSettings(s, now = Date.now()) {
   return {
     announce, deliveryFee: s.deliveryFee, freeOver: s.freeOver, exchangeDays: s.exchangeDays, hours: s.hours,
     welcome: welcome ? { pct: welcome.pct, min: welcome.min, sale: welcome.sale, bar: welcome.bar, text: welcome.text, until: welcome.until } : null,
+    shut: s.shut && s.shut.on ? { words: s.shut.words, title: s.shut.title, text: s.shut.text, since: s.shut.since } : null,
   };
 }
 

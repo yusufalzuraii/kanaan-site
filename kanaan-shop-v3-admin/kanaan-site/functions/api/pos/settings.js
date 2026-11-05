@@ -6,7 +6,7 @@ import { welcomeStats } from "../../_shared/welcome.js";
 /* GET /api/pos/settings — the control room on Kanaan POS (Website → Site) in one call: the site's settings (bar at
    the top, delivery, exchanges, opening hours), the shopper app (its update number, how many phones have it, the
    last notification), the problems shoppers hit, and how the welcome offer (first order) has done.
-   PUT /api/pos/settings — { announce?, welcome?, deliveryFee?, freeOver?, exchangeDays?, hours?, appVersion? } → the same. */
+   PUT /api/pos/settings — { announce?, welcome?, shut?, deliveryFee?, freeOver?, exchangeDays?, hours?, appVersion? } → the same. */
 async function room(env) {
   const settings = await loadSettings(env);
   const first = async (sql, ...b) => { try { return await env.DB.prepare(sql).bind(...b).first(); } catch { return null; } };
@@ -36,7 +36,7 @@ export async function onRequestPut(context) {
   try { body = await request.json(); } catch { return json({ error: "bad json" }, 400); }
   if (!body || typeof body !== "object") return json({ error: "bad json" }, 400);
   const patch = {};
-  for (const k of ["announce", "welcome", "deliveryFee", "freeOver", "exchangeDays", "hours"]) if (k in body) patch[k] = body[k];
+  for (const k of ["announce", "welcome", "shut", "deliveryFee", "freeOver", "exchangeDays", "hours"]) if (k in body) patch[k] = body[k];
   if (Object.keys(patch).length) await saveSettings(env, patch);
   if ("appVersion" in body) {
     const v = parseInt(body.appVersion, 10);

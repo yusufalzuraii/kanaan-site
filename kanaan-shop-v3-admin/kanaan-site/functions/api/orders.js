@@ -36,9 +36,22 @@ function orderNumber() {
   return String(Math.floor(100000 + Math.random() * 900000));
 }
 
+/** Sent from the website itself (not from the Android / iPhone app, which calls from its own origin). */
+function fromWebsite(request) {
+  const o = request.headers.get("Origin") || "";
+  if (!o) return true;
+  try { const u = new URL(o); return u.host === new URL(request.url).host || /(^|\.)kanaanshop\.com$/.test(u.hostname); } catch { return true; }
+}
+
 export async function onRequestPost(context) {
   const { request, env } = context;
   if (!env.DB) return json({ error: "Database not configured." }, 500);
+
+  // the website shut by hand: no orders from it (the shop's apps stay open — they call from their own origin)
+  try {
+    const st = await loadSettings(env);
+    if (st.shut && st.shut.on && fromWebsite(request)) return json({ error: "The website is closed for a little while — message us on WhatsApp and we'll help you.", closed: true }, 409);
+  } catch { /* settings unreadable: orders go on */ }
 
   /* Without a limit here, a script could submit hundreds of fake orders
      and reserve the whole catalogue for 24 hours — the shop would show

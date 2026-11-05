@@ -13,12 +13,19 @@
    A curtain, not a safe: the site's code is public, so this hides the
    shop for a launch; it does not protect anything.
 
+   Shut by hand (Kanaan POS → Website → Site → The website, setting
+   `shut`): the same shutter with words in the holes instead of the time,
+   down until the shop opens it again — every open page rolls it up by
+   itself within half a minute. Orders from the website are refused
+   meanwhile (functions/api/orders.js).
+
    Not shut: the shop's own phone app (/pos is a separate page), the
    old admin (/admin) and the Android / iPhone apps.
    ============================================================ */
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { isNativeApp } from "../native.js";
+import { getSettings, applySettings, useSiteSettings } from "../lib/siteSettings.js";
 
 // the moment the doors open (Beirut time): exactly two days after the work was finished
 export const OPENS_AT = Date.parse("2026-11-01T15:03:00+02:00");
@@ -29,19 +36,46 @@ const fits = (s) => { let x = 5381; for (const c of `kanaan:${s}`) x = ((x * 33)
 
 const reduced = () => { try { return window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch { return false; } };
 
-/* Decides once, at the start: shut (this page), opening (the shutter going up over the site) or open. */
+const staffHere = () => { try { return localStorage.getItem(KEY) === "1"; } catch { return false; } };
+const counting = () => Date.now() < OPENS_AT;
+const exempt = () => { try { return isNativeApp || window.location.pathname.startsWith("/admin"); } catch { return false; } };
+const forcedShut = () => { try { return new URLSearchParams(window.location.search).has("shut"); } catch { return false; } };
+
+/* Shut (this page), opening (the shutter going up over the site), dropping (coming down over it) or open. Decided at
+   the start from what this device knew last time, then from the site itself (/api/state), and again every 30 s while
+   it is down — so the shop opening it lifts it for everyone who is looking. */
 export function ShopGate({ children }) {
+  const settings = useSiteSettings();
   const [state, setState] = useState(() => {
-    try {
-      if (isNativeApp) return "open";
-      if (window.location.pathname.startsWith("/admin")) return "open";
-      const forced = new URLSearchParams(window.location.search).has("shut");
-      if (forced) return "shut";
-      if (Date.now() >= OPENS_AT) return "open";
-      if (localStorage.getItem(KEY) === "1") return "open";
-    } catch { /* storage blocked: shut */ }
-    return "shut";
+    if (exempt()) return "open";
+    if (forcedShut()) return "shut";
+    if (staffHere()) return "open";
+    if (counting()) return "shut";
+    return getSettings().shut ? "shut" : "open";
   });
+  const [shut, setShut] = useState(() => getSettings().shut || null);
+  const stateRef = useRef(state); stateRef.current = state;
+  const check = async () => {
+    if (exempt() || staffHere() || forcedShut()) return;
+    let r = null;
+    try { r = await (await fetch("/api/state", { cache: "no-store" })).json(); } catch { return; }
+    const now = r && r.shut ? r.shut : null;
+    applySettings({ ...getSettings(), shut: now });
+    setShut(now);
+    if (now && stateRef.current === "open") setState("dropping");
+    else if (!now && !counting() && (stateRef.current === "shut" || stateRef.current === "dropping")) setState(reduced() ? "open" : "opening");
+  };
+  useEffect(() => {
+    check();
+    const t = setInterval(() => { if (stateRef.current !== "open" || document.visibilityState === "visible") check(); }, 30000);
+    const vis = () => { if (document.visibilityState === "visible") check(); };
+    document.addEventListener("visibilitychange", vis);
+    return () => { clearInterval(t); document.removeEventListener("visibilitychange", vis); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // the products came with the settings and say it is shut now: the shutter comes down over the page
+  useEffect(() => {
+    if (settings.shut && stateRef.current === "open" && !exempt() && !staffHere()) { setShut(settings.shut); setState("dropping"); }
+  }, [settings.shut]); // eslint-disable-line react-hooks/exhaustive-deps
   const open = (staff) => {
     if (staff) { try { localStorage.setItem(KEY, "1"); } catch { /* this visit only */ } }
     try {
@@ -50,10 +84,11 @@ export function ShopGate({ children }) {
     } catch { /* fine */ }
     setState(reduced() ? "open" : "opening");
   };
+  const manual = !counting() && (shut || forcedShut());
   return (
     <>
       {state !== "shut" && children}
-      {state !== "open" && <ShopShut opening={state === "opening"} onOpen={open} onGone={() => setState("open")} />}
+      {state !== "open" && <ShopShut opening={state === "opening"} dropping={state === "dropping"} words={manual ? (shut && shut.words) || "SOON" : null} shut={manual ? shut || {} : null} onOpen={open} onGone={() => setState("open")} onDown={() => setState("shut")} />}
     </>
   );
 }
@@ -71,7 +106,35 @@ const GLYPHS = {
   8: ["01110", "10001", "10001", "01110", "10001", "10001", "01110"],
   9: ["01110", "10001", "10001", "01111", "00001", "00010", "01100"],
   ":": ["0", "0", "1", "0", "1", "0", "0"],
+  " ": ["00", "00", "00", "00", "00", "00", "00"],
+  A: ["01110", "10001", "10001", "11111", "10001", "10001", "10001"],
+  B: ["11110", "10001", "10001", "11110", "10001", "10001", "11110"],
+  C: ["01110", "10001", "10000", "10000", "10000", "10001", "01110"],
+  D: ["11100", "10010", "10001", "10001", "10001", "10010", "11100"],
+  E: ["11111", "10000", "10000", "11110", "10000", "10000", "11111"],
+  F: ["11111", "10000", "10000", "11110", "10000", "10000", "10000"],
+  G: ["01110", "10001", "10000", "10111", "10001", "10001", "01111"],
+  H: ["10001", "10001", "10001", "11111", "10001", "10001", "10001"],
+  I: ["01110", "00100", "00100", "00100", "00100", "00100", "01110"],
+  J: ["00111", "00010", "00010", "00010", "00010", "10010", "01100"],
+  K: ["10001", "10010", "10100", "11000", "10100", "10010", "10001"],
+  L: ["10000", "10000", "10000", "10000", "10000", "10000", "11111"],
+  M: ["10001", "11011", "10101", "10101", "10001", "10001", "10001"],
+  N: ["10001", "10001", "11001", "10101", "10011", "10001", "10001"],
+  O: ["01110", "10001", "10001", "10001", "10001", "10001", "01110"],
+  P: ["11110", "10001", "10001", "11110", "10000", "10000", "10000"],
+  Q: ["01110", "10001", "10001", "10001", "10101", "10010", "01101"],
+  R: ["11110", "10001", "10001", "11110", "10100", "10010", "10001"],
+  S: ["01111", "10000", "10000", "01110", "00001", "00001", "11110"],
+  T: ["11111", "00100", "00100", "00100", "00100", "00100", "00100"],
+  U: ["10001", "10001", "10001", "10001", "10001", "10001", "01110"],
+  V: ["10001", "10001", "10001", "10001", "10001", "01010", "00100"],
+  W: ["10001", "10001", "10001", "10101", "10101", "10101", "01010"],
+  X: ["10001", "10001", "01010", "00100", "01010", "10001", "10001"],
+  Y: ["10001", "10001", "01010", "00100", "00100", "00100", "00100"],
+  Z: ["11111", "00001", "00010", "00100", "01000", "10000", "11111"],
 };
+const glyphW = (ch) => (GLYPHS[ch] || GLYPHS[" "])[0].length;
 const pad = (n) => String(n).padStart(2, "0");
 function timeLeft(ms) {
   const s = Math.max(0, Math.floor(ms / 1000));
@@ -79,13 +142,13 @@ function timeLeft(ms) {
 }
 // which holes are lit: a set of "col,row" for the text, centred in cols × rows
 function litHoles(text, cols, rows) {
-  const width = [...text].reduce((a, ch) => a + (ch === ":" ? 1 : 5), 0) + text.length - 1;
+  const width = [...text].reduce((a, ch) => a + glyphW(ch), 0) + text.length - 1;
   const x0 = Math.floor((cols - width) / 2);
   const y0 = Math.floor((rows - 7) * 0.42);
   const lit = new Set();
   let x = x0;
   for (const ch of text) {
-    const g = GLYPHS[ch];
+    const g = GLYPHS[ch] || GLYPHS[" "];
     g.forEach((line, r) => [...line].forEach((b, c) => { if (b === "1") lit.add(`${x + c},${y0 + r}`); }));
     x += g[0].length + 1;
   }
@@ -105,7 +168,7 @@ function drawShutter(canvas, w, h, text, night) {
   if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) { canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr); }
   const g = canvas.getContext("2d");
   g.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const units = [...text].reduce((a, ch) => a + (ch === ":" ? 1 : 5), 0) + text.length - 1;
+  const units = [...text].reduce((a, ch) => a + glyphW(ch), 0) + text.length - 1;
   const p = Math.max(6, Math.min(15, Math.floor(w / (units + 8)), Math.floor(h / 15))); // the holes' pitch
   const slat = p * 3;
   const cols = Math.floor(w / p), rows = Math.floor(h / p);
@@ -154,7 +217,7 @@ function drawShutter(canvas, w, h, text, night) {
   return { below: oy + (y0 + 7) * p + p * 0.6, p };
 }
 
-function ShopShut({ opening, onOpen, onGone }) {
+function ShopShut({ opening, dropping = false, words = null, shut = null, onOpen, onGone, onDown }) {
   const [now, setNow] = useState(() => Date.now());
   const [night] = useState(() => isNight());
   const [asking, setAsking] = useState(false);
@@ -165,18 +228,18 @@ function ShopShut({ opening, onOpen, onGone }) {
   const canvas = useRef(null);
   const input = useRef(null);
   const left = timeLeft(OPENS_AT - now);
-  const text = `${pad(left.h)}:${pad(left.m)}:${pad(left.s)}`;
+  const text = words || `${pad(left.h)}:${pad(left.m)}:${pad(left.s)}`;
 
   // the page under it stays still
   useEffect(() => {
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    document.title = "Kanaan Shop — the winter collection is going up";
+    document.title = words ? "Kanaan Shop — back soon" : "Kanaan Shop — the winter collection is going up";
     return () => { document.body.style.overflow = prev; };
   }, []);
   // every second; at zero the shutter goes up by itself
   useEffect(() => {
-    if (opening) return undefined;
+    if (opening || words) return undefined;
     const t = setInterval(() => {
       const n = Date.now();
       setNow(n);
@@ -199,6 +262,12 @@ function ShopShut({ opening, onOpen, onGone }) {
     ro.observe(el);
     return () => ro.disconnect();
   }, [text, night]);
+  // coming down over the page (the shop shut the website while someone was looking)
+  useEffect(() => {
+    if (!dropping) return undefined;
+    const t = setTimeout(() => onDown && onDown(), reduced() ? 0 : 1300);
+    return () => clearTimeout(t);
+  }, [dropping]); // eslint-disable-line react-hooks/exhaustive-deps
   // going up: the shutter rolls into its box, the shop shows, then the site
   useEffect(() => {
     if (!opening) return undefined;
@@ -223,7 +292,7 @@ function ShopShut({ opening, onOpen, onGone }) {
   })();
 
   return createPortal(
-    <div className={`ss ${night ? "is-night" : "is-day"} ${opening ? "is-opening" : ""}`} role="main" aria-label="Kanaan Shop is opening soon" data-testid="shop-shut">
+    <div className={`ss ${night ? "is-night" : "is-day"} ${opening ? "is-opening" : ""} ${dropping ? "is-dropping" : ""} ${words ? "is-words" : ""}`} role="main" aria-label={words ? "Kanaan Shop — the website is closed for now" : "Kanaan Shop is opening soon"} data-testid="shop-shut" data-mode={words ? "words" : "time"}>
       <style>{SHOP_SHUT_CSS}</style>
       <div className="ss-building" aria-hidden="true"><i /><i /><i /></div>
       <div className="ss-front">
@@ -233,9 +302,9 @@ function ShopShut({ opening, onOpen, onGone }) {
           <div className="ss-inside" aria-hidden="true" />
           <div className="ss-shutter" ref={shutter}>
             <canvas ref={canvas} aria-hidden="true" />
-            <p className="ss-in" style={labelsAt ? { top: Math.max(26, labelsAt.below - labelsAt.p * 8.2 - 22) } : undefined}>Opening in</p>
-            <p className="ss-units" style={labelsAt ? { top: labelsAt.below + Math.max(2, labelsAt.p * 0.3) } : undefined} aria-hidden="true"><span>hours</span><span>minutes</span><span>seconds</span></p>
-            <span className="sr-only" aria-live="polite">{`${left.h} hours and ${left.m} minutes left`}</span>
+            {!words && <p className="ss-in" style={labelsAt ? { top: Math.max(26, labelsAt.below - labelsAt.p * 8.2 - 22) } : undefined}>Opening in</p>}
+            {!words && <p className="ss-units" style={labelsAt ? { top: labelsAt.below + Math.max(2, labelsAt.p * 0.3) } : undefined} aria-hidden="true"><span>hours</span><span>minutes</span><span>seconds</span></p>}
+            <span className="sr-only" aria-live="polite">{words ? "The website is closed for now" : `${left.h} hours and ${left.m} minutes left`}</span>
             <div className="ss-rail">
               <button type="button" className="ss-lock" onClick={ask} aria-label="Staff code" data-testid="shop-shut-lock">
                 <svg viewBox="0 0 24 30" width="16" height="20" aria-hidden="true"><path d="M7 13V9a5 5 0 0 1 10 0v4" fill="none" stroke="currentColor" strokeWidth="2.4" /><rect x="3.5" y="13" width="17" height="14" rx="3" fill="currentColor" /><circle cx="12" cy="19.5" r="1.8" fill="rgba(255,255,255,.55)" /></svg>
@@ -246,10 +315,19 @@ function ShopShut({ opening, onOpen, onGone }) {
         </div>
       </div>
       <div className="ss-street">
-        <h1>The winter collection is going up.</h1>
-        <p>The shutter rolls up on <b>{opensOn}</b>. Until then, ask us anything on WhatsApp or drop by the shop in Saida.</p>
+        {words ? (
+          <>
+            <h1 data-testid="shop-shut-title">{(shut && shut.title) || "Something new is on its way."}</h1>
+            <p>{(shut && shut.text) || "The website is closed for a little while. Ask us anything on WhatsApp, or drop by the shop in Saida — the doors there are open."}</p>
+          </>
+        ) : (
+          <>
+            <h1>The winter collection is going up.</h1>
+            <p>The shutter rolls up on <b>{opensOn}</b>. Until then, ask us anything on WhatsApp or drop by the shop in Saida.</p>
+          </>
+        )}
         <div className="ss-actions">
-          <a className="ss-btn is-primary" href={`https://wa.me/${WHATSAPP}?text=${encodeURIComponent("Hi Kanaan! I'd like to hear first when the winter collection is online.")}`} target="_blank" rel="noopener noreferrer">Tell me first on WhatsApp</a>
+          <a className="ss-btn is-primary" href={`https://wa.me/${WHATSAPP}?text=${encodeURIComponent(words ? "Hi Kanaan! Tell me when the website opens again." : "Hi Kanaan! I'd like to hear first when the winter collection is online.")}`} target="_blank" rel="noopener noreferrer">Tell me first on WhatsApp</a>
           <a className="ss-btn" href="https://instagram.com/kanaan.shop" target="_blank" rel="noopener noreferrer">Instagram</a>
         </div>
       </div>
@@ -274,6 +352,10 @@ const SHOP_SHUT_CSS = `
   .ss { position: fixed; inset: 0; z-index: 200; display: flex; flex-direction: column; overflow: hidden; font-family: 'Inter', sans-serif; --ink: #14141A; --wall: #E9E6E1; --sky: #F2F2F4; background: var(--sky); color: var(--ink); transition: opacity .7s ease .1s; }
   .ss.is-night { --wall: #2A2B30; --sky: #121318; color: #F5F5F7; }
   .ss.is-opening { animation: ssFade .7s ease 2.4s both; }
+  .ss.is-dropping .ss-shutter { animation: ssDrop 1.2s cubic-bezier(.5,0,.3,1) both; }
+  .ss.is-dropping { animation: ssIn .35s ease both; }
+  @keyframes ssDrop { from { transform: translateY(-101%); } to { transform: translateY(0); } }
+  @media (prefers-reduced-motion: reduce) { .ss.is-dropping .ss-shutter, .ss.is-dropping { animation: none; } }
   @keyframes ssFade { to { opacity: 0; visibility: hidden; } }
 
   /* the floors above: the building and its windows */

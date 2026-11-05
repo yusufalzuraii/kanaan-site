@@ -277,12 +277,15 @@ export async function pull(db, dev, since, limit = LIMITS.pullRows) {
     db.prepare('SELECT t, pk k, d, v, dev, at, ca FROM hub_rows WHERE v > ? ORDER BY v LIMIT ?').bind(since, limit),
     db.prepare("SELECT v FROM hub_meta WHERE k = 'v'"),
     db.prepare('UPDATE hub_devices SET last_seen = ?, last_v = ? WHERE no = ?').bind(Date.now(), since, dev.no),
+    // requests from the apps waiting for this device (the WhatsApp server answers them within seconds)
+    db.prepare('SELECT COUNT(*) n FROM hub_cmds WHERE to_dev = ? AND done_at IS NULL').bind(dev.no),
   ]);
   const all = res[0].results || [];
   const top = res[1].results[0].v;
   const more = all.length === limit;
   const next = more ? all[all.length - 1].v : top;
-  return { rows: all.filter((r) => r.dev !== dev.no), next, more, top };
+  const cmds = (res[3] && res[3].results && res[3].results[0] && res[3].results[0].n) || 0;
+  return { rows: all.filter((r) => r.dev !== dev.no), next, more, top, cmds };
 }
 export async function status(db) {
   const v = (await db.prepare("SELECT v FROM hub_meta WHERE k = 'v'").first()).v;

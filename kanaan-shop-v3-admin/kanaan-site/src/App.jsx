@@ -824,6 +824,21 @@ function getImagesForColor(product, colorKey) {
   return untagged.length > 0 ? untagged : all;
 }
 
+/* Every photo of a piece, colour by colour in the piece's own colour order
+   (the product page's gallery shows them all — the owner's ask, 8 Nov 2026:
+   a shopper sees every colour without tapping each one); photos with no
+   colour come last. Each keeps its colour, so the gallery can tell which
+   colour a photo shows. */
+function galleryImages(product) {
+  const all = getImageList(product);
+  const order = product.colors || [];
+  const tagged = (x) => x.color && order.includes(x.color);
+  const out = [];
+  for (const c of order) for (const x of all) if (x.color === c) out.push(x);
+  for (const x of all) if (!tagged(x)) out.push(x);
+  return out;
+}
+
 /* Uploaded photos are stored twice — the full image and a smaller copy
    with "-thumb" before the extension. Grid cards show up to 12 images at
    once, so pulling the small one there is the difference between a page
@@ -1070,14 +1085,15 @@ function SwatchPanel({ product, big, liked, onToggleLike, forceSoldOut, swipeabl
    Falls back to the mesh art when a product has no photos, so
    the look is identical to before for image-less products.
    ============================================================ */
-function ProductGallery({ product, liked, onToggleLike, activeColor }) {
-  // Memoised: without this the list was rebuilt on every render, which
-  // remounted the <img> and made colour switching feel sluggish.
-  const images = useMemo(
-    () => getImagesForColor(product, activeColor).map((x) => x.url),
-    [product, activeColor]
-  );
-  const allUrls = useMemo(() => getImageList(product).map((x) => x.url), [product]);
+function ProductGallery({ product, liked, onToggleLike, activeColor, onColor }) {
+  // Every colour's photos, one colour after another (galleryImages). A
+  // colour tapped below jumps to its first photo; swiping on to another
+  // colour's photos picks that colour (as a tap on it would) — so the photo
+  // and the chosen colour always agree.
+  const shots = useMemo(() => galleryImages(product), [product]);
+  const images = useMemo(() => shots.map((x) => x.url), [shots]);
+  const allUrls = images;
+  const many = new Set(shots.map((x) => x.color).filter(Boolean)).size > 1;
 
   // Warm the browser cache with every photo of this product as soon as the
   // page opens, so tapping a colour swaps instantly instead of waiting on
@@ -1109,16 +1125,29 @@ function ProductGallery({ product, liked, onToggleLike, activeColor }) {
     if (!fromBack) { try { if (window.history.state && window.history.state.viewer) window.history.back(); } catch { /* fine */ } }
   };
 
-  // Back to the first photo whenever the product or the chosen colour changes.
+  // A new piece: its first photo. A colour chosen (a tap on its swatch):
+  // that colour's first photo — unless the photo showing is already of it
+  // (the colour was chosen by swiping to it).
+  const shownColor = useRef(null);
+  useEffect(() => { setActive(Math.max(0, shots.findIndex((x) => x.color === activeColor))); shownColor.current = activeColor; }, [product.id]); // eslint-disable-line
   useEffect(() => {
-    setActive(0);
-  }, [product.id, activeColor]);
+    if (!activeColor || shownColor.current === activeColor) return;
+    const at = shots.findIndex((x) => x.color === activeColor);
+    if (at >= 0) { setActive(at); shownColor.current = activeColor; }
+  }, [activeColor, shots]);
 
   const idx = Math.min(active, Math.max(0, images.length - 1));
   const activeSrc = images[idx] && !broken[images[idx]] ? images[idx] : null;
+  const photoColor = shots[idx] ? shots[idx].color : null;
+  // a photo of another colour reached by swiping or a thumbnail: that colour is the one chosen now
+  const show = (i) => {
+    setActive(i);
+    const c = shots[i] && shots[i].color;
+    if (c && c !== activeColor && onColor) { shownColor.current = c; onColor(c); }
+  };
   const go = (dir) => {
     if (images.length < 2) return;
-    setActive((i) => (i + dir + images.length) % images.length);
+    show((idx + dir + images.length) % images.length);
   };
 
   return (
@@ -1166,6 +1195,13 @@ function ProductGallery({ product, liked, onToggleLike, activeColor }) {
         <div className="absolute top-3 left-3">
           <LikeButton liked={liked} onToggle={onToggleLike} size="lg" />
         </div>
+        {/* which colour this photo shows (a piece in more than one colour) */}
+        {many && activeSrc && photoColor && COLORS[photoColor] && (
+          <div className="absolute bottom-3 left-3 glass rounded-full flex items-center gap-2 pl-1.5 pr-3" style={{ height: 32 }} data-testid="photo-colour">
+            <span className="rounded-full" style={{ width: 20, height: 20, background: COLORS[photoColor].hex, boxShadow: "inset 0 0 0 1px rgba(0,0,0,0.12)" }} />
+            <span className="font-body text-xs text-fg">{COLORS[photoColor].label}</span>
+          </div>
+        )}
         {activeSrc && (
           <button
             type="button"
@@ -1184,15 +1220,22 @@ function ProductGallery({ product, liked, onToggleLike, activeColor }) {
       )}
 
       {images.length > 1 && (
-        <div className="flex gap-2 mt-3 overflow-x-auto pb-1 max-w-full" style={{ WebkitOverflowScrolling: "touch" }}>
+        <div className="flex gap-2 mt-3 overflow-x-auto pb-1 max-w-full" style={{ WebkitOverflowScrolling: "touch" }} data-testid="photo-thumbs">
           {images.map((src, i) =>
             broken[src] ? null : (
               <button
                 key={src}
-                onClick={() => setActive(i)}
+                ref={idx === i ? (el) => { if (el && el.scrollIntoView && el.parentElement && (el.offsetLeft < el.parentElement.scrollLeft || el.offsetLeft + el.offsetWidth > el.parentElement.scrollLeft + el.parentElement.clientWidth)) el.parentElement.scrollTo({ left: el.offsetLeft - 8, behavior: "smooth" }); } : undefined}
+                onClick={() => show(i)}
                 className="relative flex-shrink-0 rounded-xl overflow-hidden tap-scale"
-                style={{ width: 64, height: 80, border: idx === i ? "2px solid var(--coral)" : "1px solid var(--border)" }}
-                aria-label={`Photo ${i + 1}`}
+                style={{
+                  width: 64, height: 80,
+                  border: idx === i ? "2px solid var(--coral)" : "1px solid var(--border)",
+                  // a little more room before each new colour's photos
+                  marginLeft: many && i > 0 && shots[i].color !== shots[i - 1].color ? 8 : 0,
+                }}
+                aria-label={`Photo ${i + 1}${shots[i].color && COLORS[shots[i].color] ? `, ${COLORS[shots[i].color].label}` : ""}`}
+                data-color={shots[i].color || ""}
               >
                 <img
                   src={src}
@@ -5015,7 +5058,7 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 pb-32">
       <div className="grid md:grid-cols-2 gap-10">
         <div className="md:sticky md:top-24 self-start min-w-0">
-          <ProductGallery product={product} liked={liked} onToggleLike={toggleLike} activeColor={color} />
+          <ProductGallery product={product} liked={liked} onToggleLike={toggleLike} activeColor={color} onColor={pickColor} />
           {/* Mobile: colours sit right under the photos so you can watch
               the gallery switch as you tap. */}
           <div className="mt-4 md:hidden">

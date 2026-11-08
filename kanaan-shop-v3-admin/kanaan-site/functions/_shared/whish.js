@@ -171,7 +171,7 @@ export async function checkPayment(env, row, { force = false, ctx = null, timeou
   const won = await env.DB.prepare("UPDATE orders SET whish_checked_at = ? WHERE id = ? AND whish_checked_at = ? RETURNING id")
     .bind(now, row.id, Number(row.whish_checked_at) || 0).first();
   if (!won && !force) return (await fetchRow(env, row.id)) || row;
-  let failed = 0; let open = 0; const list = exts(row).reverse();
+  let failed = 0; let open = 0; let newestFailed = false; const list = exts(row).reverse();
   for (const ext of list) {
     let s;
     try { s = await askStatus(cfg, ext, { timeout }); } catch { open++; continue; }
@@ -180,11 +180,12 @@ export async function checkPayment(env, row, { force = false, ctx = null, timeou
       await flag(env, row, `Whish says ${s.currency || "USD"} ${s.amount} was paid (payment ${ext}), not the order's ${money(row.total)} — not counted; check it in Whish`, ctx);
       continue;
     }
-    if (s.status === "failed") failed++; else open++;
+    if (s.status === "failed") { failed++; if (ext === list[0]) newestFailed = true; } else open++;
   }
-  // every link failed (none still open): the shopper is told, and can try again or pay cash — only if no new link
-  // was made meanwhile (the list we asked about is still the order's)
-  if (list.length && failed === list.length && !open) {
+  // the newest link failed (the one the order's page hands out): the shopper is told, and can try again or pay cash —
+  // an older link still open at Whish is still asked about every time, so a late payment on it still counts. Only if
+  // no new link was made meanwhile (the list we asked about is still the order's).
+  if (list.length && (newestFailed || (failed === list.length && !open))) {
     await env.DB.prepare("UPDATE orders SET pay_status = 'failed' WHERE id = ? AND pay_status = 'waiting' AND whish_ext = ?").bind(row.id, row.whish_ext).run();
   }
   return (await fetchRow(env, row.id)) || row;

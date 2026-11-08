@@ -22,7 +22,11 @@ async function handle(context) {
   const e = String(u.searchParams.get("e") || "").replace(/\D/g, "").slice(0, 20);
   try {
     if (row.pay_status === "paid" || row.pay_status === "late") after = await checkSecond(env, row, e, context);
-    else after = await checkPayment(env, row, { force: true, ctx: context });
+    else {
+      after = await checkPayment(env, row, { force: true, ctx: context });
+      // paid now by another of its links (two open, both paid): this one is asked about too — paid twice is told
+      if ((after.pay_status === "paid" || after.pay_status === "late") && e && String(e) !== String(after.whish_paid_ext)) after = await checkSecond(env, after, e, context);
+    }
   } catch { /* the order page asks again */ }
   return json({ ok: true, paid: after.pay_status === "paid" || after.pay_status === "late" });
 }

@@ -39,6 +39,8 @@ export async function onRequestPost(context) {
     if (st.length) await env.DB.batch(st);
   } else if (action === "cancel") {
     if (await posInvolved(env, row, items)) return json({ error: "Kanaan POS is handling this order: reject it there (Website → Orders), so the shop's stock and accounts stay right." }, 409);
+    // waiting for its Whish payment: it ends by itself (paid, or its pieces go back after its time)
+    if (row.status === "paying") return json({ error: "This order is waiting for its Whish payment: it ends by itself in a few minutes." }, 409);
     if (row.status === "pending") {
       const won = await env.DB.prepare("UPDATE orders SET status = 'cancelled', updated_at = ? WHERE id = ? AND status = 'pending' RETURNING id").bind(now, id).first();
       if (won) { const st = releaseStatements(env, items); if (st.length) await env.DB.batch(st); }
@@ -72,6 +74,9 @@ export async function onRequestDelete(context) {
   let items = [];
   try { items = JSON.parse(row.items || "[]"); } catch { /* ignore */ }
   if (await posInvolved(env, row, items)) return json({ error: "Kanaan POS is handling this order: it stays." }, 409);
+  // an order that went to Whish stays for good: its number made Whish's payment numbers, and a new order drawing the
+  // same number would make the same ones (an old payment could then count for it); a paying one holds its pieces
+  if (row.whish_ext || row.status === "paying") return json({ error: "This order went to Whish: it stays (cancel it instead once it's no longer waiting for its payment)." }, 409);
 
   // If it was still holding stock, release it before deleting.
   if (row.status === "pending") { const st = releaseStatements(env, items); if (st.length) await env.DB.batch(st); }

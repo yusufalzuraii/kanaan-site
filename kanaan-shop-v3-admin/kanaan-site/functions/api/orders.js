@@ -200,7 +200,9 @@ export async function onRequestPost(context) {
     await rollback();
     return json({ error: "Whish isn't available right now — choose cash on delivery.", field: "pay", whishOff: true }, 409);
   }
-  if (Number(body.pricing) >= 2 && settings) delivery = deliveryFor(settings, subtotal);
+  // (a Whish order always pays the shop's own delivery: only today's site and app offer Whish, and the total goes to
+  // Whish as it is — the old apps' flat fee is never what a card is charged)
+  if ((Number(body.pricing) >= 2 || byWhish) && settings) delivery = deliveryFor(settings, subtotal);
   // the welcome offer on a first order (the lines it is on are marked, so the invoice spreads it on them only)
   let welcome = null;
   try {

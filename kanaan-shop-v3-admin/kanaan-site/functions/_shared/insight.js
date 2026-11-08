@@ -61,7 +61,35 @@ export async function ensureInsight(env) {
        sizes INTEGER NOT NULL DEFAULT 0, photos INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (day, pid))`,
   ];
   for (const s of stmts) await env.DB.prepare(s).run();
+  // 2.2: the shop can take a bag off its own list (the shopper keeps it): hidden_at; a change to the bag after it shows it again
+  const ccols = ((await env.DB.prepare("PRAGMA table_info(ins_carts)").all()).results || []).map((c) => c.name);
+  if (!ccols.includes("hidden_at")) { try { await env.DB.prepare("ALTER TABLE ins_carts ADD COLUMN hidden_at INTEGER").run(); } catch { /* added by a parallel request */ } }
   ready = true;
+}
+
+/** A bag the shop sees: not taken off its list, or changed by its shopper since. */
+const SHOWN = "(hidden_at IS NULL)"; // 2.2.0: put back only when its pieces change (the upsert below), not by a page reload
+
+/**
+ * The shop takes open bags off its list (Website → Visitors), or puts them back. The shoppers keep their bags exactly
+ * as they are — only the shop's view changes; a bag its shopper changes later shows again by itself.
+ * { vids: [...] } or { all: true } hides; { show: true } shows every hidden one again.
+ */
+export async function hideBags(env, { vids, all, show } = {}) {
+  await ensureInsight(env);
+  const now = Date.now();
+  if (show) {
+    const r = await env.DB.prepare("UPDATE ins_carts SET hidden_at = NULL WHERE hidden_at IS NOT NULL").run();
+    return { ok: true, shown: r.meta ? r.meta.changes : 0 };
+  }
+  if (all) {
+    const r = await env.DB.prepare(`UPDATE ins_carts SET hidden_at = ? WHERE ${SHOWN}`).bind(now).run();
+    return { ok: true, hidden: r.meta ? r.meta.changes : 0 };
+  }
+  const list = (Array.isArray(vids) ? vids : []).map((v) => String(v || "").slice(0, 80)).filter(Boolean).slice(0, 99); // + the time: within D1's 100 bound values
+  if (!list.length) return { ok: true, hidden: 0 };
+  const r = await env.DB.prepare(`UPDATE ins_carts SET hidden_at = ? WHERE vid IN (${list.map(() => "?").join(",")})`).bind(now, ...list).run();
+  return { ok: true, hidden: r.meta ? r.meta.changes : 0 };
 }
 
 /** What a browser says about itself → phone / tablet / desktop / app, its system and browser (Instagram's own…). */
@@ -235,7 +263,7 @@ export async function recordBatch(env, request, body) {
     if (!items.length || order) stmts.push(db.prepare("DELETE FROM ins_carts WHERE vid = ?").bind(vid));
     else {
       stmts.push(db.prepare(`INSERT INTO ins_carts (vid, sid, items, pieces, value, created_at, updated_at) VALUES (?,?,?,?,?,?,?)
-        ON CONFLICT(vid) DO UPDATE SET sid = excluded.sid, items = excluded.items, pieces = excluded.pieces, value = excluded.value, updated_at = excluded.updated_at`)
+        ON CONFLICT(vid) DO UPDATE SET sid = excluded.sid, hidden_at = CASE WHEN ins_carts.items = excluded.items THEN ins_carts.hidden_at ELSE NULL END, items = excluded.items, pieces = excluded.pieces, value = excluded.value, updated_at = excluded.updated_at`)
         .bind(vid, sid, JSON.stringify(items), items.reduce((a, r) => a + r[3], 0), items.reduce((a, r) => a + r[3] * r[4], 0), now, now));
     }
   } else if (order) stmts.push(db.prepare("DELETE FROM ins_carts WHERE vid = ?").bind(vid));
@@ -315,7 +343,7 @@ export async function insightsBetween(env, from, to, startMs, endMs) {
       SUM(removes) AS removes, SUM(sizes) AS sizes, SUM(photos) AS photos FROM ins_pday WHERE day BETWEEN ? AND ? GROUP BY pid ORDER BY views DESC LIMIT 60`).bind(from, to).all()).results || [];
   const likedNow = new Map(((await db.prepare("SELECT pid, COUNT(*) AS n FROM ins_likes GROUP BY pid ORDER BY n DESC LIMIT 60").all()).results || []).map((r) => [r.pid, Number(r.n)]));
   const inBags = new Map();
-  for (const c of (await db.prepare("SELECT items FROM ins_carts").all()).results || []) for (const it of parse(c.items, [])) inBags.set(it[0], (inBags.get(it[0]) || 0) + Number(it[3] || 1));
+  for (const c of (await db.prepare(`SELECT items FROM ins_carts WHERE ${SHOWN}`).all()).results || []) for (const it of parse(c.items, [])) inBags.set(it[0], (inBags.get(it[0]) || 0) + Number(it[3] || 1));
   const ordered = new Map();
   for (const o of (await db.prepare("SELECT items FROM orders WHERE created_at BETWEEN ? AND ? AND status NOT IN ('cancelled','rejected','expired')").bind(startMs, endMs).all()).results || []) {
     for (const it of parse(o.items, [])) ordered.set(it.productId, (ordered.get(it.productId) || 0) + Number(it.qty || 1));
@@ -367,7 +395,8 @@ export async function insightsLive(env) {
   const now = Date.now();
   const batches = await recentBatches(env, 150, now - 2 * DAY);
   const onSids = [...new Set(batches.filter((bt) => bt.at > now - 5 * 60000).map((bt) => bt.sid))].slice(0, 40);
-  const carts = ((await db.prepare("SELECT vid, sid, items, pieces, value, created_at, updated_at FROM ins_carts").all()).results || []).sort((a, z) => z.updated_at - a.updated_at).slice(0, 40);
+  const carts = ((await db.prepare(`SELECT vid, sid, items, pieces, value, created_at, updated_at FROM ins_carts WHERE ${SHOWN}`).all()).results || []).sort((a, z) => z.updated_at - a.updated_at).slice(0, 40);
+  const hiddenBags = Number(((await db.prepare(`SELECT COUNT(*) AS n FROM ins_carts WHERE NOT ${SHOWN}`).first()) || {}).n || 0);
   const feed = [];
   for (const bt of batches) { for (const a of parse(bt.e, []).reverse()) feed.push({ ...unpack(a), sid: bt.sid, vid: bt.vid }); if (feed.length >= 80) break; }
   feed.sort((a, z) => z.at - a.at);
@@ -379,7 +408,7 @@ export async function insightsLive(env) {
   const nm = await names(env, [...on.map((s) => s.cur_pid), ...items.flat().map((it) => it[0]), ...feed.map((f) => f.pid)]);
   const about = (sid) => { const s = sess.get(sid) || {}; return { src: s.src || "", dev: s.dev || "", city: s.city || "" }; };
   return {
-    at: now,
+    at: now, hiddenBags,
     now: on.map((s) => ({ ...s, piece: s.cur_pid ? nm.get(s.cur_pid) || null : null })),
     carts: carts.map((c, i) => ({ vid: c.vid, sid: c.sid, pieces: c.pieces, value: c.value, since: c.created_at, at: c.updated_at, ...about(c.sid),
       items: items[i].map((it) => ({ id: it[0], color: it[1], size: it[2], qty: it[3], price: it[4], name: (nm.get(it[0]) || {}).name || it[0], image: (nm.get(it[0]) || {}).image || "" })) })),

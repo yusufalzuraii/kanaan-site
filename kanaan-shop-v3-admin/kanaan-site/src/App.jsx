@@ -882,12 +882,41 @@ function galleryImages(product) {
 /* A piece about to be opened (the mouse on its card, a finger touching it): its first photo, full size, starts
    coming now — by the time the page opens, it's usually here. Once per piece, never more than that: a phone's
    data isn't spent on pieces nobody reached for. */
+/* A card tapped: its photo grows into the product page's big photo (the owner's choice, 9 Nov 2026), with the
+   browser's own view transitions (Chrome, Edge, Samsung Internet, Safari 18+). The page opens instantly
+   underneath; elsewhere, with reduced motion, or from anything but a card, it simply opens as before. The page's
+   own rise-in is held for that moment (.vt-morph) so the photo lands where it stays. */
+let morphNav = false; // the next page opens by the photo growing into it: no rise-in of its own (PageTransition)
+function morphOpen(fromEl, go) {
+  const can = !!fromEl && typeof document !== "undefined" && typeof document.startViewTransition === "function"
+    && !(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  if (!can) { go(); return; }
+  const root = document.documentElement;
+  try {
+    // a card on a product page (Complete the look): that page's own big photo gives up the name for the moment
+    document.querySelectorAll("[data-gallery-photo]").forEach((el) => { if (el !== fromEl) el.style.viewTransitionName = "none"; });
+    fromEl.style.viewTransitionName = "kanaan-photo";
+    root.classList.add("vt-morph");
+    const t = document.startViewTransition(async () => {
+      morphNav = true;
+      go();
+      // the new page is drawn in the next turn (Preact draws after the current task); wait for it
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    const done = () => { root.classList.remove("vt-morph"); try { fromEl.style.viewTransitionName = ""; } catch { /* gone */ } };
+    t.finished.then(done, done);
+  } catch {
+    root.classList.remove("vt-morph");
+    go();
+  }
+}
+
 const warmed = new Set();
 function warmProduct(product) {
   if (!product || warmed.has(product.id)) return;
   warmed.add(product.id);
   const first = galleryImages(product)[0];
-  if (first && first.url) { const im = new Image(); im.decoding = "async"; im.src = first.url; }
+  if (first && first.url) { const im = new Image(); im.decoding = "async"; im.src = bigUrlFor(first.url); }
 }
 
 /* Uploaded photos are stored twice — the full image and a smaller copy
@@ -898,11 +927,41 @@ function warmProduct(product) {
    Products uploaded before thumbnails existed simply don't have one; the
    <img> onError below falls back to the full image, so nothing breaks. */
 function thumbUrlFor(url) {
+  const cdn = resizedPhoto(url, 480, 75);
+  if (cdn) return cdn;
   const u = String(url || "");
   if (!u.startsWith("/img/")) return ""; // external or missing — no thumb to guess at
   const dot = u.lastIndexOf(".");
   if (dot <= 0) return "";
   return `${u.slice(0, dot)}-thumb${u.slice(dot)}`;
+}
+/* The big photo (the product page): 1000 px wide is sharp on a phone's screen and a computer's half-page. */
+function bigUrlFor(url) {
+  return resizedPhoto(url, 1000, 80) || url;
+}
+/* An <img> showing a resized photo: if that ever fails, the original photo itself */
+const photoFallback = (full) => (e) => {
+  const el = e.currentTarget;
+  if (full && el.src !== new URL(full, location.href).href) el.src = full;
+};
+
+/* Cloudflare resizes the shop's photos on the way out (Images → Transformations, switched on 9 Nov 2026 — the
+   owner's choice): the width the screen needs, as AVIF or WebP when the browser takes them — a card's photo is
+   about 20 KB instead of 350. Each size of a photo is made once and cached. Past the free 5,000 a month, or on any
+   error, Cloudflare sends the original photo instead (onerror=redirect), so nothing breaks. Two sizes only (480
+   for cards, thumbnails and the 3D tags; 1000 for the product page), so a photo counts twice at most. Only on the
+   live shop and in the apps (which load from it): a local preview has no /cdn-cgi. functions/_shared/ssr.js
+   writes the very same addresses into the pages, so a photo is fetched once. */
+const PHOTO_CDN = (() => {
+  if (isNativeApp) return true;
+  try { return /(^|\.)kanaanshop\.com$/.test(window.location.hostname); } catch { return false; }
+})();
+function resizedPhoto(url, width, quality) {
+  if (!PHOTO_CDN) return "";
+  const u = String(url || "");
+  const m = u.match(/^(?:https:\/\/(?:www\.)?kanaanshop\.com)?(\/img\/[^?#]+)$/);
+  if (!m || /-thumb\.[a-z0-9]+$/i.test(m[1])) return "";
+  return `${isNativeApp ? SITE_URL : ""}/cdn-cgi/image/width=${width},quality=${quality},format=auto,fit=scale-down,onerror=redirect${m[1]}`;
 }
 
 function getImages(product) {
@@ -938,23 +997,58 @@ function SoldOutBadge() {
   );
 }
 
-function SwatchPanel({ product, big, liked, onToggleLike, forceSoldOut, swipeable }) {
+/* One photo on a card: the shimmer until it decodes, the small copy (falling back to the full photo if a small
+   copy is missing), then nothing at all if even that fails (the card's colours show instead). */
+function CardPhoto({ full, alt, eager, hint, onFail }) {
+  const [loaded, setLoaded] = useState(false);
+  const [useFull, setUseFull] = useState(false);
+  const small = thumbUrlFor(full) || full;
+  const src = useFull ? full : small;
+  return (
+    <>
+      {!loaded && <span className="skeleton" aria-hidden="true" />}
+      <img
+        src={src}
+        alt={alt}
+        loading={eager ? undefined : "lazy"}
+        decoding="async"
+        key={src}
+        draggable={false}
+        className={`absolute inset-0 w-full h-full ph-img${loaded ? " is-loaded photo-settle" : ""}${hint ? " swipe-hint" : ""}`}
+        style={{ objectFit: "cover" }}
+        onLoad={() => setLoaded(true)}
+        onError={() => { if (!useFull && small !== full) setUseFull(true); else if (onFail) onFail(); }}
+      />
+    </>
+  );
+}
+
+/* A card's photos (since 9 Nov 2026, the owner's choice: flick through them on the card). They sit side by side
+   in a strip that follows the finger and snaps to each photo — the phone's own scrolling, so it's as smooth as
+   the page — first the photo the card opens on, then the others colour by colour. Only the photo showing and the
+   ones either side of it are loaded, and the neighbours only once the card is touched or pointed at. A computer
+   gets arrows on hover. The colour of the photo showing is reported to the card (its dots underneath light up),
+   and a dot tapped there brings that colour's photo (`jump`). */
+function SwatchPanel({ product, big, liked, onToggleLike, forceSoldOut, swipeable, jump, onShowColor }) {
   const c1 = COLORS[product.colors[0]]?.hex || "#141414";
   const c2 = COLORS[product.colors[1]]?.hex || c1;
   const [imgOk, setImgOk] = useState(true);
 
-  /* Browse a product's photos without leaving the grid.
-     Only on cards (never the product page, which has its own gallery),
-     and only when there's genuinely more than one photo to see. */
-  const allImages = useMemo(() => getImages(product), [product]);
-  const canSwipe = !!swipeable && !big && allImages.length > 1;
+  const shots = useMemo(() => {
+    const first = getImageList(product)[0];
+    if (!first) return [];
+    return [first, ...galleryImages(product).filter((x) => x.url !== first.url)];
+  }, [product]);
+  const canSwipe = !!swipeable && !big && shots.length > 1;
   const [idx, setIdx] = useState(0);
+  const idxRef = useRef(0);
+  const [armed, setArmed] = useState(false);
+  const seen = useRef(new Set([0]));
   const [hinted, setHinted] = useState(false);
   const hintRef = useRef(null);
-  const touch = useRef(null);
+  const strip = useRef(null);
 
-  // The nudge plays once, on the first card to reach the screen — enough
-  // to teach the gesture, not enough to become wallpaper.
+  // The nudge plays once, on the first card to reach the screen — enough to teach the gesture.
   useEffect(() => {
     if (!canSwipe || hinted) return;
     const el = hintRef.current;
@@ -966,115 +1060,65 @@ function SwatchPanel({ product, big, liked, onToggleLike, forceSoldOut, swipeabl
     return () => obs.disconnect();
   }, [canSwipe, hinted]);
 
-  // Warm the neighbouring photo so a swipe lands on something instant.
+  const reduced = () => typeof window !== "undefined" && window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const goTo = (i) => {
+    const el = strip.current;
+    if (!el) return;
+    const n = Math.max(0, Math.min(shots.length - 1, i));
+    setArmed(true);
+    el.scrollTo({ left: n * el.clientWidth, behavior: reduced() ? "auto" : "smooth" });
+  };
+  const onScroll = () => {
+    const el = strip.current;
+    if (!el) return;
+    const i = Math.max(0, Math.min(shots.length - 1, Math.round(el.scrollLeft / Math.max(1, el.clientWidth))));
+    if (i !== idxRef.current) {
+      idxRef.current = i;
+      seen.current.add(i);
+      setIdx(i);
+      setHinted(true);
+    }
+  };
+
+  // a colour dot tapped under the card: that colour's first photo
   useEffect(() => {
-    if (!canSwipe) return;
-    const next = allImages[idx + 1];
-    if (next) { const im = new Image(); im.src = thumbUrlFor(next) || next; }
-  }, [canSwipe, idx, allImages]);
+    if (!jump || !canSwipe) return;
+    const i = shots.findIndex((x) => x.color === jump.key);
+    if (i >= 0) goTo(i);
+  }, [jump && jump.n]); // eslint-disable-line react-hooks/exhaustive-deps
+  // the colour showing, for the card's dots
+  useEffect(() => {
+    if (onShowColor) onShowColor(canSwipe ? (shots[idx] && shots[idx].color) || null : null);
+  }, [idx, canSwipe]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const go = (dir) => setIdx((i) => Math.min(allImages.length - 1, Math.max(0, i + dir)));
-
-  /* A mouse can't swipe. Without this, browsing a product's photos from
-     the grid worked on a phone and simply didn't exist on a laptop — the
-     dots appeared, hinting at more images, with no way to reach them.
-
-     Two ways in on desktop: drag the image, or use the arrows that fade
-     in on hover. Pointer events cover mouse, trackpad and pen in one go. */
-  const drag = useRef(null);
-  const onPointerDown = (e) => {
-    if (!canSwipe || e.pointerType === "touch") return; // touch has its own handlers
-    drag.current = { x: e.clientX, moved: false };
-  };
-  const onPointerMove = (e) => {
-    if (!drag.current) return;
-    if (Math.abs(e.clientX - drag.current.x) > 10) drag.current.moved = true;
-  };
-  const onPointerUp = (e) => {
-    if (!drag.current) return;
-    const dx = e.clientX - drag.current.x;
-    if (Math.abs(dx) > 45) {
-      e.preventDefault();
-      e.stopPropagation();
-      go(dx < 0 ? 1 : -1);
-      setHinted(true);
-    }
-    drag.current = null;
-  };
-
-  const onTouchStart = (e) => {
-    if (!canSwipe) return;
-    touch.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, moved: false };
-  };
-  const onTouchMove = (e) => {
-    if (!canSwipe || !touch.current) return;
-    const dx = e.touches[0].clientX - touch.current.x;
-    const dy = e.touches[0].clientY - touch.current.y;
-    // Horizontal intent only — a vertical drag is the page scrolling.
-    if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy)) touch.current.moved = true;
-  };
-  const onTouchEnd = (e) => {
-    if (!canSwipe || !touch.current) return;
-    const dx = e.changedTouches[0].clientX - touch.current.x;
-    const dy = e.changedTouches[0].clientY - touch.current.y;
-    if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) {
-      // Swallow the tap so flicking through photos never opens the product.
-      e.preventDefault();
-      e.stopPropagation();
-      go(dx < 0 ? 1 : -1);
-      setHinted(true);
-    }
-    touch.current = null;
-  };
-
-  const fullSrc = (canSwipe ? allImages[idx] : allImages[0]) || null;
-  // `big` = product page hero, where the full-resolution image belongs.
-  const preferred = big ? fullSrc : (thumbUrlFor(fullSrc) || fullSrc);
-  const imgSrc = imgOk ? preferred : null;
-  const [thumbFailed, setThumbFailed] = useState(false);
-  const [imgLoaded, setImgLoaded] = useState(false);
-  const shownSrc = thumbFailed ? fullSrc : imgSrc;
+  const fullSrc = shots[0] ? shots[0].url : null;
   return (
     <div
       ref={hintRef}
       className="relative w-full flex items-center justify-center overflow-hidden"
+      data-card-photo=""
       style={{
         aspectRatio: "4/5",
         borderRadius: big ? "28px" : "20px",
         background: `radial-gradient(120% 120% at 15% 15%, ${c1} 0%, transparent 55%), radial-gradient(120% 120% at 85% 85%, ${c2} 0%, transparent 55%), #1A1A1E`,
-        // Lets the browser keep vertical scrolling on its fast path while
-        // we handle the horizontal gesture ourselves.
-        touchAction: canSwipe ? "pan-y" : undefined,
       }}
-      onTouchStart={onTouchStart}
-      onTouchMove={onTouchMove}
-      onTouchEnd={onTouchEnd}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerLeave={() => { drag.current = null; }}
+      onPointerEnter={canSwipe ? () => setArmed(true) : undefined}
+      onTouchStart={canSwipe ? () => setArmed(true) : undefined}
     >
-      {shownSrc ? (
-        <>
-          {/* Shimmer sits underneath until the photo actually decodes. */}
-          {!imgLoaded && <span className="skeleton" aria-hidden="true" />}
-        <img
-          src={shownSrc}
-          alt={product.name}
-          loading="lazy"
-          decoding="async"
-          key={shownSrc}
-          className={`absolute inset-0 w-full h-full ph-img${imgLoaded ? " is-loaded photo-settle" : ""}${canSwipe && hinted && idx === 0 ? " swipe-hint" : ""}`}
-          style={{ objectFit: "cover" }}
-          onLoad={() => setImgLoaded(true)}
-          onError={() => {
-            // A missing thumbnail just means this photo predates them —
-            // retry once with the full image before giving up entirely.
-            if (!thumbFailed && shownSrc !== fullSrc) setThumbFailed(true);
-            else setImgOk(false);
-          }}
-        />
-        </>
+      {fullSrc && imgOk ? (
+        canSwipe ? (
+          <div ref={strip} className="card-strip" onScroll={onScroll} data-testid="card-strip">
+            {shots.map((x, i) => (
+              <div key={`${x.url}-${i}`} className="card-slide" aria-hidden={i === idx ? undefined : "true"}>
+                {(i === 0 || seen.current.has(i) || (armed && Math.abs(i - idx) <= 1)) && (
+                  <CardPhoto full={x.url} alt={i === 0 ? product.name : ""} eager={i > 0} hint={i === 0 && hinted && idx === 0} onFail={i === 0 ? () => setImgOk(false) : undefined} />
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <CardPhoto full={big ? fullSrc : fullSrc} alt={product.name} onFail={() => setImgOk(false)} />
+        )
       ) : (
         <>
           <div className="grain-overlay" style={{ opacity: 0.05 }} />
@@ -1082,44 +1126,45 @@ function SwatchPanel({ product, big, liked, onToggleLike, forceSoldOut, swipeabl
         </>
       )}
       {product.badge && (
-        <div className="absolute top-3 right-3">
+        <div className="absolute top-3 right-3 pointer-events-none">
           <GlassChip tone={product.badge === "sale" ? "coral" : "teal"}>
             {product.badge === "sale" ? `−${product.discount}%` : "New"}
           </GlassChip>
         </div>
       )}
-      {/* Dots only appear where swiping is possible, so they double as the
-          signal that there's more than one photo here. */}
-      {canSwipe && (
+      {/* Arrows (a computer, on hover) and dots only where there's more than one photo. */}
+      {canSwipe && imgOk && (
         <>
           {idx > 0 && (
             <button
               type="button"
               className="card-arrow card-arrow-left"
-              onClick={(e) => { e.preventDefault(); e.stopPropagation(); go(-1); }}
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); goTo(idx - 1); }}
               aria-label="Previous photo"
             >
               <ChevronDown className="w-4 h-4" style={{ transform: "rotate(90deg)" }} />
             </button>
           )}
-          {idx < allImages.length - 1 && (
+          {idx < shots.length - 1 && (
             <button
               type="button"
               className="card-arrow card-arrow-right"
-              onClick={(e) => { e.preventDefault(); e.stopPropagation(); go(1); }}
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); goTo(idx + 1); }}
               aria-label="Next photo"
             >
               <ChevronDown className="w-4 h-4" style={{ transform: "rotate(-90deg)" }} />
             </button>
           )}
+          {shots.length <= 8 ? (
+            <div className="card-dots" aria-hidden="true">
+              {shots.map((_, i) => (
+                <span key={i} className={`card-dot${i === idx ? " is-active" : ""}`} />
+              ))}
+            </div>
+          ) : (
+            <div className="card-count font-num" aria-hidden="true">{idx + 1}/{shots.length}</div>
+          )}
         </>
-      )}
-      {canSwipe && (
-        <div className="card-dots" aria-hidden="true">
-          {allImages.slice(0, 6).map((_, i) => (
-            <span key={i} className={`card-dot${i === idx ? " is-active" : ""}`} />
-          ))}
-        </div>
       )}
       {(forceSoldOut || product.soldOut) && <SoldOutBadge />}
       {onToggleLike && (
@@ -1184,7 +1229,7 @@ function ProductGallery({ product, liked, onToggleLike, activeColor, onColor }) 
   useEffect(() => {
     if (!activeSrc || !sharp[activeSrc] || images.length < 2) return undefined;
     const t = setTimeout(() => {
-      for (const k of [idx + 1, idx - 1]) { const u = images[(k + images.length) % images.length]; if (u && !sharp[u]) { const im = new Image(); im.decoding = "async"; im.src = u; } }
+      for (const k of [idx + 1, idx - 1]) { const u = images[(k + images.length) % images.length]; if (u && !sharp[u]) { const im = new Image(); im.decoding = "async"; im.src = bigUrlFor(u); } }
     }, 250);
     return () => clearTimeout(t);
   }, [activeSrc, sharp[activeSrc]]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1203,6 +1248,7 @@ function ProductGallery({ product, liked, onToggleLike, activeColor, onColor }) 
     <div className="min-w-0 w-full">
       <div
         className="relative w-full flex items-center justify-center overflow-hidden"
+        data-gallery-photo=""
         onClick={() => { if (activeSrc) openViewer(idx); }}
         onTouchStart={(e) => { touchX.current = e.touches[0].clientX; }}
         onTouchEnd={(e) => {
@@ -1216,6 +1262,8 @@ function ProductGallery({ product, liked, onToggleLike, activeColor, onColor }) 
           borderRadius: "28px",
           background: `radial-gradient(120% 120% at 15% 15%, ${c1} 0%, transparent 55%), radial-gradient(120% 120% at 85% 85%, ${c2} 0%, transparent 55%), #1A1A1E`,
           cursor: activeSrc ? "zoom-in" : undefined,
+          // the card's photo grows into this one (morphOpen)
+          viewTransitionName: "kanaan-photo",
         }}
       >
         {activeSrc ? (
@@ -1235,14 +1283,14 @@ function ProductGallery({ product, liked, onToggleLike, activeColor, onColor }) 
             )}
             <img
               key={activeSrc}
-              src={activeSrc}
+              src={bigUrlFor(activeSrc)}
               alt={product.name}
               fetchPriority="high"
               decoding="async"
               className="absolute inset-0 w-full h-full kanaan-sharpen"
               style={{ objectFit: "cover", opacity: sharp[activeSrc] ? 1 : 0 }}
               onLoad={() => setSharp((m) => (m[activeSrc] ? m : { ...m, [activeSrc]: true }))}
-              onError={() => setBroken((b) => ({ ...b, [activeSrc]: true }))}
+              onError={(e) => { if (e.currentTarget.src !== new URL(activeSrc, location.href).href) e.currentTarget.src = activeSrc; else setBroken((b) => ({ ...b, [activeSrc]: true })); }}
             />
           </>
         ) : (
@@ -1352,14 +1400,20 @@ const ProductCard = memo(function ProductCard({ product, onOpen, liked, onToggle
   // Bound here, once per card, instead of a fresh arrow at every call site
   // on every parent render.
   const handleToggle = useCallback(() => onToggleLike(product.id), [onToggleLike, product.id]);
+  const quickAdd = useContext(QuickAddCtx);
+  // the colour of the photo showing on the card, and a dot tapped to show a colour's photo
+  const [shownColor, setShownColor] = useState(null);
+  const [jump, setJump] = useState(null);
+  const photoColors = useMemo(() => new Set(getImageList(product).map((x) => x.color).filter(Boolean)), [product]);
   return (
-    <button onClick={() => onOpen(product)} onPointerEnter={() => warmProduct(product)} onTouchStart={() => warmProduct(product)} onFocus={() => warmProduct(product)} className="text-left group focus:outline-none w-full">
+    <button onClick={(e) => onOpen(product, e.currentTarget.querySelector("[data-card-photo]"))} onPointerEnter={() => warmProduct(product)} onTouchStart={() => warmProduct(product)} onFocus={() => warmProduct(product)} className="text-left group focus:outline-none w-full" data-product-card={product.id}>
       <div
         ref={tiltRef}
-        className="card-tilt"
+        className="card-tilt relative"
         style={{ opacity: isOut ? 0.7 : 1 }}
       >
-        <SwatchPanel product={product} liked={liked} onToggleLike={handleToggle} forceSoldOut={isOut} swipeable />
+        <SwatchPanel product={product} liked={liked} onToggleLike={handleToggle} forceSoldOut={isOut} swipeable jump={jump} onShowColor={setShownColor} />
+        {quickAdd && !isOut && <QuickAddButton product={product} onOpen={quickAdd} />}
       </div>
       <div className="mt-3.5 space-y-1">
         <p className="font-body font-medium text-fg text-sm">{product.name}</p>
@@ -1378,7 +1432,21 @@ const ProductCard = memo(function ProductCard({ product, onOpen, liked, onToggle
         </div>
         <div className="flex items-center gap-1 pt-1">
           {product.colors.map((key) => (
-            <span key={key} className="w-3 h-3 rounded-full border" style={{ background: swatchBackground(key), borderColor: "var(--border)" }} />
+            photoColors.has(key) && photoColors.size > 1 ? (
+              // a colour with its own photos: tapping it shows that colour on the card (the ring = the colour showing)
+              <span
+                key={key}
+                role="button"
+                tabIndex={-1}
+                className={`card-swatch${shownColor === key ? " is-on" : ""}`}
+                aria-label={`Show ${COLORS[key]?.label || key}`}
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); setJump((j) => ({ key, n: (j ? j.n : 0) + 1 })); }}
+              >
+                <span className="w-3 h-3 rounded-full border block" style={{ background: swatchBackground(key), borderColor: "var(--border)" }} />
+              </span>
+            ) : (
+              <span key={key} className="w-3 h-3 rounded-full border" style={{ background: swatchBackground(key), borderColor: "var(--border)" }} />
+            )
           ))}
           <CardStars reviews={product.reviews} />
         </div>
@@ -1386,6 +1454,68 @@ const ProductCard = memo(function ProductCard({ product, onOpen, liked, onToggle
     </button>
   );
 });
+
+/* Quick add (since 9 Nov 2026, the owner's choice): the round + on a card's photo opens the size sheet right
+   there (SizeSheet, the same one the product page uses), and the piece goes in the bag without leaving the
+   grid — a small note says so, with a way to the bag. */
+const QuickAddCtx = createContext(null);
+function QuickAddButton({ product, onOpen }) {
+  return (
+    <button
+      type="button"
+      className="quick-add glass tap-scale"
+      aria-label={`Quick add ${product.name}`}
+      data-testid="quick-add"
+      onClick={(e) => { e.preventDefault(); e.stopPropagation(); hapticLight(); onOpen(product); }}
+      onTouchStart={(e) => e.stopPropagation()}
+    >
+      <Plus className="w-4 h-4" />
+    </button>
+  );
+}
+function QuickAddSheet({ product, onClose, addToCart }) {
+  const firstColor = product.colors.find((c) => colorHasStock(product, c)) || product.colors[0];
+  const [color, setColor] = useState(firstColor);
+  const [size, setSize] = useState(() => {
+    const left = product.sizes.filter((s) => stockFor(product, firstColor, s) > 0);
+    return product.sizes.length === 1 && left.length === 1 ? left[0] : null;
+  });
+  const [qty, setQty] = useState(1);
+  const [guide, setGuide] = useState(false);
+  const pickColor = (key) => { setColor(key); if (size && stockFor(product, key, size) <= 0) setSize(null); setQty(1); };
+  return (
+    <>
+      <SizeSheet
+        product={product}
+        color={color}
+        onColor={pickColor}
+        size={size}
+        onSize={setSize}
+        qty={qty}
+        setQty={setQty}
+        onAdd={() => { const s = size, c = color, q = qty; onClose(); setTimeout(() => addToCart(product, s, c, COLORS[c]?.label || c, q, { stay: true }), 170); }}
+        onClose={onClose}
+        onSizeGuide={() => setGuide(true)}
+      />
+      {guide && <SizeGuideModal category={product.category} onClose={() => setGuide(false)} />}
+    </>
+  );
+}
+/* "Added to your bag" — the note after a quick add: the piece, its size and colour, and "View bag". */
+function AddedNote({ item, onView, onDone }) {
+  useEffect(() => { const t = setTimeout(onDone, 3800); return () => clearTimeout(t); }, [item]); // eslint-disable-line react-hooks/exhaustive-deps
+  const img = getImagesForColor(item.product, item.colorKey)[0]?.url;
+  return (
+    <div className="added-note glass" role="status" data-testid="added-note" style={{ bottom: isNativeApp ? "calc(96px + env(safe-area-inset-bottom, 0px))" : "calc(18px + env(safe-area-inset-bottom, 0px))" }}>
+      {img ? <img src={thumbUrlFor(img) || img} alt="" className="added-note-img" onError={photoFallback(img)} /> : <span className="added-note-img" />}
+      <div className="min-w-0 flex-1">
+        <p className="font-body text-sm font-medium leading-tight flex items-center gap-1.5"><Check className="w-3.5 h-3.5" style={{ color: "var(--teal-text)" }} /> Added to your bag</p>
+        <p className="font-body text-xs text-muted truncate mt-0.5">{item.product.name} · {item.size}{item.colorLabel ? ` · ${item.colorLabel}` : ""}</p>
+      </div>
+      <button type="button" onClick={onView} className="added-note-btn tap-scale">View bag</button>
+    </div>
+  );
+}
 
 /* ============================================================
    SEARCH OVERLAY
@@ -2052,13 +2182,15 @@ const SaleProductCard = memo(function SaleProductCard({ product, onOpen, liked, 
   const isOut = product.soldOut || !productHasStock(product);
   const saving = product.price - effectivePrice(product);
   const handleToggle = useCallback(() => onToggleLike(product.id), [onToggleLike, product.id]);
+  const quickAdd = useContext(QuickAddCtx);
   return (
-    <button onClick={() => onOpen(product)} onPointerEnter={() => warmProduct(product)} onTouchStart={() => warmProduct(product)} onFocus={() => warmProduct(product)} className="text-left group focus:outline-none w-full">
+    <button onClick={(e) => onOpen(product, e.currentTarget.querySelector("[data-card-photo]"))} onPointerEnter={() => warmProduct(product)} onTouchStart={() => warmProduct(product)} onFocus={() => warmProduct(product)} className="text-left group focus:outline-none w-full" data-product-card={product.id}>
       <div
-        className="transition-transform duration-500 group-hover:-translate-y-2"
+        className="relative transition-transform duration-500 group-hover:-translate-y-2"
         style={{ transitionTimingFunction: "cubic-bezier(0.16,1,0.3,1)", opacity: isOut ? 0.7 : 1 }}
       >
         <SwatchPanel product={product} liked={liked} onToggleLike={handleToggle} forceSoldOut={isOut} swipeable />
+        {quickAdd && !isOut && <QuickAddButton product={product} onOpen={quickAdd} />}
       </div>
       <div className="mt-3.5 space-y-1">
         <p className="font-body font-medium text-fg text-sm truncate">{product.name}</p>
@@ -2068,7 +2200,7 @@ const SaleProductCard = memo(function SaleProductCard({ product, onOpen, liked, 
           <div className="flex items-baseline gap-2">
             <span className="font-num text-base text-coral">{money(effectivePrice(product))}</span>
             <span className="font-num text-xs text-muted line-through">{money(product.price)}</span>
-            <span className="font-body rounded-full ml-auto flex-shrink-0" style={{ fontSize: "0.62rem", padding: "2px 8px", background: "rgba(255,69,34,0.12)", border: "1px solid rgba(255,69,34,0.25)", color: "var(--coral)" }}>
+            <span className="font-body rounded-full ml-auto flex-shrink-0" style={{ fontSize: "0.62rem", padding: "2px 8px", background: "rgba(255,69,34,0.12)", border: "1px solid rgba(255,69,34,0.25)", color: "var(--coral-text)" }}>
               save {money(saving)}
             </span>
           </div>
@@ -2382,7 +2514,12 @@ function KanaanShop() {
      KanaanShop — which has nineteen pieces of state, so it renders often.
      A new function is a new prop, a new prop defeats memo, and every card
      re-renders because the cart drawer opened. */
-  const openProduct = useCallback((product) => navigate(`/product/${product.slug}`), [navigate]);
+  // from a card: its photo grows into the product page's photo (morphOpen); from anywhere else the page just opens
+  const openProduct = useCallback((product, fromEl) => morphOpen(fromEl, () => navigate(`/product/${product.slug}`)), [navigate]);
+  // quick add from a card: the size sheet over the grid, then a small "Added to your bag" note
+  const [quickPiece, setQuickPiece] = useState(null);
+  const [addedNote, setAddedNote] = useState(null);
+  const openQuickAdd = useCallback((product) => { insight("size_open", { id: product.id, x: "card" }); setQuickPiece(product); }, []);
   const goCheckout = () => { setCartOpen(false); setOrderPlaced(false); navigate("/checkout"); };
 
   const likesNow = useRef(likes); likesNow.current = likes;
@@ -2422,7 +2559,7 @@ function KanaanShop() {
 
   // colorKey = the palette key we track stock against ("black")
   // colorLabel = what the shopper reads ("Black")
-  const addToCart = (product, size, colorKey, colorLabel, qty) => {
+  const addToCart = (product, size, colorKey, colorLabel, qty, opts) => {
     insight("add", { id: product.id, c: colorKey, s: size, q: qty, v: effectivePrice(product) });
     rememberSize(product, size); // "you usually take L" next time
     setCart((prev) => {
@@ -2440,7 +2577,9 @@ function KanaanShop() {
     });
     hapticLight();
     playTapChime();
-    setCartOpen(true);
+    // a quick add from the grid stays on the grid (a note says it's in the bag); everywhere else the bag opens
+    if (opts && opts.stay) setAddedNote({ product, size, colorKey, colorLabel, at: Date.now() });
+    else setCartOpen(true);
   };
 
   const cartNow = useRef(cart); cartNow.current = cart;
@@ -2544,6 +2683,7 @@ function KanaanShop() {
 
   return (
     <ProductsContext.Provider value={products}>
+    <QuickAddCtx.Provider value={openQuickAdd}>
     <div
       data-theme={theme}
       className="min-h-screen bg-app text-fg font-body relative"
@@ -2682,6 +2822,10 @@ function KanaanShop() {
         goCatalog={goCatalog}
         goSale={goSale}
       />
+      {quickPiece && <QuickAddSheet product={quickPiece} onClose={() => setQuickPiece(null)} addToCart={addToCart} />}
+      {addedNote && !cartOpen && (
+        <AddedNote key={addedNote.at} item={addedNote} onView={() => { setAddedNote(null); setCartOpen(true); }} onDone={() => setAddedNote(null)} />
+      )}
       <CartDrawer
         open={cartOpen}
         onClose={() => setCartOpen(false)}
@@ -2721,6 +2865,7 @@ function KanaanShop() {
         }}
       />
     </div>
+    </QuickAddCtx.Provider>
     </ProductsContext.Provider>
   );
 }
@@ -2957,6 +3102,15 @@ function GlobalStyles() {
       .cat-sizes::-webkit-scrollbar { display: none; }
       .cat-size { position: relative; flex-shrink: 0; min-width: 44px; height: 38px; padding: 0 14px; border-radius: 999px; font-family: 'Space Grotesk', sans-serif; font-size: 14px; background: var(--glass-bg); border: 1px solid var(--glass-border); color: var(--fg); }
       .cat-size.is-on { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+      /* colour and price chips: a sideways row each, under the sizes; the number is how many pieces */
+      .cat-more { display: flex; flex-direction: column; gap: 10px; }
+      .cat-chip { position: relative; flex-shrink: 0; height: 38px; border-radius: 999px; background: var(--glass-bg); border: 1px solid var(--glass-border); color: var(--fg); }
+      .cat-chip.is-on { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+      .cat-color, .cat-price { display: inline-flex; align-items: center; gap: 7px; padding: 0 12px; font-family: 'Inter', sans-serif; font-size: 13px; }
+      .cat-swatch { width: 14px; height: 14px; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(127,127,127,0.35); flex-shrink: 0; }
+      .cat-n { font-family: 'Space Grotesk', sans-serif; font-size: 12px; color: var(--fg-muted); }
+      .cat-chip.is-on .cat-n { color: var(--bg); opacity: 0.75; }
+      .cat-clear { margin-left: 10px; font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 500; color: var(--coral-text); text-decoration: underline; text-underline-offset: 3px; }
       .cat-order { display: flex; flex-direction: column-reverse; gap: 10px; }
       @media (min-width: 640px) { .cat-order { flex-direction: row; align-items: center; justify-content: space-between; gap: 16px; } }
       .sort-toggle { position: relative; display: grid; grid-template-columns: repeat(var(--n), 1fr); align-items: center; height: 40px; padding: 4px; border-radius: 999px; }
@@ -3255,6 +3409,49 @@ function GlobalStyles() {
         .card-arrow:hover { transform: translateY(-50%) scale(1.08); }
       }
 
+      /* the next / previous piece of the category, by its name on the product page */
+      .piece-steps { display: flex; align-items: center; gap: 10px; }
+      .piece-step { width: 34px; height: 34px; border-radius: 999px; display: flex; align-items: center; justify-content: center; position: relative; color: var(--fg); }
+      .piece-step::before { content: ""; position: absolute; inset: -5px; }
+      /* quick add: the round + on a card's photo (bottom right; the hit area is 44 px) */
+      .quick-add {
+        position: absolute; right: 10px; bottom: 10px; z-index: 2;
+        width: 34px; height: 34px; border-radius: 999px;
+        display: flex; align-items: center; justify-content: center; color: var(--fg);
+      }
+      .quick-add::before { content: ""; position: absolute; inset: -5px; }
+      /* the colour dots under a card: a colour with photos can be tapped (24 px to tap, a ring on the colour showing) */
+      .card-swatch { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; margin: -4px -2px; border-radius: 999px; position: relative; cursor: pointer; }
+      .card-swatch::before { content: ""; position: absolute; inset: -2px; }
+      .card-swatch.is-on { box-shadow: 0 0 0 1.5px var(--fg); }
+      /* "Added to your bag" after a quick add — floating chrome, so glass */
+      .added-note {
+        position: fixed; left: 50%; transform: translateX(-50%); z-index: 80;
+        width: min(420px, calc(100vw - 24px)); display: flex; align-items: center; gap: 12px;
+        padding: 8px 8px 8px 8px; border-radius: 22px; animation: addedIn 0.32s cubic-bezier(0.16, 1, 0.3, 1) both;
+      }
+      @keyframes addedIn { from { opacity: 0; transform: translate(-50%, 14px); } to { opacity: 1; transform: translate(-50%, 0); } }
+      .added-note-img { width: 40px; height: 50px; border-radius: 12px; object-fit: cover; flex-shrink: 0; background: var(--field-bg); }
+      .added-note-btn { flex-shrink: 0; height: 38px; padding: 0 16px; border-radius: 999px; background: var(--fg); color: var(--bg); font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 600; }
+      @media (prefers-reduced-motion: reduce) { .added-note { animation: none; } }
+      /* the card's photo growing into the product page's (morphOpen): the page itself doesn't rise in meanwhile */
+      .vt-morph .page-in { animation: none !important; }
+      ::view-transition-group(kanaan-photo) { animation-duration: 0.42s; animation-timing-function: cubic-bezier(0.2, 0.9, 0.25, 1); }
+      ::view-transition-old(kanaan-photo), ::view-transition-new(kanaan-photo) { animation-duration: 0.42s; height: 100%; object-fit: cover; }
+      ::view-transition-old(root), ::view-transition-new(root) { animation-duration: 0.26s; }
+      /* a card's photos side by side, snapping one at a time under the finger (SwatchPanel) */
+      .card-strip {
+        position: absolute; inset: 0; display: flex;
+        overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory;
+        overscroll-behavior-x: contain; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+        touch-action: pan-x pan-y;
+      }
+      .card-strip::-webkit-scrollbar { display: none; }
+      .card-slide { position: relative; flex: 0 0 100%; height: 100%; scroll-snap-align: center; scroll-snap-stop: always; overflow: hidden; }
+      .card-count {
+        position: absolute; left: 10px; bottom: 10px; padding: 2px 8px; border-radius: 999px;
+        font-size: 11px; color: #fff; background: rgba(18,18,24,0.55); pointer-events: none;
+      }
       .card-dots {
         position: absolute; left: 0; right: 0; bottom: 8px;
         display: flex; justify-content: center; gap: 4px;
@@ -4037,7 +4234,7 @@ function SpotlightCard({ product, onOpen }) {
       style={{ aspectRatio: "16/11" }}
     >
       {img ? (
-        <img src={img} alt={product.name} className="absolute inset-0 w-full h-full object-cover" />
+        <img src={bigUrlFor(img)} alt={product.name} className="absolute inset-0 w-full h-full object-cover" onError={photoFallback(img)} />
       ) : (
         <div className="absolute inset-0" style={{ background: "linear-gradient(135deg, var(--coral), #ff7a52)" }} />
       )}
@@ -4207,7 +4404,7 @@ function NativeHomeView({ products, loading, error, onRetry, goCatalog, goSale, 
                 <button key={p.id} onClick={() => openProduct(p)} className="flex-shrink-0 text-left tap-scale" style={{ width: 118 }}>
                   <div className="relative rounded-xl overflow-hidden" style={{ aspectRatio: "4/5", background: "#232326" }}>
                     {getImages(p)[0] ? (
-                      <img src={getImages(p)[0]} alt={p.name} className="absolute inset-0 w-full h-full object-cover" />
+                      <img src={thumbUrlFor(getImages(p)[0]) || getImages(p)[0]} alt={p.name} loading="lazy" className="absolute inset-0 w-full h-full object-cover" onError={photoFallback(getImages(p)[0])} />
                     ) : (
                       <div className="absolute inset-0 flex items-center justify-center">
                         <IconFor type={p.icon} className="w-8 h-8" style={{ color: "rgba(255,255,255,0.3)" }} />
@@ -4487,8 +4684,39 @@ function readCatalogQuery() {
   try {
     const q = new URLSearchParams(window.location.search);
     const sort = q.get("sort") || "";
-    return { size: (q.get("size") || "").slice(0, 12), sort: SORTS.some((s) => s.id === sort) ? sort : "" };
-  } catch { return { size: "", sort: "" }; }
+    const color = q.get("color") || "";
+    const price = q.get("price") || "";
+    return {
+      size: (q.get("size") || "").slice(0, 12),
+      sort: SORTS.some((s) => s.id === sort) ? sort : "",
+      color: /^[a-z0-9-]{1,24}$/.test(color) ? color : "",
+      price: /^\d{1,5}-\d{0,5}$/.test(price) ? price : "",
+    };
+  } catch { return { size: "", sort: "", color: "", price: "" }; }
+}
+/* "25-40" → pieces from $25 up to $39; "40-" → $40 and up */
+function priceRange(v) {
+  const m = /^(\d+)-(\d*)$/.exec(v || "");
+  return m ? [Number(m[1]), m[2] ? Number(m[2]) : Infinity] : null;
+}
+/* The price chips of a listing: three bands cut where its own prices fall (a third of the pieces in each, at round
+   numbers), so "Under $30" means something in Jeans and something else in Shoes. Fewer than four different prices:
+   no price chips. */
+function priceBands(products) {
+  const prices = products.map((p) => effectivePrice(p)).filter((n) => n > 0).sort((a, b) => a - b);
+  if (new Set(prices).size < 4) return [];
+  const r5 = (n) => Math.max(5, Math.round(n / 5) * 5);
+  let a = r5(prices[Math.floor(prices.length / 3)]);
+  let b = r5(prices[Math.floor((prices.length * 2) / 3)]);
+  const lo = prices[0];
+  if (a <= lo) a = r5(lo + 5);
+  if (b <= a) b = a + 5;
+  const bands = [
+    { id: `0-${a}`, label: `Under $${a}` },
+    { id: `${a}-${b}`, label: `$${a}–${b - 1}` },
+    { id: `${b}-`, label: `$${b} and up` },
+  ];
+  return bands.filter((x) => { const [f, t] = priceRange(x.id); return prices.some((n) => n >= f && n < t); });
 }
 function writeCatalogQuery(patch) {
   try {
@@ -4508,7 +4736,7 @@ function CatalogView({ activeCategory, activeSub, loading, error, onRetry, goCat
     const n = Number(window.history.state && window.history.state.shown);
     return n > PAGE_SIZE && n < 500 ? n : PAGE_SIZE;
   });
-  const [{ size: sizeF, sort }, setQuery] = useState(readCatalogQuery);
+  const [{ size: sizeF, sort, color: colorF, price: priceF }, setQuery] = useState(readCatalogQuery);
   const sizesMine = useMySizes();
   const subs = subsFor(activeCategory);
 
@@ -4553,16 +4781,36 @@ function CatalogView({ activeCategory, activeSub, loading, error, onRetry, goCat
   // a size chip is "yours" when it's the size you bought before, in the same way of sizing (L for tops, 32 for waists)
   const isMineChip = (s) => { const k = sizeKind({ category: activeCategory }, s); return !!(k && sizesMine[k] && sizeNorm(sizesMine[k]) === sizeNorm(s)); };
 
+  // colour and price (the owner's choice, 9 Nov 2026): each chip says how many pieces it would show, given the
+  // other filters already on
+  const inSize = (p) => !sizeF || (p.sizes || []).some((s) => sizeNorm(s) === sizeNorm(sizeF) && leftInSize(p, s));
+  const inColor = (p) => !colorF || (!p.soldOut && p.colors.includes(colorF) && colorHasStock(p, colorF));
+  const band = priceRange(priceF);
+  const inPrice = (p) => !band || (effectivePrice(p) >= band[0] && effectivePrice(p) < band[1]);
+  const bands = useMemo(() => priceBands(products), [products]);
+  const colorOptions = useMemo(() => {
+    const n = new Map();
+    for (const p of products) {
+      if (p.soldOut || !inSize(p) || !inPrice(p)) continue;
+      for (const c of p.colors) if (COLORS[c] && colorHasStock(p, c)) n.set(c, (n.get(c) || 0) + 1);
+    }
+    return [...n.entries()].sort((a, b) => b[1] - a[1]).map(([key, count]) => ({ key, count }));
+  }, [products, sizeF, priceF]); // eslint-disable-line react-hooks/exhaustive-deps
+  const bandCount = (id) => { const r = priceRange(id); return products.filter((p) => inSize(p) && inColor(p) && effectivePrice(p) >= r[0] && effectivePrice(p) < r[1]).length; };
+  const filtered = !!(sizeF || colorF || priceF);
+
   const list = useMemo(() => {
     let l = products;
     if (sizeF) l = l.filter((p) => (p.sizes || []).some((s) => sizeNorm(s) === sizeNorm(sizeF) && leftInSize(p, s)));
+    if (colorF) l = l.filter(inColor);
+    if (band) l = l.filter(inPrice);
     if (sort) {
       const out = (p) => (p.soldOut || !productHasStock(p) ? 1 : 0);
       const key = sort === "new" ? (p) => -(p.createdAt || 0) : sort === "low" ? (p) => effectivePrice(p) : (p) => -effectivePrice(p);
       l = [...l].sort((a, b) => out(a) - out(b) || key(a) - key(b));
     }
     return l;
-  }, [products, sizeF, sort]);
+  }, [products, sizeF, sort, colorF, priceF]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const visible = list.slice(0, shown);
   const remaining = list.length - visible.length;
@@ -4652,9 +4900,65 @@ function CatalogView({ activeCategory, activeSub, loading, error, onRetry, goCat
               })}
             </div>
           )}
+          {(colorOptions.length > 1 || bands.length > 1 || colorF || priceF) && (
+            <div className="cat-more mb-3" data-testid="catalog-more-filters">
+              {(colorOptions.length > 1 || colorF) && (
+                <div className="cat-sizes cat-group" role="group" aria-label="Show pieces in a colour">
+                  <span className="font-body text-xs text-muted mr-1 flex-shrink-0">Colour</span>
+                  {(colorF && !colorOptions.some((o) => o.key === colorF) ? [{ key: colorF, count: 0 }, ...colorOptions] : colorOptions).map(({ key, count }) => {
+                    const on = key === colorF;
+                    const name = COLORS[key]?.label || key;
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        className={`cat-chip cat-color tap-scale ${on ? "is-on" : ""}`}
+                        aria-pressed={on}
+                        aria-label={`${name}, ${count} ${count === 1 ? "piece" : "pieces"}`}
+                        onClick={() => { setFilter({ color: on ? "" : key }); hapticLight(); }}
+                        data-color={key}
+                      >
+                        <span className="cat-swatch" style={{ background: swatchBackground(key) }} aria-hidden="true" />
+                        <span className="font-body">{name}</span>
+                        <span className="cat-n">{count}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              {(bands.length > 1 || priceF) && (
+                <div className="cat-sizes cat-group" role="group" aria-label="Show pieces in a price range">
+                  <span className="font-body text-xs text-muted mr-1 flex-shrink-0">Price</span>
+                  {bands.map((b) => {
+                    const on = b.id === priceF;
+                    const count = bandCount(b.id);
+                    return (
+                      <button
+                        key={b.id}
+                        type="button"
+                        className={`cat-chip cat-price tap-scale ${on ? "is-on" : ""}`}
+                        aria-pressed={on}
+                        aria-label={`${b.label}, ${count} ${count === 1 ? "piece" : "pieces"}`}
+                        onClick={() => { setFilter({ price: on ? "" : b.id }); hapticLight(); }}
+                        data-price={b.id}
+                      >
+                        <span>{b.label}</span>
+                        <span className="cat-n">{count}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
           <div className="cat-order">
             <p className="font-body text-sm text-muted" aria-live="polite" data-testid="catalog-count">
               {list.length} {list.length === 1 ? "piece" : "pieces"}{sizeF ? <> in <span className="font-num text-fg">{sizeF}</span></> : null}
+              {colorF ? <> · <span className="text-fg">{COLORS[colorF]?.label || colorF}</span></> : null}
+              {band ? <> · <span className="text-fg">{(bands.find((b) => b.id === priceF) || {}).label || "price"}</span></> : null}
+              {filtered && (
+                <button type="button" className="cat-clear tap-scale" onClick={() => { setFilter({ size: "", color: "", price: "" }); hapticLight(); }} data-testid="catalog-clear">Clear</button>
+              )}
             </p>
             <SortToggle value={sort} onChange={(v) => setFilter({ sort: v })} />
           </div>
@@ -4678,8 +4982,17 @@ function CatalogView({ activeCategory, activeSub, loading, error, onRetry, goCat
         </p>
       ) : list.length === 0 ? (
         <div className="py-16 text-center">
-          <p className="font-body text-muted text-sm mb-3">Nothing left in {sizeF} here right now.</p>
-          <button onClick={() => setFilter({ size: "" })} className="glass rounded-full font-body text-sm px-5 py-2 tap-scale">Show every size</button>
+          {sizeF && !colorF && !priceF ? (
+            <>
+              <p className="font-body text-muted text-sm mb-3">Nothing left in {sizeF} here right now.</p>
+              <button onClick={() => setFilter({ size: "" })} className="glass rounded-full font-body text-sm px-5 py-2 tap-scale">Show every size</button>
+            </>
+          ) : (
+            <>
+              <p className="font-body text-muted text-sm mb-3">Nothing here with these filters right now.</p>
+              <button onClick={() => setFilter({ size: "", color: "", price: "" })} className="glass rounded-full font-body text-sm px-5 py-2 tap-scale">Clear filters</button>
+            </>
+          )}
         </div>
       ) : (
         <>
@@ -4900,7 +5213,7 @@ function SizeSheet({ product, color, onColor, size, onSize, qty, setQty, onAdd, 
 
         <div className="flex items-center gap-3 mb-5">
           {photo ? (
-            <img src={photo} alt="" className="rounded-2xl flex-shrink-0" style={{ width: 64, height: 80, objectFit: "cover", background: "var(--field-bg)" }} />
+            <img src={thumbUrlFor(photo) || photo} alt="" className="rounded-2xl flex-shrink-0" style={{ width: 64, height: 80, objectFit: "cover", background: "var(--field-bg)" }} onError={photoFallback(photo)} />
           ) : (
             <div className="rounded-2xl flex-shrink-0 flex items-center justify-center" style={{ width: 64, height: 80, background: "var(--field-bg)" }}><Shirt className="w-5 h-5 text-muted" /></div>
           )}
@@ -4942,7 +5255,7 @@ function SizeSheet({ product, color, onColor, size, onSize, qty, setQty, onAdd, 
 
         <div className="flex items-baseline justify-between mb-2.5">
           <p className="font-display font-bold text-xl">{size ? <>Size <span className="text-coral">{size}</span></> : "Pick your size"}</p>
-          <button onClick={onSizeGuide} className="font-body text-sm text-coral tap-scale">Size guide</button>
+          <button onClick={onSizeGuide} className="font-body text-sm tap-scale" style={{ color: "var(--coral-text)" }}>Size guide</button>
         </div>
         <MySizeHint product={product} color={color} size={size} mine={mine} onSize={(s) => { onSize(s); setQty(1); }} onColor={onColor} className="mb-3" />
         <div key={nudge} className={`grid grid-cols-4 gap-2 p-0.5 ${nudge ? "size-nudge" : ""}`} role="radiogroup" aria-label="Size">
@@ -5058,6 +5371,41 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
   const related = products.filter((p) => p.category === product.category && p.id !== product.id && !look.includes(p)).slice(0, 3);
   const productUrl = `${SITE_URL}/product/${product.slug}`;
 
+  /* The next and previous piece of the same category, in the shop's order (since 9 Nov 2026, the owner's choice):
+     a swipe sideways on the page, or the arrows by the category's name. Not from the photos (they swipe their own
+     photos), anything that scrolls sideways, or the screen's edges (the phone's own "back" gesture). */
+  const siblings = useMemo(() => products.filter((p) => p.category === product.category), [products, product.category]);
+  const at = siblings.findIndex((p) => p.id === product.id);
+  const prevPiece = siblings.length > 1 && at >= 0 ? siblings[(at - 1 + siblings.length) % siblings.length] : null;
+  const nextPiece = siblings.length > 1 && at >= 0 ? siblings[(at + 1) % siblings.length] : null;
+  const swipe = useRef(null);
+  const onSwipeStart = (e) => {
+    swipe.current = null;
+    if (!nextPiece || e.touches.length !== 1) return;
+    const t = e.touches[0];
+    if (t.clientX < 24 || t.clientX > window.innerWidth - 24) return;
+    const target = e.target;
+    if (target && target.closest && target.closest("[data-gallery-photo],[data-card-photo],[data-no-swipe],input,textarea,select,[role='dialog']")) return;
+    for (let el = target; el && el !== e.currentTarget; el = el.parentElement) {
+      if (el.scrollWidth > el.clientWidth + 2) {
+        const ox = window.getComputedStyle(el).overflowX;
+        if (ox === "auto" || ox === "scroll") return;
+      }
+    }
+    swipe.current = { x: t.clientX, y: t.clientY, at: Date.now() };
+  };
+  const onSwipeEnd = (e) => {
+    const s0 = swipe.current;
+    swipe.current = null;
+    if (!s0) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - s0.x, dy = t.clientY - s0.y;
+    if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.8 && Date.now() - s0.at < 800) {
+      hapticLight();
+      openProduct(dx < 0 ? nextPiece : prevPiece);
+    }
+  };
+
   const available = size ? stockFor(product, color, size) : 0;
   const outOfStock = product.soldOut || !productHasStock(product);
   const canAdd = !outOfStock && !!size && available > 0;
@@ -5145,7 +5493,7 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
   };
 
   return (
-    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 pb-32">
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 pb-32" onTouchStart={onSwipeStart} onTouchEnd={onSwipeEnd} onTouchCancel={() => { swipe.current = null; }}>
       <div className="grid md:grid-cols-2 gap-10">
         <div className="md:sticky md:top-24 self-start min-w-0">
           <ProductGallery product={product} liked={liked} onToggleLike={toggleLike} activeColor={color} onColor={pickColor} />
@@ -5157,7 +5505,23 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
         </div>
 
         <div>
-          <p className="font-body text-xs text-muted mb-2">{CATEGORIES.find((c) => c.id === product.category)?.label}</p>
+          {/* the category, and on its left and right the previous and next piece of it (left-aligned: the round
+              WhatsApp button floats on the right) */}
+          {prevPiece && nextPiece ? (
+            <div className="piece-steps mb-2" data-testid="piece-steps">
+              <button type="button" className="piece-step glass tap-scale" onClick={() => openProduct(prevPiece)} aria-label={`Previous piece: ${prevPiece.name}`} data-testid="piece-prev">
+                <ChevronDown className="w-4 h-4" style={{ transform: "rotate(90deg)" }} />
+              </button>
+              <p className="font-body text-xs text-muted">
+                {CATEGORIES.find((c) => c.id === product.category)?.label} <span className="font-num" aria-hidden="true">· {at + 1} / {siblings.length}</span>
+              </p>
+              <button type="button" className="piece-step glass tap-scale" onClick={() => openProduct(nextPiece)} aria-label={`Next piece: ${nextPiece.name}`} data-testid="piece-next">
+                <ChevronDown className="w-4 h-4" style={{ transform: "rotate(-90deg)" }} />
+              </button>
+            </div>
+          ) : (
+            <p className="font-body text-xs text-muted mb-2">{CATEGORIES.find((c) => c.id === product.category)?.label}</p>
+          )}
           <div className="flex items-start justify-between gap-3">
             <h1 className="font-display font-bold text-3xl mb-3">{product.name}</h1>
           </div>
@@ -5406,7 +5770,7 @@ function CartItemThumb({ item }) {
   if (src && ok) {
     return (
       <div className="w-16 h-16 rounded-xl flex-shrink-0 overflow-hidden" style={{ border: "1px solid var(--glass-border)" }}>
-        <img src={src} alt={item.name} className="w-full h-full" style={{ objectFit: "cover" }} onError={() => setOk(false)} />
+        <img src={thumbUrlFor(src) || src} alt={item.name} className="w-full h-full" style={{ objectFit: "cover" }} onError={(e) => { if (e.currentTarget.src !== new URL(src, location.href).href) e.currentTarget.src = src; else setOk(false); }} />
       </div>
     );
   }
@@ -6112,7 +6476,7 @@ function PageTransition({ path, direction, children }) {
 
      Two: it was gated to the app only. The website navigated with a hard
      cut — the old page gone, the new one abruptly there. */
-  useEffect(() => { setAnimating(true); }, [path]);
+  useEffect(() => { setAnimating(!morphNav); morphNav = false; }, [path]);
 
   if (reducedMotion) return <>{children}</>;
 

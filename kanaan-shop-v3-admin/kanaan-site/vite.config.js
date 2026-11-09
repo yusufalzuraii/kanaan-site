@@ -17,7 +17,20 @@ const notFoundPage = () => ({
   },
 })
 
+/* The engine that draws the shop (since 9 Nov 2026, the owner's choice): Preact, which reads the same React code
+   through preact/compat — the same site, about 50 KB less for every phone to download and start (166 → 115 KB).
+   Back to React = 'react' here (nothing else changes). The dev server keeps React (its instant reload needs it). */
+const ENGINE = 'preact'
+const preact = [
+  { find: /^react-dom\/client$/, replacement: 'preact/compat/client' },
+  { find: /^react-dom$/, replacement: 'preact/compat' },
+  { find: /^react\/jsx-runtime$/, replacement: 'preact/jsx-runtime' },
+  { find: /^react\/jsx-dev-runtime$/, replacement: 'preact/jsx-dev-runtime' },
+  { find: /^react$/, replacement: 'preact/compat' },
+]
+
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   plugins: [react(), notFoundPage()],
-})
+  resolve: { alias: command === 'build' && ENGINE === 'preact' ? preact : [] },
+}))

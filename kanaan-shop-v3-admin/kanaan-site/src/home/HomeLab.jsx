@@ -886,7 +886,12 @@ function LabSwitcher({ variant, setVariant, canDo3D }) {
       {opts.map(([id, label]) => (
         <button
           key={id}
-          onClick={() => { setVariant(id); window.scrollTo(0, 0); }}
+          onClick={() => {
+            setVariant(id);
+            // in the address at once (the effect that also does it runs after the next frame, which a busy 3D page delays)
+            try { const u = new URL(window.location.href); u.searchParams.set("v", id); window.history.replaceState(window.history.state, "", u.pathname + u.search); } catch { /* fine */ }
+            window.scrollTo(0, 0);
+          }}
           aria-pressed={variant === id}
           disabled={!canDo3D && id !== "lite"}
           className={variant === id ? "is-on" : ""}

@@ -72,8 +72,17 @@ export function smallPhoto(url) {
   if (!m || /-thumb$/i.test(m[1])) return "";
   return `${m[1]}-thumb${m[2]}`;
 }
+/* On the live shop the photos go through Cloudflare's resizing (switched on 9 Nov 2026): 480 px for cards and
+   1000 px for the product page's big photo, as AVIF/WebP — the same addresses the app asks for (thumbUrlFor /
+   bigUrlFor in src/App.jsx), so each is fetched once. Past the free monthly allowance or on any error Cloudflare
+   sends the original. Elsewhere (a local preview) there's no resizing: the small copy, else the original. */
+export function resizedPhoto(url, width, quality) {
+  const m = String(url || "").match(/^(https:\/\/(?:www\.)?kanaanshop\.com)(\/img\/[^?#]+)$/);
+  if (!m || /-thumb\.[a-z0-9]+$/i.test(m[2])) return "";
+  return `${m[1]}/cdn-cgi/image/width=${width},quality=${quality},format=auto,fit=scale-down,onerror=redirect${m[2]}`;
+}
 function cardImg(url, alt, style, eager) {
-  const small = smallPhoto(url);
+  const small = resizedPhoto(url, 480, 75) || smallPhoto(url);
   const src = small || url;
   const back = small ? ` data-full="${esc(url)}" onerror="this.onerror=null;this.src=this.dataset.full"` : "";
   return `<img src="${esc(src)}" alt="${esc(alt)}" style="${style}" width="480" height="600"${eager ? "" : ' loading="lazy"'} decoding="async"${back} />`;
@@ -88,7 +97,11 @@ export function renderProductContent({ product, origin, categoryLabel, images, i
   // the first photo is fetched at once (it's the one the page opens on); the others only if someone scrolls to
   // them before the app takes over — search engines read them all the same
   const gallery = images.slice(0, 4)
-    .map((url, i) => (i === 0 ? `<img src="${esc(url)}" alt="${esc(product.name)}" style="${S.img}" fetchpriority="high" />` : cardImg(url, product.name, S.img, false)))
+    .map((url, i) => {
+      if (i > 0) return cardImg(url, product.name, S.img, false);
+      const big = resizedPhoto(url, 1000, 80);
+      return `<img src="${esc(big || url)}" alt="${esc(product.name)}" style="${S.img}" fetchpriority="high"${big ? ` data-full="${esc(url)}" onerror="this.onerror=null;this.src=this.dataset.full"` : ""} />`;
+    })
     .join("\n      ");
 
   return `<div style="${S.page}"><div style="${S.wrap}">

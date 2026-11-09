@@ -61,6 +61,24 @@ const S = {
 
 const money = (n) => `$${Math.round(Number(n) || 0)}`;
 
+/* The small copy of an uploaded photo ("-thumb" before the extension, made when it was uploaded): what a card
+   or a thumbnail shows. These pages are on screen only until the app takes over, and the app's cards show the
+   very same small copies — so they're fetched once, and a category page no longer pulls every piece's full
+   photo (a third of a megabyte each: 33 of them, 11 MB, on Jeans). The full photos stay in the page's
+   structured data for search engines. A photo without a small copy falls back to the full one. */
+export function smallPhoto(url) {
+  const u = String(url || "");
+  const m = u.match(/^((?:https?:\/\/[^/]+)?\/img\/[^?#]*)(\.[a-z0-9]+)$/i);
+  if (!m || /-thumb$/i.test(m[1])) return "";
+  return `${m[1]}-thumb${m[2]}`;
+}
+function cardImg(url, alt, style, eager) {
+  const small = smallPhoto(url);
+  const src = small || url;
+  const back = small ? ` data-full="${esc(url)}" onerror="this.onerror=null;this.src=this.dataset.full"` : "";
+  return `<img src="${esc(src)}" alt="${esc(alt)}" style="${style}" width="480" height="600"${eager ? "" : ' loading="lazy"'} decoding="async"${back} />`;
+}
+
 /** Full product page content. */
 export function renderProductContent({ product, origin, categoryLabel, images, inStock, description, related = [] }) {
   const finalPrice = product.discount > 0
@@ -70,7 +88,7 @@ export function renderProductContent({ product, origin, categoryLabel, images, i
   // the first photo is fetched at once (it's the one the page opens on); the others only if someone scrolls to
   // them before the app takes over — search engines read them all the same
   const gallery = images.slice(0, 4)
-    .map((url, i) => `<img src="${esc(url)}" alt="${esc(product.name)}" style="${S.img}" ${i === 0 ? 'fetchpriority="high"' : 'loading="lazy" decoding="async"'} />`)
+    .map((url, i) => (i === 0 ? `<img src="${esc(url)}" alt="${esc(product.name)}" style="${S.img}" fetchpriority="high" />` : cardImg(url, product.name, S.img, false)))
     .join("\n      ");
 
   return `<div style="${S.page}"><div style="${S.wrap}">
@@ -91,7 +109,7 @@ export function renderProductContent({ product, origin, categoryLabel, images, i
       ${related.length ? `<h2 style="${S.h2}">More ${esc(categoryLabel)}</h2>
       <div style="${S.grid}">
         ${related.map((p) => `<a href="${origin}/product/${esc(p.id)}" style="${S.card}">
-          ${p.image ? `<img src="${esc(p.image)}" alt="${esc(p.name)}" style="${S.cardImg}" loading="lazy" />` : ""}
+          ${p.image ? cardImg(p.image, p.name, S.cardImg, false) : ""}
           <p style="${S.cardName}">${esc(p.name)}</p>
           <p style="${S.cardPrice}">${money(p.price)}</p>
         </a>`).join("\n        ")}
@@ -106,9 +124,10 @@ export function renderListingContent({ title, intro, products, origin, nav = [],
   const links = nav.length
     ? `<nav aria-label="${esc(navTitle)}" style="${S.navWrap}"><h2 style="${S.h2}">${esc(navTitle)}</h2>${nav.map((n) => `<a href="${esc(n.href)}" style="${S.chip}">${esc(n.label)}${n.count ? ` (${n.count})` : ""}</a>`).join(" ")}</nav>`
     : "";
-  const cards = products.slice(0, limit).map((p) => {
+  const cards = products.slice(0, limit).map((p, i) => {
     const finalPrice = p.discount > 0 ? Math.round(p.price * (1 - p.discount / 100)) : p.price;
-    const img = p.image ? `<img src="${esc(p.image)}" alt="${esc(p.name)}" style="${S.cardImg}" />` : "";
+    // the first row straight away (the app's first cards are the same small copies), the rest as they're reached
+    const img = p.image ? cardImg(p.image, p.name, S.cardImg, i < 4) : "";
     return `<a href="${origin}/product/${esc(p.id)}" style="${S.card}">
           ${img}
           <p style="${S.cardName}">${esc(p.name)}</p>

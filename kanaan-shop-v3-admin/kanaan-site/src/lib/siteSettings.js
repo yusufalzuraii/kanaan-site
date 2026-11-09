@@ -32,6 +32,12 @@ export function applySettings(s) {
 
 export const getSettings = () => current;
 
+/* When the settings last came from the server (the catalogue written into the page, or /api/products): the
+   shutter's first check is skipped when they're seconds old — they already said whether the shop is shut. */
+let freshAt = 0;
+export const markSettingsFresh = () => { freshAt = Date.now(); };
+export const settingsFreshFor = (ms) => Date.now() - freshAt < ms;
+
 export function useSiteSettings() {
   const [s, set] = useState(current);
   useEffect(() => {

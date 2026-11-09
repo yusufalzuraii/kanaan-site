@@ -58,11 +58,15 @@ const Admin = React.lazy(() => import("./Admin.jsx"));
    because it IS the front door; the 3D engine inside it is still its own
    chunk, fetched only when a device can show it. */
 import HomeLab from "./home/HomeLab.jsx";
+// the logo, as small files with their version in their names (cached for good): the PNGs were 114 KB and 163 KB,
+// and the header logo was the last thing a phone drew on most pages
+import LOGO_COMPACT from "./assets/logo-compact.webp";
+import LOGO_FULL from "./assets/logo-full.webp";
 /* false brings back the previous homepage (HomeView) in one line */
 const HOME_3D = true;
 import { COLORS as PALETTE, swatchBackground } from "./palette.js";
 /* Set from Kanaan POS (Website → Site): the bar at the top, delivery, exchanges, opening hours */
-import { applySettings, useSiteSettings, deliveryFor, welcomeNow, welcomeFits, welcomeOn, markOrdered } from "./lib/siteSettings.js";
+import { applySettings, markSettingsFresh, useSiteSettings, deliveryFor, welcomeNow, welcomeFits, welcomeOn, markOrdered } from "./lib/siteSettings.js";
 import { parsePhone } from "./lib/phone.js";
 import { AnnounceBar, FreeDeliveryMeter, WelcomeNote, PieceWords, SITE_BITS_CSS } from "./components/SiteBits.jsx";
 import { ReviewPage, ProductReviews, RatingLine, CardStars, REVIEWS_CSS } from "./components/Reviews.jsx";
@@ -195,6 +199,38 @@ function applyCategories(list, remember = true) {
   return true;
 }
 try { const saved = JSON.parse(localStorage.getItem("kanaan-cats") || "null"); if (saved) applyCategories(saved, false); } catch { /* first visit */ }
+
+/* The catalogue the shop starts with, before anything is asked for:
+   - the one the server wrote into this page (functions/_shared/catalog.js) — current to the second, so the
+     pieces show the moment the script runs (no request first, no blank page, nothing jumping when they arrive);
+   - else the last one this device saw (kept below; the app, a page from an old cache): shown at once while a
+     fresh one is asked for. */
+const CATALOG_KEY = isNativeApp ? "kanaan-catalog-app" : "kanaan-catalog";
+const BOOT = (() => {
+  if (typeof document === "undefined") return null;
+  try {
+    const el = document.getElementById("kanaan-catalog");
+    if (el) {
+      const d = JSON.parse(el.textContent);
+      el.remove();
+      if (d && Array.isArray(d.products)) return { ...d, fresh: true };
+    }
+  } catch { /* a page without it */ }
+  try {
+    const c = JSON.parse(localStorage.getItem(CATALOG_KEY) || "null");
+    // a week old at most (the pieces, prices and stock are refreshed the moment the page is up anyway)
+    if (c && Array.isArray(c.products) && c.products.length && Date.now() - (Number(c.at) || 0) < 7 * 86400000) return { ...c, fresh: false };
+  } catch { /* nothing kept */ }
+  return null;
+})();
+if (BOOT) {
+  if (Array.isArray(BOOT.categories)) applyCategories(BOOT.categories, BOOT.fresh);
+  if (BOOT.settings) { applySettings(BOOT.settings); if (BOOT.fresh) markSettingsFresh(); }
+}
+function keepCatalog(data) {
+  try { localStorage.setItem(CATALOG_KEY, JSON.stringify({ products: data.products, categories: data.categories, settings: data.settings, appExclusiveCount: data.appExclusiveCount, at: Date.now() })); } catch { /* full or private: next visit asks again */ }
+}
+if (BOOT && BOOT.fresh) keepCatalog(BOOT);
 
 /* What a visit does (pages, time, pieces, sizes, likes, the bag, the order) goes to the shop's program —
    Kanaan POS → Website → Visitors. Anonymous, batched, never slows a page: see lib/insight.js. */
@@ -734,7 +770,7 @@ function AnimatedSplash({ onDone }) {
       <div className="splash-glow" />
       <div className="splash-ring" />
       <div className="splash-logo-wrap">
-        <img src="/logo-compact.png" alt="" className="splash-logo" />
+        <img src={LOGO_COMPACT} alt="" className="splash-logo" />
         <span className="splash-sheen" />
       </div>
       <div className="splash-tagline">MEN'S FASHION WEAR</div>
@@ -744,7 +780,7 @@ function AnimatedSplash({ onDone }) {
 
 function LogoMark({ variant = "compact", className = "" }) {
   const [ok, setOk] = useState(true);
-  const src = variant === "full" ? "/logo-full.png" : "/logo-compact.png";
+  const src = variant === "full" ? LOGO_FULL : LOGO_COMPACT;
 
   if (!ok) {
     return (
@@ -758,6 +794,10 @@ function LogoMark({ variant = "compact", className = "" }) {
     <img
       src={src}
       alt={STORE_NAME}
+      // its shape, so the space is kept before it's drawn (nothing moves when it arrives)
+      width={variant === "full" ? 760 : 640}
+      height={variant === "full" ? 202 : 100}
+      decoding="async"
       className={className}
       style={{ objectFit: "contain", filter: "var(--logo-filter)" }}
       onError={() => setOk(false)}
@@ -837,6 +877,17 @@ function galleryImages(product) {
   for (const c of order) for (const x of all) if (x.color === c) out.push(x);
   for (const x of all) if (!tagged(x)) out.push(x);
   return out;
+}
+
+/* A piece about to be opened (the mouse on its card, a finger touching it): its first photo, full size, starts
+   coming now — by the time the page opens, it's usually here. Once per piece, never more than that: a phone's
+   data isn't spent on pieces nobody reached for. */
+const warmed = new Set();
+function warmProduct(product) {
+  if (!product || warmed.has(product.id)) return;
+  warmed.add(product.id);
+  const first = galleryImages(product)[0];
+  if (first && first.url) { const im = new Image(); im.decoding = "async"; im.src = first.url; }
 }
 
 /* Uploaded photos are stored twice — the full image and a smaller copy
@@ -1092,20 +1143,11 @@ function ProductGallery({ product, liked, onToggleLike, activeColor, onColor }) 
   // and the chosen colour always agree.
   const shots = useMemo(() => galleryImages(product), [product]);
   const images = useMemo(() => shots.map((x) => x.url), [shots]);
-  const allUrls = images;
   const many = new Set(shots.map((x) => x.color).filter(Boolean)).size > 1;
-
-  // Warm the browser cache with every photo of this product as soon as the
-  // page opens, so tapping a colour swaps instantly instead of waiting on
-  // a fresh download.
-  useEffect(() => {
-    const imgs = allUrls.map((url) => {
-      const im = new Image();
-      im.src = url;
-      return im;
-    });
-    return () => imgs.forEach((im) => { im.src = ""; });
-  }, [allUrls]);
+  // the big photo, sharp: once it's in, the full size of the photos either side is fetched quietly (a swipe or a
+  // colour tapped then shows its photo at once) — not every photo of the piece up front: a piece in six colours
+  // was two megabytes before anything was tapped, on a phone's data
+  const [sharp, setSharp] = useState({});
 
   const c1 = COLORS[activeColor]?.hex || COLORS[product.colors[0]]?.hex || "#141414";
   const c2 = COLORS[product.colors[1]]?.hex || c1;
@@ -1139,6 +1181,13 @@ function ProductGallery({ product, liked, onToggleLike, activeColor, onColor }) 
   const idx = Math.min(active, Math.max(0, images.length - 1));
   const activeSrc = images[idx] && !broken[images[idx]] ? images[idx] : null;
   const photoColor = shots[idx] ? shots[idx].color : null;
+  useEffect(() => {
+    if (!activeSrc || !sharp[activeSrc] || images.length < 2) return undefined;
+    const t = setTimeout(() => {
+      for (const k of [idx + 1, idx - 1]) { const u = images[(k + images.length) % images.length]; if (u && !sharp[u]) { const im = new Image(); im.decoding = "async"; im.src = u; } }
+    }, 250);
+    return () => clearTimeout(t);
+  }, [activeSrc, sharp[activeSrc]]); // eslint-disable-line react-hooks/exhaustive-deps
   // a photo of another colour reached by swiping or a thumbnail: that colour is the one chosen now
   const show = (i) => {
     setActive(i);
@@ -1170,14 +1219,32 @@ function ProductGallery({ product, liked, onToggleLike, activeColor, onColor }) 
         }}
       >
         {activeSrc ? (
-          <img
-            key={activeSrc}
-            src={activeSrc}
-            alt={product.name}
-            className="absolute inset-0 w-full h-full"
-            style={{ objectFit: "cover" }}
-            onError={() => setBroken((b) => ({ ...b, [activeSrc]: true }))}
-          />
+          <>
+            {/* the small copy first — usually already here from the grid, so the photo is up the moment the page
+                opens — and the full size fades in over it as it arrives */}
+            {!sharp[activeSrc] && thumbUrlFor(activeSrc) && (
+              <img
+                key={`s-${activeSrc}`}
+                src={thumbUrlFor(activeSrc)}
+                alt=""
+                aria-hidden="true"
+                className="absolute inset-0 w-full h-full"
+                style={{ objectFit: "cover" }}
+                onError={(e) => { e.currentTarget.style.display = "none"; }}
+              />
+            )}
+            <img
+              key={activeSrc}
+              src={activeSrc}
+              alt={product.name}
+              fetchPriority="high"
+              decoding="async"
+              className="absolute inset-0 w-full h-full kanaan-sharpen"
+              style={{ objectFit: "cover", opacity: sharp[activeSrc] ? 1 : 0 }}
+              onLoad={() => setSharp((m) => (m[activeSrc] ? m : { ...m, [activeSrc]: true }))}
+              onError={() => setBroken((b) => ({ ...b, [activeSrc]: true }))}
+            />
+          </>
         ) : (
           <>
             <div className="grain-overlay" style={{ opacity: 0.05 }} />
@@ -1237,12 +1304,14 @@ function ProductGallery({ product, liked, onToggleLike, activeColor, onColor }) 
                 aria-label={`Photo ${i + 1}${shots[i].color && COLORS[shots[i].color] ? `, ${COLORS[shots[i].color].label}` : ""}`}
                 data-color={shots[i].color || ""}
               >
+                {/* the small copy (a thumbnail doesn't need the full photo) */}
                 <img
-                  src={src}
+                  src={thumbUrlFor(src) || src}
                   alt=""
+                  decoding="async"
                   className="w-full h-full"
                   style={{ objectFit: "cover" }}
-                  onError={() => setBroken((b) => ({ ...b, [src]: true }))}
+                  onError={(e) => { if (e.currentTarget.src !== new URL(src, location.href).href) e.currentTarget.src = src; else setBroken((b) => ({ ...b, [src]: true })); }}
                 />
               </button>
             )
@@ -1284,7 +1353,7 @@ const ProductCard = memo(function ProductCard({ product, onOpen, liked, onToggle
   // on every parent render.
   const handleToggle = useCallback(() => onToggleLike(product.id), [onToggleLike, product.id]);
   return (
-    <button onClick={() => onOpen(product)} className="text-left group focus:outline-none w-full">
+    <button onClick={() => onOpen(product)} onPointerEnter={() => warmProduct(product)} onTouchStart={() => warmProduct(product)} onFocus={() => warmProduct(product)} className="text-left group focus:outline-none w-full">
       <div
         ref={tiltRef}
         className="card-tilt"
@@ -1984,7 +2053,7 @@ const SaleProductCard = memo(function SaleProductCard({ product, onOpen, liked, 
   const saving = product.price - effectivePrice(product);
   const handleToggle = useCallback(() => onToggleLike(product.id), [onToggleLike, product.id]);
   return (
-    <button onClick={() => onOpen(product)} className="text-left group focus:outline-none w-full">
+    <button onClick={() => onOpen(product)} onPointerEnter={() => warmProduct(product)} onTouchStart={() => warmProduct(product)} onFocus={() => warmProduct(product)} className="text-left group focus:outline-none w-full">
       <div
         className="transition-transform duration-500 group-hover:-translate-y-2"
         style={{ transitionTimingFunction: "cubic-bezier(0.16,1,0.3,1)", opacity: isOut ? 0.7 : 1 }}
@@ -2232,9 +2301,9 @@ function KanaanShop() {
     } catch {}
   }, [likes, storageReady]);
 
-  const [products, setProducts] = useState([]);
-  const [catalogLoading, setCatalogLoading] = useState(true);
-  const [appExclusiveCount, setAppExclusiveCount] = useState(0);
+  const [products, setProducts] = useState(() => (BOOT ? BOOT.products : []));
+  const [catalogLoading, setCatalogLoading] = useState(!BOOT);
+  const [appExclusiveCount, setAppExclusiveCount] = useState(() => (BOOT && typeof BOOT.appExclusiveCount === "number" ? BOOT.appExclusiveCount : 0));
   const [updateInfo, setUpdateInfo] = useState({ available: false });
 
   // بانر "نسخة جديدة متوفرة". بما إنو التطبيق بيشتغل من نسخة محزّمة
@@ -2248,35 +2317,54 @@ function KanaanShop() {
   }, []);
   const [productsError, setProductsError] = useState(false);
 
-  const refreshProducts = async () => {
+  const catalogAt = useRef(Date.now());
+  // quiet: brought up to date in the background (see below) — a failure then changes nothing on screen
+  const refreshProducts = async (opts) => {
+    const quiet = !!(opts && opts.quiet === true);
     try {
       const res = await fetchWithTimeout(`${apiBase}/api/products`, {
         headers: isNativeApp ? { "X-Kanaan-Client": "app" } : {},
       });
       const data = await res.json();
       if (Array.isArray(data.categories)) applyCategories(data.categories);
-      if (data.settings) applySettings(data.settings);
+      if (data.settings) { applySettings(data.settings); markSettingsFresh(); }
       // the database failing answers "no products" with an error: keep what's shown and say so
-      if (!res.ok || (data.error && !(data.products || []).length)) { setProductsError(true); return; }
+      if (!res.ok || (data.error && !(data.products || []).length)) { if (!quiet) setProductsError(true); return; }
+      catalogAt.current = Date.now();
       if (Array.isArray(data.products)) {
         setProducts(data.products);
         setProductsError(false);
+        keepCatalog(data);
       }
       if (typeof data.appExclusiveCount === "number") setAppExclusiveCount(data.appExclusiveCount);
     } catch {
       // انقطاع أو مهلة خلصت — منعلّم حالة خطأ واضحة بدل ما نسكت
       // ونخلي المستخدم يظن إنو المتجر فاضي فعلاً
-      setProductsError(true);
+      if (!quiet) setProductsError(true);
     }
   };
 
   useEffect(() => {
+    // the page came with the catalogue (current to the second): nothing to ask for now
+    if (BOOT && BOOT.fresh) return undefined;
     let alive = true;
     (async () => {
       await refreshProducts();
       if (alive) setCatalogLoading(false);
     })();
     return () => { alive = false; };
+  }, []);
+
+  // a tab (or the app) left open and come back to after ten minutes or more: prices, stock and new pieces are
+  // brought up to date quietly — no spinner, and nothing changes if the network isn't there
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== "visible" || Date.now() - catalogAt.current < 10 * 60000) return;
+      catalogAt.current = Date.now();
+      refreshProducts({ quiet: true });
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
   }, []);
 
   const goHome = () => { navigate("/"); setMenuOpen(false); };
@@ -2664,7 +2752,7 @@ function GlobalStyles() {
         --bg: #F2F2F4;
         --bg-soft: #FFFFFF;
         --fg: #14141A;
-        --fg-muted: rgba(20,20,26,0.58);
+        --fg-muted: rgba(20,20,26,0.62); /* 0.58 read 4.3:1 on the page; 0.62 reads 5:1 (small grey words stay legible) */
         --border: rgba(20,20,26,0.1);
         --glass-bg: rgba(255,255,255,0.55);
         --glass-border: rgba(255,255,255,0.9);
@@ -3284,6 +3372,8 @@ function GlobalStyles() {
         opacity: 0;
         animation: splashRing 1.25s cubic-bezier(0.16,1,0.3,1) 0.28s both;
       }
+      .kanaan-sharpen { transition: opacity 0.28s ease; }
+      @media (prefers-reduced-motion: reduce) { .kanaan-sharpen { transition: none; } }
       .splash-logo-wrap { position: relative; display: inline-block; overflow: hidden; }
       .splash-logo {
         display: block; width: 210px; height: auto;
@@ -5097,7 +5187,7 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
           <div className="mb-8" ref={sizeRowRef}>
             <div className="flex items-center justify-between mb-2">
               <p className="font-body text-sm font-medium">{size ? <>Size <span className="text-coral">{size}</span></> : outOfStock && !isNativeApp ? "Tap your size — we'll tell you when it's back" : "Pick your size"}</p>
-              <button onClick={openGuide} className="font-body text-xs text-coral hover:underline">Size guide</button>
+              <button onClick={openGuide} className="font-body text-xs hover:underline" style={{ color: "var(--coral-text)" }}>Size guide</button>
             </div>
             <MySizeHint product={product} color={color} size={size} mine={mine} onSize={pickSize} onColor={pickColor} className="mb-2.5" />
             <div key={sizeNudge} className={`flex flex-wrap gap-2 p-0.5 ${sizeNudge ? "size-nudge" : ""}`} role="radiogroup" aria-label="Size">
@@ -6191,7 +6281,7 @@ function Footer({ goCatalog, goSale }) {
             <button
               onClick={goSale}
               className="mt-5 inline-flex items-center gap-2 rounded-full px-4 py-2 font-body text-sm font-medium tap-scale"
-              style={{ background: "rgba(255,69,34,0.12)", border: "1px solid rgba(255,69,34,0.3)", color: "var(--coral)" }}
+              style={{ background: "rgba(255,69,34,0.12)", border: "1px solid rgba(255,69,34,0.3)", color: "var(--coral-text)" }}
             >
               <Tag className="w-3.5 h-3.5" /> Shop the sale
             </button>

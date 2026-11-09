@@ -1,9 +1,8 @@
-import { json, rowToProduct, loadStock, releaseExpiredOrders } from "../_shared/util.js";
-import { loadCategories } from "../_shared/site.js";
-import { loadSettings, publicSettings } from "../_shared/settings.js";
-import { summaries as reviewSummaries } from "../_shared/reviews.js";
+import { json } from "../_shared/util.js";
+import { catalogPayload } from "../_shared/catalog.js";
 
-// GET /api/products — public list of visible products, with stock info.
+// GET /api/products — public list of visible products, with stock info (functions/_shared/catalog.js; every page
+// the server writes also carries it, so the site rarely needs to ask).
 //
 // طلبات التطبيق (أندرويد/آيفون) بترسل هيدر "X-Kanaan-Client: app" —
 // هيك منقدر نميّز طلبات التطبيق الحقيقية عن أي طلب من متصفح، ونخفي
@@ -13,41 +12,9 @@ import { summaries as reviewSummaries } from "../_shared/reviews.js";
 export async function onRequestGet(context) {
   const { request, env } = context;
   const isAppClient = request.headers.get("X-Kanaan-Client") === "app";
-
   try {
-    // Free any stock held by pending orders that were never confirmed.
-    try { await releaseExpiredOrders(env); } catch { /* non-fatal */ }
-
-    const { results } = await env.DB.prepare(
-      "SELECT * FROM products WHERE active = 1 ORDER BY sort_order ASC, created_at DESC"
-    ).all();
-    let products = (results || []).map(rowToProduct);
-
-    const exclusiveCount = products.filter((p) => p.appExclusive).length;
-    if (!isAppClient) {
-      products = products.filter((p) => !p.appExclusive);
-    }
-
-    let stock = {};
-    try {
-      stock = await loadStock(env, products.map((p) => p.id));
-    } catch { /* if stock lookup fails, products stay untracked = available */ }
-
-    for (const p of products) {
-      const s = stock[p.id];
-      p.tracked = !!s;
-      p.stock = s ? s.stock : null;
-    }
-
-    // the shop's categories and fits (edited from Kanaan POS) come with the products: one request, always in step
-    let categories = null;
-    try { categories = (await loadCategories(env)).list.filter((c) => c.active); } catch { categories = null; }
-    // the bar at the top, delivery, exchanges, opening hours (set from Kanaan POS)
-    let settings = null;
-    try { settings = publicSettings(await loadSettings(env), Date.now(), env); } catch { settings = null; }
-    // real reviews: each piece with approved ones carries its stars, { avg, count } (the cards show them)
-    try { const sums = await reviewSummaries(env); for (const p of products) { const r = sums.get(p.id); if (r) p.reviews = r; } } catch { /* no reviews yet */ }
-    return json({ products, appExclusiveCount: exclusiveCount, categories, settings }, 200, { "Cache-Control": "no-store" });
+    const { at: _at, ...data } = await catalogPayload(env, { app: isAppClient });
+    return json(data, 200, { "Cache-Control": "no-store" });
   } catch (err) {
     return json({ products: [], error: String((err && err.message) || err) }, 200);
   }

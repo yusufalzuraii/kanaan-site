@@ -8,6 +8,7 @@
    ItemList of what's actually in stock there right now. */
 
 import { renderListingContent, injectContent, headTags, setHead, jsonLd } from "../_shared/ssr.js";
+import { embedCatalog } from "../_shared/catalog.js";
 import { catalogCounts, categoryLinks, subLinks, cardsFrom, itemList, loadCategories, ONLINE } from "../_shared/seo.js";
 
 export async function onRequestGet(context) {
@@ -96,6 +97,8 @@ export async function onRequestGet(context) {
   headers.set("Cache-Control", "public, max-age=0, must-revalidate");
   headers.delete("ETag");
   headers.delete("Last-Modified");
+  // the catalogue inside the page: the app shows the pieces straight away (functions/_shared/catalog.js)
+  html = await embedCatalog(html, env);
   return new Response(html, { status: 200, headers });
 }
 

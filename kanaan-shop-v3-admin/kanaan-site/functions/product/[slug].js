@@ -16,6 +16,7 @@
 const jsonLd = (obj) => JSON.stringify(obj).replace(/</g, "\\u003c");
 
 import { parseImages, rowToProduct } from "../_shared/util.js";
+import { embedCatalog } from "../_shared/catalog.js";
 import { loadCategories } from "../_shared/site.js";
 import { loadSettings } from "../_shared/settings.js";
 import { renderProductContent, injectContent, headTags, setHead, productDescription, offerExtras } from "../_shared/ssr.js";
@@ -211,6 +212,8 @@ export async function onRequestGet(context) {
   headers.set("Cache-Control", "public, max-age=0, must-revalidate");
   headers.delete("ETag");
   headers.delete("Last-Modified");
+  // the catalogue inside the page: the app shows the pieces straight away (functions/_shared/catalog.js)
+  html = await embedCatalog(html, env);
   return new Response(html, { status: 200, headers });
 }
 

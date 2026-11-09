@@ -16,6 +16,7 @@
    فبدل ما نراهن عليه، منعتمد على الطريقة يلي ثبت إنها شغالة هون:
    Function صريحة لكل مسار. */
 import { headTags, setHead } from "./ssr.js";
+import { embedCatalog } from "./catalog.js";
 
 /* The shell for a page React draws, with that page's own title, address
    and description (so search engines don't take it for a copy of the
@@ -34,6 +35,8 @@ export function appPage({ title, description, path, noindex = false }) {
     headers.delete("ETag");
     headers.delete("Last-Modified");
     if (noindex) headers.set("X-Robots-Tag", "noindex, follow");
+    // the catalogue inside the page: the app shows the pieces straight away (functions/_shared/catalog.js)
+    html = await embedCatalog(html, context.env);
     return new Response(html, { status: 200, headers });
   };
 }

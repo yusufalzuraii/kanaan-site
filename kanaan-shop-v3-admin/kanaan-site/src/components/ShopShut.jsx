@@ -25,7 +25,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { isNativeApp } from "../native.js";
-import { getSettings, applySettings, useSiteSettings } from "../lib/siteSettings.js";
+import { getSettings, applySettings, useSiteSettings, settingsFreshFor } from "../lib/siteSettings.js";
+import LOGO_FULL from "../assets/logo-full.webp";
 
 // the moment the doors open (Beirut time): exactly two days after the work was finished
 export const OPENS_AT = Date.parse("2026-11-01T15:03:00+02:00");
@@ -66,7 +67,8 @@ export function ShopGate({ children }) {
     else if (!now && !counting() && (stateRef.current === "shut" || stateRef.current === "dropping")) setState(reduced() ? "open" : "opening");
   };
   useEffect(() => {
-    check();
+    // the page came with the shop's settings (functions/_shared/catalog.js): they already said shut or open
+    if (!settingsFreshFor(15000)) check();
     const t = setInterval(() => { if (stateRef.current !== "open" || document.visibilityState === "visible") check(); }, 30000);
     const vis = () => { if (document.visibilityState === "visible") check(); };
     document.addEventListener("visibilitychange", vis);
@@ -296,7 +298,7 @@ function ShopShut({ opening, dropping = false, words = null, shut = null, onOpen
       <style>{SHOP_SHUT_CSS}</style>
       <div className="ss-building" aria-hidden="true"><i /><i /><i /></div>
       <div className="ss-front">
-        <div className="ss-fascia"><img src="/logo-full.png" alt="Kanaan Shop — men's fashion wear" /></div>
+        <div className="ss-fascia"><img src={LOGO_FULL} alt="Kanaan Shop — men's fashion wear" /></div>
         <div className="ss-canopy" aria-hidden="true">{Array.from({ length: 13 }, (_, i) => <i key={i} />)}</div>
         <div className="ss-door">
           <div className="ss-inside" aria-hidden="true" />

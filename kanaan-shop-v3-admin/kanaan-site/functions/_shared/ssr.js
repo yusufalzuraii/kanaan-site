@@ -67,8 +67,10 @@ export function renderProductContent({ product, origin, categoryLabel, images, i
     ? Math.round(product.price * (1 - product.discount / 100))
     : product.price;
 
+  // the first photo is fetched at once (it's the one the page opens on); the others only if someone scrolls to
+  // them before the app takes over — search engines read them all the same
   const gallery = images.slice(0, 4)
-    .map((url) => `<img src="${esc(url)}" alt="${esc(product.name)}" style="${S.img}" />`)
+    .map((url, i) => `<img src="${esc(url)}" alt="${esc(product.name)}" style="${S.img}" ${i === 0 ? 'fetchpriority="high"' : 'loading="lazy" decoding="async"'} />`)
     .join("\n      ");
 
   return `<div style="${S.page}"><div style="${S.wrap}">

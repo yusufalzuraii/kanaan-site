@@ -803,11 +803,11 @@ function Shelves({ products, counts, goCatalog }) {
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lab-head">
         <h2 className="lab-h2">Shop by category</h2>
       </div>
-      <div className="lab-shelf" role="list" style={{ "--lab-cols": cols }}>
+      <div className="lab-shelf" style={{ "--lab-cols": cols }}>
         {cats.map((c) => {
           const lead = products.find((p) => p.category === c.id && firstImage(p));
           return (
-            <button key={c.id} role="listitem" onClick={() => goCatalog(c.id)} className="lab-shelf-item tap-scale">
+            <button key={c.id} onClick={() => goCatalog(c.id)} className="lab-shelf-item tap-scale">
               {lead ? <img src={firstImage(lead)} alt="" loading="lazy" decoding="async" /> : <span className="lab-shelf-ph" />}
               <span className="lab-shelf-label">
                 <span className="font-display font-semibold">{c.label}</span>
@@ -992,7 +992,7 @@ const LAB_CSS = String.raw`
 /* for keyboards and screen readers: out of sight until it has focus */
 .lab-skip { position: absolute; left: -9999px; font-family: Inter, system-ui, sans-serif; font-size: 0.85rem; color: var(--fg-muted); text-decoration: underline; text-underline-offset: 3px; }
 .lab-skip:focus-visible { position: static; display: inline-block; margin-top: 12px; }
-.lab-link { font-family: Inter, system-ui, sans-serif; font-size: 0.92rem; color: var(--coral); margin-top: 16px; text-underline-offset: 3px; }
+.lab-link { font-family: Inter, system-ui, sans-serif; font-size: 0.92rem; color: var(--coral-text, #C93412); margin-top: 16px; text-underline-offset: 3px; }
 .lab-link:hover { text-decoration: underline; }
 
 .lab-picks { list-style: none; margin: 18px 0 0; padding: 0; display: grid; gap: 8px; }

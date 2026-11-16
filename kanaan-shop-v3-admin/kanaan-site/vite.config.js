@@ -17,6 +17,21 @@ const notFoundPage = () => ({
   },
 })
 
+/* The built name of the 3D shop's file (assets/StoreStage-<hash>.js), written into the code where it says
+   __KANAAN_STAGE_FILE__ (src/home/HomeLab.jsx): when that file fails to arrive, the browser remembers the failure
+   under its address, so the second try asks for it under a new one (?try=…). */
+const stageFile = () => ({
+  name: 'kanaan-stage-file',
+  apply: 'build',
+  generateBundle(_, bundle) {
+    const stage = Object.values(bundle).find((c) => c.type === 'chunk' && c.facadeModuleId && /StoreStage\.jsx$/.test(c.facadeModuleId))
+    if (!stage) return
+    for (const c of Object.values(bundle)) {
+      if (c.type === 'chunk' && c.code.includes('__KANAAN_STAGE_FILE__')) c.code = c.code.split('__KANAAN_STAGE_FILE__').join(stage.fileName)
+    }
+  },
+})
+
 /* The engine that draws the shop (since 9 Nov 2026, the owner's choice): Preact, which reads the same React code
    through preact/compat — the same site, about 50 KB less for every phone to download and start (166 → 115 KB).
    Back to React = 'react' here (nothing else changes). The dev server keeps React (its instant reload needs it). */
@@ -31,6 +46,6 @@ const preact = [
 
 // https://vite.dev/config/
 export default defineConfig(({ command }) => ({
-  plugins: [react(), notFoundPage()],
+  plugins: [react(), notFoundPage(), stageFile()],
   resolve: { alias: command === 'build' && ENGINE === 'preact' ? preact : [] },
 }))

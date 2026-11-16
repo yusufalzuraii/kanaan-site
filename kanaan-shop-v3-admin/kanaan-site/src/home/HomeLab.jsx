@@ -45,7 +45,45 @@ import { COLORS as PALETTE } from "../palette.js";
 import { useSiteSettings } from "../lib/siteSettings.js";
 import { OpenNow } from "../components/SiteBits.jsx";
 
-const StoreStage = React.lazy(() => import("../store3d/StoreStage.jsx"));
+/* The 3D shop is its own file (three.js with it, ~170 KB on the wire), fetched after the page shows. On a weak phone
+   connection, or when the shopper leaves while it is still coming (Instagram's browser, 7–14 Nov 2026: "Failed to fetch
+   dynamically imported module" / "Importing a module script failed"), that fetch can fail. It is tried again after a
+   moment, under a new address (the browser keeps a failed one as failed; STAGE_FILE is the built file's name, written
+   in by vite.config.js). If that fails too, the homepage simply keeps the still of the shop (StageBoundary below) —
+   before, the failure reached the site's own error page ("Something went wrong") and the whole page was lost. */
+const STAGE_FILE = "__KANAAN_STAGE_FILE__";
+const StoreStage = React.lazy(() =>
+  import("../store3d/StoreStage.jsx").catch(
+    (err) => new Promise((resolve, reject) => {
+      if (!/^assets\/StoreStage-[\w-]+\.js$/.test(STAGE_FILE)) { reject(err); return; }
+      setTimeout(() => { import(/* @vite-ignore */ `/${STAGE_FILE}?try=${Date.now()}`).then(resolve, reject); }, 1500);
+    }),
+  ),
+);
+class StageBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { failed: false }; }
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch(error, info) {
+    // the still stays on screen. A file that didn't arrive is the network, not a fault: nothing to report. Anything
+    // else that breaks inside the 3D is still reported (the owner sees it in Problems shoppers hit), marked as such.
+    const msg = String((error && error.message) || error || "");
+    if (/dynamically imported module|module script|Loading chunk|Load failed|NetworkError|Failed to fetch/i.test(msg)) return;
+    try {
+      fetch(`${apiBase}/api/log-error`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: `3D shop (the still was shown instead): ${msg}`.slice(0, 500),
+          stack: String((error && error.stack) || ""),
+          componentStack: String((info && info.componentStack) || ""),
+          url: window.location.href,
+          platform: "web",
+        }),
+      }).catch(() => {});
+    } catch { /* ignore */ }
+  }
+  render() { return this.state.failed ? null : this.props.children; }
+}
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
@@ -390,6 +428,7 @@ function Stage({ mode, theme, tall, tier, tags, windowSlots, onPeek, safe, onSto
   return (
     <div className="lab-stage" aria-hidden="true">
       <img className="lab-poster" src={posterFor(theme, tall)} alt="" decoding="async" fetchPriority="high" />
+      <StageBoundary>
       <React.Suspense fallback={null}>
         <StoreStage
           mode={mode}
@@ -406,6 +445,7 @@ function Stage({ mode, theme, tall, tier, tags, windowSlots, onPeek, safe, onSto
           className={`lab-canvas${ready ? " is-ready" : ""}`}
         />
       </React.Suspense>
+      </StageBoundary>
     </div>
   );
 }

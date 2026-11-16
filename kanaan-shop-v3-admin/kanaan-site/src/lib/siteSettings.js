@@ -9,7 +9,9 @@
 import { useEffect, useState } from "react";
 
 const KEY = "kanaan-site";
-export const DEFAULT_SETTINGS = { announce: null, deliveryFee: 5, freeOver: 0, exchangeDays: 3, hours: null, welcome: null };
+export const DEFAULT_SETTINGS = { announce: null, deliveryFee: 5, saidaFee: 3, freeOver: 0, exchangeDays: 3, hours: null, welcome: null };
+/* Saida, the shop's own town, has its own delivery fee (functions/_shared/settings.js says the same) */
+export const LOCAL_AREA = "Saida";
 
 function load() {
   try {
@@ -48,9 +50,14 @@ export function useSiteSettings() {
   return s;
 }
 
-/** What delivery costs for this many dollars of pieces. */
-export function deliveryFor(s, subtotal) {
-  return s.freeOver > 0 && subtotal >= s.freeOver ? 0 : s.deliveryFee;
+/** What delivery costs for this many dollars of pieces, to this area (Saida has its own fee). */
+export function deliveryFor(s, subtotal, area) {
+  if (s.freeOver > 0 && subtotal >= s.freeOver) return 0;
+  return area === LOCAL_AREA && Number.isFinite(s.saidaFee) ? s.saidaFee : s.deliveryFee;
+}
+/** "$3 in Saida" when Saida's fee is different (else nothing) */
+export function saidaNote(s, money) {
+  return Number.isFinite(s.saidaFee) && s.saidaFee !== s.deliveryFee ? `${money(s.saidaFee)} in Saida` : "";
 }
 
 /* ---------- the welcome offer: N% off a first website order ----------

@@ -45,7 +45,7 @@ export async function onRequestPut(context) {
   try { body = await request.json(); } catch { return json({ error: "bad json" }, 400); }
   if (!body || typeof body !== "object") return json({ error: "bad json" }, 400);
   const patch = {};
-  for (const k of ["announce", "welcome", "shut", "whish", "deliveryFee", "freeOver", "exchangeDays", "hours"]) if (k in body) patch[k] = body[k];
+  for (const k of ["announce", "welcome", "shut", "whish", "deliveryFee", "saidaFee", "freeOver", "exchangeDays", "hours"]) if (k in body) patch[k] = body[k];
   if (patch.whish && patch.whish.on && !whishConfig(env)) return json({ error: "The Whish keys are not in Cloudflare yet — put them there first (the guide says where)." }, 400);
   if (Object.keys(patch).length) await saveSettings(env, patch);
   if (body.checkWhish) return json({ ...(await room(env)), whishCheck: await checkKeys(env) });

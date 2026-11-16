@@ -66,7 +66,7 @@ import LOGO_FULL from "./assets/logo-full.webp";
 const HOME_3D = true;
 import { COLORS as PALETTE, swatchBackground } from "./palette.js";
 /* Set from Kanaan POS (Website → Site): the bar at the top, delivery, exchanges, opening hours */
-import { applySettings, markSettingsFresh, useSiteSettings, deliveryFor, welcomeNow, welcomeFits, welcomeOn, markOrdered } from "./lib/siteSettings.js";
+import { applySettings, markSettingsFresh, useSiteSettings, deliveryFor, saidaNote, LOCAL_AREA, welcomeNow, welcomeFits, welcomeOn, markOrdered } from "./lib/siteSettings.js";
 import { parsePhone } from "./lib/phone.js";
 import { AnnounceBar, FreeDeliveryMeter, WelcomeNote, PieceWords, SITE_BITS_CSS } from "./components/SiteBits.jsx";
 import { ReviewPage, ProductReviews, RatingLine, CardStars, REVIEWS_CSS } from "./components/Reviews.jsx";
@@ -5667,7 +5667,7 @@ function ProductView({ product, products, addToCart, openProduct, liked, toggleL
 
           <div className="mt-8 pt-6 border-t grid grid-cols-3 gap-3 text-center" style={{ borderColor: "var(--border)" }}>
             {[
-              { icon: Truck, label: site.freeOver ? `Free delivery from ${money(site.freeOver)}` : `${money(site.deliveryFee)} delivery, all Lebanon` },
+              { icon: Truck, label: site.freeOver ? `Free delivery from ${money(site.freeOver)}` : saidaNote(site, money) ? `${money(site.deliveryFee)} delivery, all Lebanon · ${saidaNote(site, money)}` : `${money(site.deliveryFee)} delivery, all Lebanon` },
               { icon: ShieldCheck, label: "Cash on delivery" },
               site.exchangeDays > 0 ? { icon: RotateCcw, label: `Exchange within ${site.exchangeDays} days` } : { icon: MapPin, label: "Try it on in Saida" },
             ].map(({ icon: Icon, label }) => (
@@ -5887,7 +5887,7 @@ function CartDrawer({ open, onClose, cart, products = [], updateQty, removeFromC
               <span className="text-muted">Subtotal</span>
               <span className="font-num text-lg">{money(total)}</span>
             </div>
-            <p className="font-body text-xs text-muted mb-3">{delivery ? `+ ${money(delivery)} delivery, paid at your door` : "Free delivery · pay at your door"}</p>
+            <p className="font-body text-xs text-muted mb-3">{delivery ? `+ ${money(delivery)} delivery${saidaNote(site, money) ? ` (${saidaNote(site, money)})` : ""}, paid at your door` : "Free delivery · pay at your door"}</p>
             <button onClick={onCheckout} disabled={blocked} className="glass-btn w-full font-body font-semibold py-3.5 rounded-full tap-scale" style={{ background: "var(--coral)", color: "#fff", opacity: blocked ? 0.5 : 1 }}>
               {blocked ? "Remove the sold-out piece first" : "Checkout"}
             </button>
@@ -5932,7 +5932,12 @@ function CheckoutView({ cart, products = [], total, onSubmitted, onPaying, goCat
   }, []);
 
   const set = (k) => (e) => { setForm((f) => ({ ...f, [k]: e.target.value })); if (bad === k) { setBad(""); setError(""); } };
-  const delivery = deliveryFor(site, total);
+  // Saida (the shop's own town) has its own fee: it's its own choice in the list (16 Nov 2026, the owner)
+  const delivery = deliveryFor(site, total, form.area);
+  const saida = saidaNote(site, money);
+  const freeHere = site.freeOver > 0 && total >= site.freeOver;
+  // "Saida" written in the address with South Lebanon chosen: say Saida has its own (lower) fee, one tap away
+  const saidaHere = !!saida && form.area === "South Lebanon" && /\b(saida|sayda|saïda|sidon)\b|صيدا/i.test(form.address || "");
   const phoneOk = parsePhone(form.phone);
   // the welcome offer: once the number is in, the shop says whether it is a first order (then it comes off here)
   const wOffer = welcomeNow(site, { any: true });
@@ -6104,17 +6109,25 @@ function CheckoutView({ cart, products = [], total, onSubmitted, onPaying, goCat
         <Field label="Phone number" required id="co-phone" hint={form.phone && phoneOk ? `We'll call ${phoneOk.pretty}` : "The driver calls before coming"}>
           <input id="co-phone" ref={refs.phone} value={form.phone} onChange={set("phone")} onBlur={() => { if (phoneOk) setForm((f) => ({ ...f, phone: phoneOk.lebanon ? phoneOk.national : phoneOk.pretty })); }} className={fieldCls("phone")} placeholder="03 123 456" type="tel" inputMode="tel" autoComplete="tel" enterKeyHint="next" aria-invalid={bad === "phone"} />
         </Field>
-        <Field label="Governorate" required id="co-area">
-          <select id="co-area" ref={refs.area} value={form.area} onChange={set("area")} className={fieldCls("area")} autoComplete="address-level1" aria-invalid={bad === "area"}>
+        <Field label="Area" required id="co-area" hint={saida && !freeHere ? `Delivery ${money(site.saidaFee)} in Saida, ${money(site.deliveryFee)} everywhere else in Lebanon` : undefined}>
+          <select id="co-area" ref={refs.area} value={form.area} onChange={set("area")} className={fieldCls("area")} autoComplete="address-level1" aria-invalid={bad === "area"} data-testid="co-area">
             <option value="" disabled>Choose…</option>
+            {saida && <option value={LOCAL_AREA}>Saida</option>}
             {LEBANON_GOVERNORATES.map((a) => (
-              <option key={a} value={a}>{a}</option>
+              <option key={a} value={a}>{saida && a === "South Lebanon" ? "South Lebanon (outside Saida)" : a}</option>
             ))}
           </select>
         </Field>
-        <Field label="Address" required id="co-address">
-          <input id="co-address" ref={refs.address} value={form.address} onChange={set("address")} className={fieldCls("address")} placeholder="Town, street, building, a landmark" autoComplete="street-address" enterKeyHint="done" aria-invalid={bad === "address"} />
-        </Field>
+        <div>
+          <Field label="Address" required id="co-address">
+            <input id="co-address" ref={refs.address} value={form.address} onChange={set("address")} className={fieldCls("address")} placeholder="Town, street, building, a landmark" autoComplete="street-address" enterKeyHint="done" aria-invalid={bad === "address"} />
+          </Field>
+          {saidaHere && !freeHere && (
+            <button type="button" onClick={() => setForm((f) => ({ ...f, area: LOCAL_AREA }))} className="font-body text-xs mt-1.5 tap-scale text-left" style={{ color: "var(--teal-text)" }} data-testid="co-saida">
+              In Saida? Delivery there is {money(site.saidaFee)} — choose Saida
+            </button>
+          )}
+        </div>
         <Field label="Notes (optional)" id="co-notes">
           <textarea id="co-notes" value={form.notes} onChange={set("notes")} rows={3} className="field resize-none" placeholder="A time that suits you, a size question…" />
         </Field>

@@ -42,7 +42,7 @@ import {
 } from "../App.jsx";
 import { detectTier } from "../store3d/tier.js";
 import { COLORS as PALETTE } from "../palette.js";
-import { useSiteSettings } from "../lib/siteSettings.js";
+import { useSiteSettings, saidaNote } from "../lib/siteSettings.js";
 import { OpenNow } from "../components/SiteBits.jsx";
 
 /* The 3D shop is its own file (three.js with it, ~170 KB on the wire), fetched after the page shows. On a weak phone
@@ -906,7 +906,7 @@ function Promises() {
   return (
     <section className="lab-section max-w-6xl mx-auto px-4 sm:px-6">
       <ul className="lab-promise-row">
-        <li><Truck className="w-5 h-5" /> <span>{site.freeOver ? `Free delivery from ${money(site.freeOver)}, all of Lebanon` : `Delivery to all of Lebanon · ${money(site.deliveryFee)}`}</span></li>
+        <li><Truck className="w-5 h-5" /> <span>{site.freeOver ? `Free delivery from ${money(site.freeOver)}, all of Lebanon` : `Delivery to all of Lebanon · ${money(site.deliveryFee)}${saidaNote(site, money) ? `, ${saidaNote(site, money)}` : ""}`}</span></li>
         <li><ShieldCheck className="w-5 h-5" /> <span>Cash on delivery</span></li>
         <li><RotateCcw className="w-5 h-5" /> <span>{site.exchangeDays > 0 ? `Exchange within ${site.exchangeDays} days` : "Try it on at the shop in Saida"}</span></li>
       </ul>

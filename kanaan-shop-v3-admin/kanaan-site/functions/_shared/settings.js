@@ -11,7 +11,10 @@
    with the products (one request, always in step).
    ============================================================ */
 
-export const DEFAULTS = { announce: null, deliveryFee: 5, freeOver: 0, exchangeDays: 3, hours: null, welcome: null, shut: null, whish: null };
+export const DEFAULTS = { announce: null, deliveryFee: 5, saidaFee: 3, freeOver: 0, exchangeDays: 3, hours: null, welcome: null, shut: null, whish: null };
+/* Delivery in Saida, the shop's own town (16 Nov 2026, the owner: "$5 all over Lebanon, Saida $3"): chosen as its own
+   area at checkout ("Saida"); everywhere else pays the fee. Free delivery from an amount covers both. */
+export const LOCAL_AREA = "Saida";
 const TONES = ["coral", "teal", "ink"];
 const int = (v, lo, hi, d) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -81,6 +84,7 @@ export function clean(input) {
     shut,
     whish,
     deliveryFee: int(s.deliveryFee, 0, 50, DEFAULTS.deliveryFee),
+    saidaFee: int(s.saidaFee, 0, 50, DEFAULTS.saidaFee),
     freeOver: int(s.freeOver, 0, 2000, 0),
     exchangeDays: int(s.exchangeDays, 0, 60, DEFAULTS.exchangeDays),
     hours,
@@ -98,7 +102,7 @@ export async function loadSettings(env) {
 export async function saveSettings(env, patch) {
   const cur = await loadSettings(env);
   const next = { ...cur };
-  for (const k of ["deliveryFee", "freeOver", "exchangeDays", "hours"]) if (patch && k in patch) next[k] = patch[k];
+  for (const k of ["deliveryFee", "saidaFee", "freeOver", "exchangeDays", "hours"]) if (patch && k in patch) next[k] = patch[k];
   if (patch && "announce" in patch) {
     const a = patch.announce;
     // a new message (other words) gets a new id: shoppers who closed the old one see it
@@ -129,7 +133,7 @@ export function publicSettings(s, now = Date.now(), env = null) {
   const announce = a && a.on && a.text && (!a.until || a.until > now) ? { text: a.text, link: a.link, tone: a.tone, id: a.id } : null;
   const welcome = activeWelcome(s, now);
   return {
-    announce, deliveryFee: s.deliveryFee, freeOver: s.freeOver, exchangeDays: s.exchangeDays, hours: s.hours,
+    announce, deliveryFee: s.deliveryFee, saidaFee: s.saidaFee, freeOver: s.freeOver, exchangeDays: s.exchangeDays, hours: s.hours,
     welcome: welcome ? { pct: welcome.pct, min: welcome.min, sale: welcome.sale, bar: welcome.bar, text: welcome.text, until: welcome.until } : null,
     shut: s.shut && s.shut.on ? { words: s.shut.words, title: s.shut.title, text: s.shut.text, since: s.shut.since } : null,
     whish: !!(s.whish && s.whish.on && env && env.WHISH_CHANNEL && env.WHISH_SECRET && env.WHISH_WEBSITE_URL),
@@ -159,6 +163,7 @@ export function welcomeOn(w, lines) {
 }
 
 /** The delivery an order pays, by these settings. */
-export function deliveryFor(s, subtotal) {
-  return s.freeOver > 0 && subtotal >= s.freeOver ? 0 : s.deliveryFee;
+export function deliveryFor(s, subtotal, area) {
+  if (s.freeOver > 0 && subtotal >= s.freeOver) return 0;
+  return area === LOCAL_AREA && Number.isFinite(s.saidaFee) ? s.saidaFee : s.deliveryFee;
 }

@@ -4505,22 +4505,25 @@ function PrivacyPolicyView() {
       </Section>
 
       <Section title="Information we collect">
-        <p><strong>When you place an order:</strong> your name, phone number, delivery address, and any notes you add. This is sent as a WhatsApp message to our order number and stored in our order system so we can prepare and track your delivery.</p>
-        <p><strong>Cart, favorites, and recently viewed items:</strong> stored only on your own device (browser or app storage), not on our servers, except for the items in your cart at the moment you check out.</p>
+        <p><strong>When you place an order:</strong> your name, phone number, delivery address, and any notes you add, together with the pieces you ordered. This is sent as a WhatsApp message to our order number and stored in our order system so we can prepare and track your delivery. Your phone number is also used to tell whether a first-order welcome offer applies.</p>
+        <p><strong>How the store is used (anonymous):</strong> the website and the app tell us which pages and products you look at, how long you stay on a page, what you add to or remove from your bag and favorites, what you search for, and when you tap WhatsApp. This helps us see what customers want. It is linked to a random number made on your device. This number is not your name or phone number, and we don't use cookies or advertising IDs for it. It stays in our own store system and is never used for advertising.</p>
+        <p><strong>Cart, favorites, and recently viewed items:</strong> kept on your device so they're there next time. The items in your bag are also included in the anonymous usage events above, and in your order when you check out.</p>
+        <p><strong>Reviews:</strong> after an order we may send you a link to review what you bought. If you write one, we keep your rating, your words, and your first name with the initial of your last name (for example "Rami H."), and we only show it on the store after we've read it.</p>
+        <p><strong>My Kanaan account (website only, optional):</strong> if you choose to sign in on the website, you confirm your phone number by sending us one WhatsApp message. We then show you your orders, and keep your favorites, bag and back-in-stock requests with your account so we can follow up on WhatsApp.</p>
         <p><strong>Push notifications (app only):</strong> if you allow notifications, we store a device identifier (not tied to your name) so we can send you updates about sales and new arrivals. You can turn this off anytime in your phone's settings.</p>
-        <p><strong>Basic technical data:</strong> standard web request information (like IP address and browser type), handled by our hosting provider for security and performance — not used to build advertising profiles.</p>
+        <p><strong>Basic technical data:</strong> standard web request information (like IP address and browser type), handled by our hosting provider for security and performance. It is not used for advertising.</p>
       </Section>
 
       <Section title="What we don't collect">
-        <p>We don't require an account, a password, or an email address to shop. Orders are paid cash on delivery, or in the Whish Money app when Whish is offered at checkout. A Whish payment happens on Whish's own page: we only learn that it went through (and the Whish number it came from), never a password, a code or any card.</p>
+        <p>We don't require an account, a password, or an email address to shop. Orders are paid cash on delivery, or in the Whish Money app when Whish is offered at checkout. A Whish payment happens on Whish's own page: we only learn that it went through (and the Whish number it came from), never a password, a code or any card. We don't access your contacts, photos, location, camera or microphone.</p>
       </Section>
 
       <Section title="Who we share information with">
-        <p>Your order details are shared with our delivery process only. We use the following services to run the store, each governed by their own privacy policy: Cloudflare (hosting), Google Firebase (push notification delivery), and WhatsApp (order communication). We do not sell personal information to anyone, and we don't use advertising or tracking networks.</p>
+        <p>Your order details are shared with our delivery process only. We use the following services to run the store, each governed by their own privacy policy: Cloudflare (hosting and data storage), Google Firebase (push notification delivery), WhatsApp (order communication), and Whish Money (online payment, when you choose it). We do not sell personal information to anyone, and we don't use advertising networks or third-party tracking.</p>
       </Section>
 
       <Section title="How long we keep it">
-        <p>Order information is kept for as long as needed for business and inventory records. Push notification identifiers are removed automatically if the app is uninstalled or notifications are disabled.</p>
+        <p>Order information is kept for as long as needed for business and inventory records. Anonymous usage events are kept to see how the store is doing over time. Push notification identifiers are removed automatically if the app is uninstalled or notifications are disabled.</p>
       </Section>
 
       <Section title="Children">
@@ -4528,11 +4531,11 @@ function PrivacyPolicyView() {
       </Section>
 
       <Section title="Your choices">
-        <p>You can ask us to delete your order history or stop contacting you at any time by reaching out on WhatsApp. You can also clear your cart, favorites, and browsing history at any time by clearing your browser or app storage.</p>
+        <p>You can ask us to delete your order history or stop contacting you at any time by reaching out on WhatsApp. You can also clear your cart, favorites, browsing history and the random usage number at any time by clearing your browser or app storage (or reinstalling the app).</p>
       </Section>
 
       <Section title="Contact us">
-        <p>Questions about this policy or your information? Message us on WhatsApp — the number is on our homepage and checkout page — and we'll get back to you.</p>
+        <p>Questions about this policy or your information? Message us on WhatsApp. The number is on our homepage and checkout page.</p>
       </Section>
     </div>
   );

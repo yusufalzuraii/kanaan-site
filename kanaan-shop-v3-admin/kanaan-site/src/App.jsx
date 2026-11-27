@@ -58,6 +58,7 @@ const Admin = React.lazy(() => import("./Admin.jsx"));
    because it IS the front door; the 3D engine inside it is still its own
    chunk, fetched only when a device can show it. */
 import HomeLab from "./home/HomeLab.jsx";
+import { AppHomeLab } from "./home/AppHomes.jsx";
 // the logo, as small files with their version in their names (cached for good): the PNGs were 114 KB and 163 KB,
 // and the header logo was the last thing a phone drew on most pages
 import LOGO_COMPACT from "./assets/logo-compact.webp";
@@ -369,6 +370,7 @@ function parseRoute(path) {
   if (path === "/") return { type: "home" };
   if (path.startsWith("/admin")) return { type: "admin" };
   if (path === "/lab") return { type: "lab" };
+  if (path === "/applab") return { type: "applab" };
   if (path === "/sale") return { type: "sale" };
   if (path === "/favorites") return { type: "favorites" };
   if (path === "/exclusives") return { type: "exclusives" };
@@ -2754,6 +2756,9 @@ function KanaanShop() {
         {route.type === "lab" && (
           <HomeLab products={products} loading={catalogLoading} goCatalog={goCatalog} goSale={goSale} openProduct={openProduct} likes={likes} toggleLike={toggleLike} appExclusiveCount={appExclusiveCount} />
         )}
+        {route.type === "applab" && (
+          <AppHomeLab products={products} kit={APP_HOME_KIT} nav={{ openProduct, goCatalog, goSale, goExclusives }} likes={likes} toggleLike={toggleLike} recent={getRecentlyViewed().map((id) => products.find((p) => p.id === id)).filter(Boolean).slice(0, 8)} />
+        )}
         {route.type === "sale" && (
           <SaleView products={products} loading={catalogLoading} goCatalog={goCatalog} openProduct={openProduct} likes={likes} toggleLike={toggleLike} />
         )}
@@ -4247,6 +4252,9 @@ function SpotlightCard({ product, onOpen }) {
     </button>
   );
 }
+
+/* what the app's home directions (src/home/AppHomes.jsx) borrow from here */
+const APP_HOME_KIT = { getImages, thumbUrlFor, bigUrlFor, photoFallback, effectivePrice, money, isOnSale, CATEGORIES, LogoMark, ProductCard };
 
 function NativeHomeView({ products, loading, error, onRetry, goCatalog, goSale, goExclusives, openProduct, likes, toggleLike, goFavorites, onCart, cartCount }) {
   useEffect(() => {

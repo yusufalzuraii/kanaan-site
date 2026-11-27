@@ -70,6 +70,7 @@ import { COLORS as PALETTE, swatchBackground } from "./palette.js";
 import { applySettings, markSettingsFresh, useSiteSettings, deliveryFor, saidaNote, LOCAL_AREA, welcomeNow, welcomeFits, welcomeOn, markOrdered } from "./lib/siteSettings.js";
 import { parsePhone } from "./lib/phone.js";
 import { AnnounceBar, FreeDeliveryMeter, WelcomeNote, PieceWords, SITE_BITS_CSS } from "./components/SiteBits.jsx";
+import { AppBanner, AppShelf, APP_PROMO_CSS } from "./components/AppPromo.jsx";
 import { ReviewPage, ProductReviews, RatingLine, CardStars, REVIEWS_CSS } from "./components/Reviews.jsx";
 import { AccountPage, TrackPage, BackInStock, AccountLink, useMemberSync, useMe, MEMBERS_CSS } from "./components/Members.jsx";
 /* The shopper's own sizes (learnt from the bag, kept on the device) and what to wear a piece with */
@@ -2703,7 +2704,10 @@ function KanaanShop() {
           />
         )
       ) : (
+        <>
+        <AppBanner path={path} />
         <Header cartCount={cartCount} likesCount={likes.length} onHome={goHome} onCart={() => setCartOpen(true)} onSearch={() => setSearchOpen(true)} onSale={goSale} onFavorites={goFavorites} menuOpen={menuOpen} setMenuOpen={setMenuOpen} goCatalog={goCatalog} navigate={navigate} />
+        </>
       )}
       {isNativeApp && isOffline && (
         <div className="px-4 sm:px-6" style={{ paddingTop: route.type === "home" ? "calc(0.75rem + env(safe-area-inset-top, 0px))" : 8 }}>
@@ -3246,6 +3250,7 @@ function GlobalStyles() {
       :root { --header-h: calc(76px + var(--announce-h, 0px)); }
       @media (min-width: 640px) { :root { --header-h: calc(84px + var(--announce-h, 0px)); } }
       ${SITE_BITS_CSS}
+      ${APP_PROMO_CSS}
       ${PHOTO_VIEWER_CSS}
       ${REVIEWS_CSS}
       ${MEMBERS_CSS}
@@ -3898,39 +3903,11 @@ function useHeroParallax() {
   return y;
 }
 
-/* The app teaser: app-only prices when there are some, "coming soon"
-   otherwise. Shared by the homepage and the previous HomeView. */
+/* The app's place on the homepage (src/components/AppPromo.jsx): the rail,
+   the swing tag and the phone, as on the app's Google Play page. Shared by
+   the homepage and the previous HomeView. */
 function AppTeaser({ appExclusiveCount = 0 }) {
-  return (
-    <section className="max-w-6xl mx-auto px-4 sm:px-6 pb-20 section-lazy">
-      <Reveal>
-        <div className="glass glass-sheen rounded-3xl p-8 sm:p-10 relative overflow-hidden text-center sm:text-left">
-          <MeshBackground variant="card" />
-          <div className="relative flex flex-col sm:flex-row items-center sm:items-center gap-5 justify-between">
-            <div className="flex flex-col sm:flex-row items-center gap-4">
-              <div className="glass rounded-2xl p-3">
-                <Smartphone className="w-7 h-7 text-coral" />
-              </div>
-              <div>
-                <p className="font-display font-bold text-xl">
-                  {appExclusiveCount > 0 ? "App-only pieces, waiting" : "The Kanaan Shop app"}
-                </p>
-                <p className="font-body text-sm text-muted mt-1 max-w-sm">
-                  {appExclusiveCount > 0
-                    ? `${appExclusiveCount} ${appExclusiveCount === 1 ? "piece is" : "pieces are"} only in the app right now.`
-                    : "Faster shopping, your saved pieces, and a note when your size is back."} Android now; iPhone is on its way.
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <a href="https://play.google.com/store/apps/details?id=com.kanaanshop.app" target="_blank" rel="noopener noreferrer" className="glass-btn rounded-full font-body font-medium text-sm px-5 py-2.5 tap-scale" style={{ background: "var(--fg)", color: "var(--bg)" }}>Get it on Google Play</a>
-              <GlassChip>iPhone soon</GlassChip>
-            </div>
-          </div>
-        </div>
-      </Reveal>
-    </section>
-  );
+  return <AppShelf appExclusiveCount={appExclusiveCount} />;
 }
 
 function HomeView({ products, loading, goCatalog, goSale, openProduct, likes, toggleLike, appExclusiveCount }) {
@@ -4387,7 +4364,7 @@ function ExclusivesLockedView() {
       </div>
       <h1 className="font-display font-bold text-2xl mb-2">App-only pricing</h1>
       <p className="font-body text-muted mb-8 max-w-sm mx-auto">
-        This section is exclusive to the Kanaan Shop app — download it on iPhone or Android to see these prices.
+        These prices are only in the Kanaan Shop app. It's on Google Play now; the iPhone app is on its way.
       </p>
       <div className="flex items-center justify-center gap-2">
         <GlassChip>Android</GlassChip>

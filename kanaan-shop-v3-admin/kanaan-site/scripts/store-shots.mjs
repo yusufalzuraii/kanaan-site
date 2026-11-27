@@ -90,8 +90,9 @@ await step("bag", async () => {
     await page.locator('[data-testid="quick-add"]').first().click();
     await page.waitForTimeout(800);
     if (cat === "hoodies") await shot("20-quick-add-sheet");
-    const sheet = page.locator('[role="dialog"]').last();
-    const sz = sheet.locator("button:not([disabled])").filter({ hasText: /^\s*(XS|S|M|L|XL|XXL|\d\d)\s*(\d+ left)?\s*$/ });
+    const sheet = page.locator(".pick-sheet").last();
+    log("sheet:", (await sheet.locator("button").allTextContents()).map((t) => JSON.stringify(t.trim().slice(0, 16))).join(" "));
+    const sz = sheet.locator("button:not([disabled])").filter({ hasText: /^\s*(XS|S|M|L|XL|XXL|\d\d)\s*(\d+\s*left)?\s*$/i });
     const n = await sz.count();
     log(cat, "sizes in sheet:", n);
     await sz.nth(Math.min(1, n - 1)).click();

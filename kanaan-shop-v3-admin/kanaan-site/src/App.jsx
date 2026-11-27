@@ -4309,6 +4309,16 @@ function PrivacyPolicyView() {
         <p>Order information is kept for as long as needed for business and inventory records. Anonymous usage events are kept to see how the store is doing over time. Push notification identifiers are removed automatically if the app is uninstalled or notifications are disabled.</p>
       </Section>
 
+      <div id="delete" />
+      <Section title="Deleting your information">
+        <p>To have your information deleted from {STORE_NAME} (the website and the Android and iPhone apps):</p>
+        <p>1. Message us on WhatsApp from the phone number you ordered with. The number is on our homepage and checkout page.</p>
+        <p>2. Write "Delete my data". We'll confirm on WhatsApp once it's done.</p>
+        <p><strong>What we delete:</strong> your name, phone number, delivery addresses and notes, your reviews, your My Kanaan account with its saved pieces and back-in-stock requests, and the app's notification identifier.</p>
+        <p><strong>What we keep:</strong> the amounts and pieces of past orders, without your name, phone or address, because we need them for our accounts and stock.</p>
+        <p>The anonymous usage number and your bag, favorites and recently viewed pieces live on your device: clear the app's storage, reinstall the app or clear your browser's data to remove them.</p>
+      </Section>
+
       <Section title="Children">
         <p>{STORE_NAME} is not directed at children, and we don't knowingly collect information from anyone under 13.</p>
       </Section>

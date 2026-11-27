@@ -90,13 +90,15 @@ await step("bag", async () => {
     await page.locator('[data-testid="quick-add"]').first().click();
     await page.waitForTimeout(800);
     if (cat === "hoodies") await shot("20-quick-add-sheet");
-    const sz = page.locator('[data-testid^="size-"]:not([disabled])');
+    const sheet = page.locator('[role="dialog"]').last();
+    const sz = sheet.locator("button:not([disabled])").filter({ hasText: /^\s*(XS|S|M|L|XL|XXL|\d\d)\s*(\d+ left)?\s*$/ });
     const n = await sz.count();
     log(cat, "sizes in sheet:", n);
     await sz.nth(Math.min(1, n - 1)).click();
-    await page.waitForTimeout(700);
-    const add = page.getByRole("button", { name: /add to (cart|bag)/i });
-    if (await add.count()) { await add.first().click(); await page.waitForTimeout(700); }
+    await page.waitForTimeout(600);
+    if (cat === "hoodies") await shot("20b-size-picked");
+    await sheet.locator("button").last().click();
+    await page.waitForTimeout(900);
     if (cat === "hoodies") await shot("21-added-note");
     await page.waitForTimeout(600);
   }
@@ -119,7 +121,8 @@ await step("cart", async () => {
 });
 await step("checkout", async () => {
   await go("/checkout"); await shot("80-checkout");
-  await page.evaluate(() => window.scrollBy(0, 600)); await settle(600); await shot("81-checkout-b");
+  await page.evaluate(() => window.scrollBy(0, 520)); await settle(600); await shot("81-checkout-b");
+  await page.evaluate(() => window.scrollBy(0, 520)); await settle(600); await shot("81-checkout-c");
   await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight)); await settle(600); await shot("82-checkout-end");
 });
 await browser.close();

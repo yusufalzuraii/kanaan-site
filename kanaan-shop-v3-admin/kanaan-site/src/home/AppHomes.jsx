@@ -18,7 +18,7 @@
    No emoji, no greeting, no counters at zero, no icon in a coloured square.
    ============================================================ */
 import React, { useMemo, useState } from "react";
-import { ArrowRight, ChevronRight } from "lucide-react";
+import { ArrowRight, ChevronRight, Heart } from "lucide-react";
 import { OpenNow } from "../components/SiteBits.jsx";
 import { useSiteSettings, saidaNote } from "../lib/siteSettings.js";
 
@@ -307,20 +307,147 @@ function ShopHome({ d, kit, nav, likes, toggleLike, recent }) {
   );
 }
 
+/* ---------------- 4. Kanaan: the shop in Saida, on its own paper (2 + 3, his pick) ----------------
+   The shop's real front, then what is yours (the bag, the hearts — only when there is something), the newest
+   piece on its swing tag, the sections walked as photo tiles labelled on small tags, the sale, new in. Every
+   card is the shop's own ProductCard (heart, quick add, photos that flick, your size). */
+function Thumbs({ kit, items }) {
+  return (
+    <span className="ahk-thumbs">
+      {items.slice(0, 3).map((p, i) => <Img key={p.id + i} kit={kit} p={p} className="ahk-thumb" />)}
+    </span>
+  );
+}
+
+function KanaanHome({ d, kit, nav, likes, toggleLike, recent, cart = [], products = [] }) {
+  const s = useSiteSettings();
+  const saida = saidaNote(s, kit.money);
+  const hero = d.newest[0];
+  const byId = (id) => products.find((p) => p.id === id);
+  const bagPieces = cart.map((i) => byId(i.productId)).filter(Boolean);
+  const bagCount = cart.reduce((a, i) => a + (i.qty || 1), 0);
+  const bagTotal = cart.reduce((a, i) => a + (i.qty || 1) * (i.price || 0), 0);
+  const saved = likes.map(byId).filter(Boolean);
+  const heroLiked = hero && likes.includes(hero.id);
+  return (
+    <div className="ah ah-kanaan">
+
+      <section className="ahs-front ahk-front">
+        <img src="/home/shop-front.webp" alt="Kanaan Shop in Saida" className="ahs-front-img" width="640" height="800" decoding="async" />
+        <div className="ahs-front-words">
+          <p className="ahs-where">Kanaan · Saida</p>
+          <OpenNow className="ahs-open" />
+          <p className="ahs-deliver">Delivery all over Lebanon {kit.money(s.deliveryFee)}{saida ? `, ${saida}` : ""}. Cash at your door.</p>
+        </div>
+      </section>
+
+      {(bagCount > 0 || saved.length > 0) && (
+        <section className="ahk-yours">
+          {bagCount > 0 && (
+            <button className="aht-line" onClick={nav.onCart}>
+              <Thumbs kit={kit} items={bagPieces} />
+              <span className="aht-line-name">Your bag</span>
+              <span className="aht-dots" aria-hidden="true" />
+              <span className="aht-line-n">{bagCount} · {kit.money(bagTotal)}</span>
+              <ChevronRight size={16} className="aht-line-go" />
+            </button>
+          )}
+          {saved.length > 0 && (
+            <button className="aht-line" onClick={nav.goFavorites}>
+              <Thumbs kit={kit} items={saved} />
+              <span className="aht-line-name">Saved</span>
+              <span className="aht-dots" aria-hidden="true" />
+              <span className="aht-line-n">{saved.length}</span>
+              <ChevronRight size={16} className="aht-line-go" />
+            </button>
+          )}
+        </section>
+      )}
+
+      {hero && (
+        <section className="ah-sec">
+          <div className="aht-chapter"><h2>Just in</h2><button onClick={() => nav.goCatalog("all")}>New in <ChevronRight size={15} /></button></div>
+          <div className="aht-hero ahk-hero">
+            <button className="aht-hero-photo" onClick={() => nav.openProduct(hero)}>
+              <Img kit={kit} p={hero} big className="aht-hero-img" />
+            </button>
+            <button className={`ahk-like ${heroLiked ? "is-on" : ""}`} aria-label={heroLiked ? "Remove from saved" : "Save"} aria-pressed={heroLiked} onClick={() => toggleLike(hero.id)}>
+              <Heart size={20} fill={heroLiked ? "currentColor" : "none"} />
+            </button>
+            <button className="aht-hero-tag" onClick={() => nav.openProduct(hero)}><Tag kit={kit} p={hero} big /></button>
+          </div>
+        </section>
+      )}
+
+      <section className="ah-sec">
+        <div className="aht-chapter"><h2>Walk in</h2><span>{d.live.length} pieces</span></div>
+        <div className="ahs-tiles ahk-tiles">
+          {d.sections.map((c, i) => (
+            <button key={c.id} className={`ahs-tile ${i === 0 ? "is-wide" : ""}`} onClick={() => nav.goCatalog(c.id)}>
+              {c.lead && <Img kit={kit} p={c.lead} big={i === 0} className="ahs-tile-img" />}
+              <span className="ahk-label"><i className="aht-eye" aria-hidden="true" /><b>{c.label}</b><small>{c.count}</small></span>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {d.sale.length > 0 && (
+        <section className="ah-sec">
+          <div className="aht-chapter is-sale"><h2>On sale, up to −{d.maxOff}%</h2><button onClick={nav.goSale}>All <ChevronRight size={15} /></button></div>
+          <div className="ahk-pad" />
+          <Rail items={d.sale.slice(0, 8)} kit={kit} nav={nav} likes={likes} toggleLike={toggleLike} />
+        </section>
+      )}
+
+      <section className="ah-sec">
+        <div className="aht-chapter"><h2>New in</h2><button onClick={() => nav.goCatalog("all")}>All <ChevronRight size={15} /></button></div>
+        <div className="ahw-grid ahk-grid">
+          {d.newest.slice(1, 7).map((p) => (
+            <kit.ProductCard key={p.id} product={p} onOpen={nav.openProduct} liked={likes.includes(p.id)} onToggleLike={toggleLike} />
+          ))}
+        </div>
+      </section>
+
+      <AppOnly d={d} kit={kit} nav={nav} />
+      <Recent recent={recent} kit={kit} nav={nav} likes={likes} toggleLike={toggleLike} />
+    </div>
+  );
+}
+
 export const APP_HOMES = [
+  { id: "kanaan", label: "Kanaan", C: KanaanHome },
   { id: "window", label: "Window", C: WindowHome },
   { id: "tag", label: "Hang tag", C: TagHome },
   { id: "shop", label: "The shop", C: ShopHome },
 ];
 
 /** One of the app's homes (which = window | tag | shop). */
-export function AppHome({ which = "window", products, kit, nav, likes, toggleLike, recent = [] }) {
+export function AppHome({ which = "kanaan", products, kit, nav, likes, toggleLike, recent = [], cart = [], loading = false, error = null, onRetry }) {
   const d = useHomeData(products, kit);
   const H = (APP_HOMES.find((h) => h.id === which) || APP_HOMES[0]).C;
+  if (!products.length) {
+    return (
+      <div className="ah">
+        <style>{AH_CSS}</style>
+        <div className="ah-top"><kit.LogoMark variant="compact" className="ah-logo" /><OpenNow className="ah-open" /></div>
+        {error && !loading ? (
+          <div className="ah-empty">
+            <p>Couldn't load the pieces. Check your connection.</p>
+            <button onClick={onRetry}>Try again</button>
+          </div>
+        ) : (
+          <div className="ah-wait" aria-label="Loading">
+            <span className="ah-wait-front" />
+            <span className="ah-wait-row"><i /><i /></span>
+          </div>
+        )}
+      </div>
+    );
+  }
   return (
     <>
       <style>{AH_CSS}</style>
-      <H d={d} kit={kit} nav={nav} likes={likes} toggleLike={toggleLike} recent={recent} />
+      <H d={d} kit={kit} nav={nav} likes={likes} toggleLike={toggleLike} recent={recent} cart={cart} products={products} />
     </>
   );
 }
@@ -328,7 +455,7 @@ export function AppHome({ which = "window", products, kit, nav, likes, toggleLik
 /** /applab — the three, a switch between them, in a phone-wide column. */
 export function AppHomeLab(props) {
   const [which, setWhich] = useState(() => {
-    try { return new URLSearchParams(window.location.search).get("v") || "window"; } catch { return "window"; }
+    try { return new URLSearchParams(window.location.search).get("v") || "kanaan"; } catch { return "kanaan"; }
   });
   const pick = (id) => {
     setWhich(id);
@@ -455,6 +582,35 @@ const AH_CSS = `
 .ahs-tile-words b { font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 17px; }
 .ahs-tile.is-wide .ahs-tile-words b { font-size: 22px; }
 .ahs-tile-words small { font-family: 'Inter', sans-serif; font-size: 12px; opacity: .8; }
+
+/* 4. kanaan */
+.ah-kanaan { padding-top: calc(env(safe-area-inset-top, 0px) + 12px); }
+.ahk-front .ahs-front-img { aspect-ratio: 16/11; object-position: center 18%; }
+.ahk-yours { display: flex; flex-direction: column; padding: 0 16px 26px; margin-top: -8px; }
+.ahk-thumbs { display: flex; width: 64px; flex-shrink: 0; }
+.ahk-thumb { width: 34px; height: 42px; border-radius: 9px; object-fit: cover; background: var(--border); border: 2px solid var(--bg); margin-left: -14px; }
+.ahk-thumb:first-child { margin-left: 0; }
+.ahk-hero { padding-top: 14px; padding-left: 0; padding-right: 0; margin: 0 12px; }
+.ahk-like { position: absolute; top: 28px; right: 14px; width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; background: rgba(247,244,238,.92); color: #14141A; box-shadow: 0 4px 14px rgba(20,20,26,.16); }
+.ahk-like.is-on { color: var(--coral); }
+.ahk-tiles { padding-top: 14px; }
+.ahk-label { position: absolute; left: 10px; bottom: 10px; display: inline-flex; align-items: baseline; gap: 7px; padding: 13px 11px 7px; background: #F7F4EE; color: #14141A; clip-path: polygon(8px 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%, 0 8px); border-radius: 0 0 5px 5px; transform: rotate(-2deg); max-width: calc(100% - 20px); }
+.ahk-label .aht-eye { top: 4px; width: 6px; height: 6px; margin-left: -3px; }
+.ahk-label b { font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ahs-tile.is-wide .ahk-label b { font-size: 19px; }
+.ahk-label small { font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 12px; color: rgba(20,20,26,.55); }
+.aht-chapter.is-sale h2 { color: var(--coral-text); }
+.ahk-pad { height: 14px; }
+.ahk-grid { padding-top: 16px; }
+
+.ah-empty { padding: 40px 16px; font-family: 'Inter', sans-serif; font-size: 14px; color: var(--fg-muted); }
+.ah-empty button { margin-top: 10px; min-height: 44px; padding: 0 20px; border-radius: 999px; background: var(--fg); color: var(--bg); font-weight: 600; }
+.ah-wait { padding: 0 12px; }
+.ah-wait-front { display: block; aspect-ratio: 16/11; border-radius: 28px; background: var(--border); }
+.ah-wait-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 24px 4px 0; }
+.ah-wait-row i { aspect-ratio: 4/5; border-radius: 20px; background: var(--border); }
+@media (prefers-reduced-motion: no-preference) { .ah-wait span, .ah-wait i { animation: ahPulse 1.4s ease-in-out infinite alternate; } }
+@keyframes ahPulse { from { opacity: .55; } to { opacity: 1; } }
 
 /* the lab */
 .ah-lab { max-width: 440px; margin: 0 auto; padding: 10px 0 40px; }

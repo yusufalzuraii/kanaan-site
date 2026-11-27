@@ -58,7 +58,7 @@ const Admin = React.lazy(() => import("./Admin.jsx"));
    because it IS the front door; the 3D engine inside it is still its own
    chunk, fetched only when a device can show it. */
 import HomeLab from "./home/HomeLab.jsx";
-import { AppHomeLab } from "./home/AppHomes.jsx";
+import { AppHome, AppHomeLab } from "./home/AppHomes.jsx";
 // the logo, as small files with their version in their names (cached for good): the PNGs were 114 KB and 163 KB,
 // and the header logo was the last thing a phone drew on most pages
 import LOGO_COMPACT from "./assets/logo-compact.webp";
@@ -2746,7 +2746,7 @@ function KanaanShop() {
       <main>
         <PageTransition path={path} direction={navDirection}>
         {route.type === "home" && isNativeApp && (
-          <NativeHomeView products={products} loading={catalogLoading} error={productsError} onRetry={refreshProducts} goCatalog={goCatalog} goSale={goSale} goExclusives={goExclusives} openProduct={openProduct} likes={likes} toggleLike={toggleLike} goFavorites={goFavorites} onCart={() => setCartOpen(true)} cartCount={cartCount} />
+          <AppHome which="kanaan" products={products} loading={catalogLoading} error={productsError} onRetry={refreshProducts} kit={APP_HOME_KIT} nav={{ openProduct, goCatalog, goSale, goExclusives, goFavorites, onCart: () => setCartOpen(true) }} likes={likes} toggleLike={toggleLike} cart={cart} recent={getRecentlyViewed().map((id) => products.find((p) => p.id === id)).filter(Boolean).slice(0, 8)} />
         )}
         {route.type === "home" && !isNativeApp && (HOME_3D ? (
           <HomeLab home products={products} loading={catalogLoading} goCatalog={goCatalog} goSale={goSale} openProduct={openProduct} likes={likes} toggleLike={toggleLike} appExclusiveCount={appExclusiveCount} />
@@ -2757,7 +2757,7 @@ function KanaanShop() {
           <HomeLab products={products} loading={catalogLoading} goCatalog={goCatalog} goSale={goSale} openProduct={openProduct} likes={likes} toggleLike={toggleLike} appExclusiveCount={appExclusiveCount} />
         )}
         {route.type === "applab" && (
-          <AppHomeLab products={products} kit={APP_HOME_KIT} nav={{ openProduct, goCatalog, goSale, goExclusives }} likes={likes} toggleLike={toggleLike} recent={getRecentlyViewed().map((id) => products.find((p) => p.id === id)).filter(Boolean).slice(0, 8)} />
+          <AppHomeLab products={products} loading={catalogLoading} error={productsError} onRetry={refreshProducts} kit={APP_HOME_KIT} nav={{ openProduct, goCatalog, goSale, goExclusives, goFavorites, onCart: () => setCartOpen(true) }} likes={likes} toggleLike={toggleLike} cart={cart} recent={getRecentlyViewed().map((id) => products.find((p) => p.id === id)).filter(Boolean).slice(0, 8)} />
         )}
         {route.type === "sale" && (
           <SaleView products={products} loading={catalogLoading} goCatalog={goCatalog} openProduct={openProduct} likes={likes} toggleLike={toggleLike} />
@@ -4256,234 +4256,9 @@ function SpotlightCard({ product, onOpen }) {
 /* what the app's home directions (src/home/AppHomes.jsx) borrow from here */
 const APP_HOME_KIT = { getImages, thumbUrlFor, bigUrlFor, photoFallback, effectivePrice, money, isOnSale, CATEGORIES, LogoMark, ProductCard };
 
-function NativeHomeView({ products, loading, error, onRetry, goCatalog, goSale, goExclusives, openProduct, likes, toggleLike, goFavorites, onCart, cartCount }) {
-  useEffect(() => {
-    document.title = `${STORE_NAME} — Menswear from Saida, Lebanon`;
-  }, []);
-
-  const hour = new Date().getHours();
-  const greeting = hour < 5 ? "Still up?" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
-
-  const spotlight = products.find((p) => p.isSpotlight) || products.find((p) => p.badge === "new") || products[0] || null;
-  const featured = products.filter((p) => !spotlight || p.id !== spotlight.id).slice(0, 10);
-  const onSale = useMemo(() => products.filter(isOnSale), [products]);
-  const saleCount = onSale.length;
-  const maxDiscount = saleCount ? Math.max(...onSale.map((p) => p.discount)) : 0;
-  const exclusives = useMemo(() => products.filter((p) => p.appExclusive), [products]);
-
-  const recentIds = getRecentlyViewed();
-  const recentProducts = recentIds.map((id) => products.find((p) => p.id === id)).filter(Boolean).slice(0, 8);
-
-  return (
-    <div className="pb-4" style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}>
-      {/* ترحيب — بديل الهيرو التسويقي، هوية "أنا تطبيق" فوراً. توهج
-          خفيف دايم خلف الترحيب (بغض النظر عن الثيم) — إشارة بصرية
-          صغيرة بس ثابتة إنو هاد تطبيق إلو شخصيته، مش نسخة من الموقع. */}
-      <section className="relative px-4 sm:px-6 pt-6 pb-4 overflow-hidden">
-        <div
-          className="absolute pointer-events-none"
-          style={{
-            top: -60, right: -40, width: 220, height: 220, borderRadius: "50%",
-            background: "radial-gradient(circle, var(--coral) 0%, transparent 70%)",
-            opacity: 0.16, filter: "blur(40px)",
-          }}
-        />
-        <div className="relative flex items-center justify-between">
-          <div>
-            <p className="font-body text-sm text-muted">{greeting} 👋</p>
-            <h1 className="font-display font-bold text-2xl mt-0.5">What are you after today?</h1>
-          </div>
-          <LogoMark variant="compact" className="h-7 w-auto opacity-90" />
-        </div>
-      </section>
-
-      {/* بلاطتين سريعتين — سلة ومفضلة، بدل ما تدور عليهم بالهيدر */}
-      <section className="px-4 sm:px-6 pb-7">
-        <div className="grid grid-cols-2 gap-3">
-          <button onClick={goFavorites} className="glass rounded-2xl p-4 flex items-center gap-3 tap-scale text-left">
-            <div className="glass rounded-xl p-2" style={{ background: "rgba(255,69,34,0.12)" }}>
-              <Heart className="w-5 h-5 text-coral" />
-            </div>
-            <div>
-              <p className="font-display font-bold text-lg leading-none">{likes.length}</p>
-              <p className="font-body text-xs text-muted mt-1">Favorites</p>
-            </div>
-          </button>
-          <button onClick={onCart} className="glass rounded-2xl p-4 flex items-center gap-3 tap-scale text-left">
-            <div className="glass rounded-xl p-2" style={{ background: "rgba(18,179,160,0.12)" }}>
-              <ShoppingCart className="w-5 h-5 text-teal" />
-            </div>
-            <div>
-              <p className="font-display font-bold text-lg leading-none">{cartCount}</p>
-              <p className="font-body text-xs text-muted mt-1">In your cart</p>
-            </div>
-          </button>
-        </div>
-      </section>
-
-
-      {/* بطاقة Spotlight — منتج واحد مميز بصورة حقيقية كبيرة */}
-      {spotlight && !loading && (
-        <section className="px-4 sm:px-6 pb-7">
-          <SpotlightCard product={spotlight} onOpen={openProduct} />
-        </section>
-      )}
-
-      {/* شبكة فئات بصفّين، بألوان متبادلة كورال/تيل — أحيا بصرياً
-          من رمادي موحّد، وبنفس ألوان الهوية بدون إضافة لون جديد */}
-      <section className="pb-7">
-        <div className="px-4 sm:px-6 flex items-center justify-between mb-3">
-          <h2 className="font-display font-bold text-lg">Browse</h2>
-          <button onClick={() => goCatalog("all")} className="font-body text-sm text-coral">See all</button>
-        </div>
-        <div className="px-4 sm:px-6 grid grid-cols-5 gap-2">
-          {BROWSE_GRID_CATEGORIES.map((c, i) => {
-            const coral = i % 2 === 0;
-            return (
-              <button
-                key={c.id}
-                onClick={() => goCatalog(c.id)}
-                className="glass rounded-xl flex flex-col items-center justify-center gap-1.5 tap-scale py-2"
-                /* minHeight بدل aspectRatio ثابت: مع تكبير خط النظام،
-                   اسم الفئة بيلف على سطرين وبيحتاج ارتفاع أكبر —
-                   بنسبة ثابتة كان بينقص وبيتقص النص. */
-                style={{ minHeight: "4.5rem" }}
-              >
-                <span
-                  className="rounded-lg flex items-center justify-center"
-                  style={{ width: 26, height: 26, background: coral ? "rgba(255,69,34,0.14)" : "rgba(18,179,160,0.14)" }}
-                >
-                  <IconFor type={iconForCategory(c.id)} className="w-3.5 h-3.5" style={{ color: coral ? "var(--coral)" : "var(--teal)" }} />
-                </span>
-                <span className="font-body text-[9px] text-center leading-tight px-0.5">{c.label}</span>
-              </button>
-            );
-          })}
-        </div>
-        {/* "Old Money Collection" مو فئة عادية زي الباقي — هي كولكشن
-            منسّق، فبتستاهل بطاقة خاصة أوضح بدل ما تضيع بنفس شبكة
-            الفئات (وهيك كمان الشبكة فوق بتصير متوازنة 5+5 تماماً). */}
-        {(() => {
-          const oldMoney = CATEGORIES.find((c) => c.id === "oldmoney");
-          return oldMoney ? (
-            <button
-              onClick={() => goCatalog(oldMoney.id)}
-              className="glass rounded-2xl mx-4 sm:mx-6 mt-3 p-4 flex items-center gap-3 tap-scale text-left"
-              style={{ background: "linear-gradient(120deg, rgba(20,20,20,0.06), rgba(255,69,34,0.06))" }}
-            >
-              <span className="rounded-xl flex items-center justify-center flex-shrink-0" style={{ width: 40, height: 40, background: "rgba(20,20,20,0.08)" }}>
-                <IconFor type={iconForCategory(oldMoney.id)} className="w-5 h-5" style={{ color: "var(--fg)" }} />
-              </span>
-              <div className="min-w-0">
-                <p className="font-display font-bold text-sm">Old Money Collection</p>
-                <p className="font-body text-xs text-muted">A curated edit, not just another category</p>
-              </div>
-            </button>
-          ) : null;
-        })()}
-      </section>
-
-      {saleCount > 0 && (
-        <section className="px-4 sm:px-6 pb-7">
-          <SaleCard onOpen={goSale} count={saleCount} maxDiscount={maxDiscount} />
-        </section>
-      )}
-
-      {/* App Exclusives — حصري 100% للتطبيق، هوية بصرية غامقة مميّزة
-          (مش نفس أسلوب باقي الصفحة) حتى يحس المستخدم إنو داخل "منطقة
-          خاصة" ما بيوصلها أي حدا عالموقع. */}
-      {exclusives.length > 0 && (
-        <section className="pb-7">
-          <div className="px-4 sm:px-6 flex items-center justify-between mb-3">
-            <h2 className="font-display font-bold text-lg flex items-center gap-1.5">
-              🔥 App Exclusives
-            </h2>
-            <button onClick={goExclusives} className="font-body text-sm text-coral">See all</button>
-          </div>
-          <div
-            className="mx-4 sm:mx-6 rounded-3xl p-4 pb-5"
-            style={{ background: "#141416" }}
-          >
-            <p className="font-body text-xs mb-3" style={{ color: "rgba(255,255,255,0.55)" }}>
-              Prices you won't find on the website — app only.
-            </p>
-            <div className="flex gap-3 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
-              {exclusives.slice(0, 8).map((p) => (
-                <button key={p.id} onClick={() => openProduct(p)} className="flex-shrink-0 text-left tap-scale" style={{ width: 118 }}>
-                  <div className="relative rounded-xl overflow-hidden" style={{ aspectRatio: "4/5", background: "#232326" }}>
-                    {getImages(p)[0] ? (
-                      <img src={thumbUrlFor(getImages(p)[0]) || getImages(p)[0]} alt={p.name} loading="lazy" className="absolute inset-0 w-full h-full object-cover" onError={photoFallback(getImages(p)[0])} />
-                    ) : (
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        <IconFor type={p.icon} className="w-8 h-8" style={{ color: "rgba(255,255,255,0.3)" }} />
-                      </div>
-                    )}
-                    <span
-                      className="absolute top-2 left-2 rounded-full px-2 py-0.5 font-num text-[9px]"
-                      style={{ background: "var(--coral)", color: "#fff" }}
-                    >
-                      🔥 App only
-                    </span>
-                  </div>
-                  <p className="font-body text-xs mt-2 truncate" style={{ color: "rgba(255,255,255,0.9)" }}>{p.name}</p>
-                  <p className="font-num text-sm" style={{ color: "var(--coral)" }}>{money(effectivePrice(p))}</p>
-                </button>
-              ))}
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* "شفتها مؤخراً" — تخصيص حقيقي، حصري للتطبيق، ما بيظهر أبداً
-          إذا ما في تاريخ تصفّح لسا */}
-      {recentProducts.length > 0 && (
-        <section className="pb-7">
-          <div className="px-4 sm:px-6 flex items-center gap-2 mb-3">
-            <RotateCcw className="w-4 h-4 text-muted" />
-            <h2 className="font-display font-bold text-lg">Recently viewed</h2>
-          </div>
-          <div className="flex gap-4 overflow-x-auto px-4 sm:px-6 pb-1" style={{ scrollbarWidth: "none" }}>
-            {recentProducts.map((p) => (
-              <div key={p.id} className="flex-shrink-0" style={{ width: 130 }}>
-                <ProductCard product={p} onOpen={openProduct} liked={likes.includes(p.id)} onToggleLike={toggleLike} />
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* شريط "جديد" أفقي — قابل للسحب، بدل شبكة ثابتة، إحساس تطبيق أكتر */}
-      <section className="pb-7">
-        <div className="px-4 sm:px-6 flex items-center justify-between mb-3">
-          <h2 className="font-display font-bold text-lg">New in</h2>
-          <button onClick={() => goCatalog("all")} className="font-body text-sm text-coral">See all</button>
-        </div>
-        {loading && products.length === 0 ? (
-          <div className="flex gap-4 px-4 sm:px-6 overflow-x-hidden">
-            {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="rounded-2xl glass flex-shrink-0" style={{ width: 150, aspectRatio: "4/5", opacity: 0.5 }} />
-            ))}
-          </div>
-        ) : error && products.length === 0 ? (
-          <div className="px-4 sm:px-6">
-            <p className="font-body text-sm text-muted mb-2">Couldn't load products — check your connection.</p>
-            <button onClick={onRetry} className="font-body text-sm text-coral">Try again</button>
-          </div>
-        ) : featured.length === 0 ? (
-          <p className="font-body text-sm text-muted px-4 sm:px-6">Products are on their way — check back soon.</p>
-        ) : (
-          <div className="flex gap-4 overflow-x-auto px-4 sm:px-6 pb-1" style={{ scrollbarWidth: "none" }}>
-            {featured.map((p) => (
-              <div key={p.id} className="flex-shrink-0" style={{ width: 150 }}>
-                <ProductCard product={p} onOpen={openProduct} liked={likes.includes(p.id)} onToggleLike={toggleLike} />
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-    </div>
-  );
-}
+/* The app's home is src/home/AppHomes.jsx ("Kanaan": the shop front, the bag and the hearts, the newest piece
+   on its swing tag, the sections walked as tiles) — chosen by the owner on 27 Nov 2026 over the old
+   dashboard-style home (greeting, counters, icon grid). */
 
 /* ============================================================
    PRIVACY POLICY — صفحة حقيقية منشورة، مطلوبة من Google Play

@@ -51,3 +51,7 @@
 
 /pos/*
   X-Robots-Tag: noindex
+
+# The store pictures (Google Play / App Store), readable from the stores' own consoles
+/store/*
+  Access-Control-Allow-Origin: *

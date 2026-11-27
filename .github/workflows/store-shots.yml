@@ -1,0 +1,29 @@
+name: Store pictures (raw app screens)
+
+# Run by hand (Actions → Run workflow): takes the app's screens from the live shop at a phone's size
+# and puts them under Releases ("store-shots"), to compose the Google Play / App Store pictures from.
+on:
+  workflow_dispatch:
+
+jobs:
+  shots:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: kanaan-shop-v3-admin/kanaan-site
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm i --no-save playwright@1.49.1 && npx playwright install --with-deps chromium
+      - run: node scripts/store-shots.mjs
+      - name: Put the screens under Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tar czf store-shots.tgz shots
+          gh release create store-shots store-shots.tgz --repo "$GITHUB_REPOSITORY" --prerelease --title "Store pictures: raw screens" --notes "Raw app screens for the store pictures." \
+            || gh release upload store-shots store-shots.tgz --repo "$GITHUB_REPOSITORY" --clobber

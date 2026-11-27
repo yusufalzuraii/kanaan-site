@@ -489,9 +489,10 @@ const AH_CSS = `
 .ah-price s { font-size: .8em; color: var(--fg-muted); font-weight: 500; }
 .ah-price b { font-weight: 700; }
 .ah-price b.is-sale { color: var(--coral-text); }
-.ah-top { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px 12px; }
-.ah-logo { height: 22px; width: auto; filter: var(--logo-filter, none); }
-.ah-open { font-size: 12.5px; }
+.ah-top { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 16px 12px; }
+.ah-logo { height: 22px; width: auto; flex-shrink: 0; filter: var(--logo-filter, none); }
+/* a long line ("Closed now · opens tomorrow at 10 am") wraps to the right of the logo, never onto it */
+.ah-open { font-size: 12.5px; text-align: right; min-width: 0; }
 
 /* only in the app */
 .ah-only { margin: 0 12px 30px; padding: 18px 0 18px; border-radius: 28px; background: var(--bg-soft); }

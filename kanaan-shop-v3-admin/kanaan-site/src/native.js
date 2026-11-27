@@ -12,7 +12,10 @@ import { Capacitor } from "@capacitor/core";
 
 // true بس جوا تطبيق أندرويد/آيفون المبني، false على أي متصفح
 // (بما فيه لما تفتح نفس الموقع من متصفح الموبايل نفسه)
-export const isNativeApp = Capacitor.isNativePlatform();
+// (one exception, for the shop's own use: a browser tab where sessionStorage "kanaan-app-preview" is "1" shows the
+// app's screens too — that is how the Google Play / App Store pictures are taken from the live catalogue)
+const appPreview = (() => { try { return sessionStorage.getItem("kanaan-app-preview") === "1"; } catch { return false; } })();
+export const isNativeApp = Capacitor.isNativePlatform() || appPreview;
 const PUSH_TOKEN_KEY = "kanaan-push-token";
 
 /* ----------------------------------------------------------

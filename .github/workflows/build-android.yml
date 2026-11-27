@@ -22,6 +22,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-24.04
+    # contents: write — so a release build can be put under the repo's Releases (one file per version, easy to download)
+    permissions:
+      contents: write
     defaults:
       run:
         working-directory: kanaan-shop-v3-admin/kanaan-site
@@ -154,3 +157,18 @@ jobs:
           name: kanaan-shop-release-aab
           path: kanaan-shop-v3-admin/kanaan-site/android/app/build/outputs/bundle/release/app-release.aab
           retention-days: 30
+
+      # The same AAB under Releases ("android-<versionCode>"), so it can be downloaded with one tap
+      # (the Actions artifact can't be opened from the GitHub phone app).
+      - name: وضع ملف الـ AAB بقسم Releases (تنزيل بكبسة وحدة)
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VC: ${{ github.event.inputs.version_code }}
+          VN: ${{ github.event.inputs.version_name }}
+        run: |
+          F="kanaan-shop-$VN-$VC.aab"
+          cp android/app/build/outputs/bundle/release/app-release.aab "$F"
+          gh release create "android-$VC" "$F" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease \
+            --title "Android $VN ($VC)" --notes "Google Play: Production → Create new release → upload $F" \
+            || gh release upload "android-$VC" "$F" --repo "$GITHUB_REPOSITORY" --clobber

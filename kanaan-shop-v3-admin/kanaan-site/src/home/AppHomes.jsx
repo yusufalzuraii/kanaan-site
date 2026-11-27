@@ -308,7 +308,7 @@ function ShopHome({ d, kit, nav, likes, toggleLike, recent }) {
 }
 
 /* ---------------- 4. Kanaan: the shop in Saida, on its own paper (2 + 3, his pick) ----------------
-   The shop's real front, then what is yours (the bag, the hearts — only when there is something), the newest
+   (no shop photo on top: his call) The logo, open now, delivery; then what is yours (the bag, the hearts — only when there is something), the newest
    piece on its swing tag, the sections walked as photo tiles labelled on small tags, the sale, new in. Every
    card is the shop's own ProductCard (heart, quick add, photos that flick, your size). */
 function Thumbs({ kit, items }) {
@@ -332,14 +332,11 @@ function KanaanHome({ d, kit, nav, likes, toggleLike, recent, cart = [], product
   return (
     <div className="ah ah-kanaan">
 
-      <section className="ahs-front ahk-front">
-        <img src="/home/shop-front.webp" alt="Kanaan Shop in Saida" className="ahs-front-img" width="640" height="800" decoding="async" />
-        <div className="ahs-front-words">
-          <p className="ahs-where">Kanaan · Saida</p>
-          <OpenNow className="ahs-open" />
-          <p className="ahs-deliver">Delivery all over Lebanon {kit.money(s.deliveryFee)}{saida ? `, ${saida}` : ""}. Cash at your door.</p>
-        </div>
-      </section>
+      <div className="ah-top ahk-top">
+        <kit.LogoMark variant="compact" className="ah-logo" />
+        <OpenNow className="ah-open" />
+      </div>
+      <p className="ahk-deliver">Delivery all over Lebanon {kit.money(s.deliveryFee)}{saida ? `, ${saida}` : ""}. Cash at your door.</p>
 
       {(bagCount > 0 || saved.length > 0) && (
         <section className="ahk-yours">
@@ -584,9 +581,11 @@ const AH_CSS = `
 .ahs-tile-words small { font-family: 'Inter', sans-serif; font-size: 12px; opacity: .8; }
 
 /* 4. kanaan */
-.ah-kanaan { padding-top: calc(env(safe-area-inset-top, 0px) + 12px); }
+.ah-kanaan { padding-top: env(safe-area-inset-top, 0px); }
 .ahk-front .ahs-front-img { aspect-ratio: 16/11; object-position: center 18%; }
-.ahk-yours { display: flex; flex-direction: column; padding: 0 16px 26px; margin-top: -8px; }
+.ahk-yours { display: flex; flex-direction: column; padding: 0 16px 22px; }
+.ahk-top { padding-top: 16px; padding-bottom: 4px; }
+.ahk-deliver { font-family: 'Inter', sans-serif; font-size: 13px; color: var(--fg-muted); padding: 0 16px 18px; }
 .ahk-thumbs { display: flex; width: 64px; flex-shrink: 0; }
 .ahk-thumb { width: 34px; height: 42px; border-radius: 9px; object-fit: cover; background: var(--border); border: 2px solid var(--bg); margin-left: -14px; }
 .ahk-thumb:first-child { margin-left: 0; }
